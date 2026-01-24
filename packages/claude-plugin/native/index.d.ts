@@ -2,6 +2,15 @@
 /* eslint-disable */
 export declare function analyzeComplexity(prompt: string, agentType?: string | undefined | null): JsComplexityAnalysis
 
+export declare function checkGoal(directory: string, goal: JsGoalConfig): Promise<JsGoalCheckResult>
+
+export declare function checkGoals(directory: string, goals: Array<JsGoalConfig>): Promise<JsVerificationResult>
+
+export declare function checkGoalsFromConfig(directory: string): Promise<JsVerificationResult | null>
+
+/** Check for pending background task notifications for a session */
+export declare function checkNotifications(sessionId: string): JsNotificationResult
+
 export declare function createHookOutputDeny(reason: string): JsHookOutput
 
 export declare function createHookOutputStop(reason: string): JsHookOutput
@@ -77,6 +86,17 @@ export interface JsAgentDefinition {
   tools: Array<string>
 }
 
+export interface JsBackgroundTask {
+  id: string
+  sessionId: string
+  parentSessionId: string
+  description: string
+  agent: string
+  status: string
+  result?: string
+  error?: string
+}
+
 /**
  * Analyze task complexity
  *
@@ -95,6 +115,25 @@ export interface JsComplexityAnalysis {
   analysis: string
 }
 
+export interface JsGoalCheckResult {
+  name: string
+  score: number
+  target: number
+  passed: boolean
+  durationMs: number
+  error?: string
+}
+
+export interface JsGoalConfig {
+  name: string
+  workspace?: string
+  command: string
+  target: number
+  timeoutSecs: number
+  enabled: boolean
+  description?: string
+}
+
 /** Input for hook execution from JavaScript */
 export interface JsHookInput {
   sessionId?: string
@@ -105,6 +144,8 @@ export interface JsHookInput {
   directory?: string
   stopReason?: string
   userRequested?: boolean
+  /** Path to transcript JSONL file for accessing conversation history */
+  transcriptPath?: string
 }
 
 export interface JsHookOutput {
@@ -116,6 +157,12 @@ export interface JsHookOutput {
   additionalContext?: string
   suppressOutput?: boolean
   systemMessage?: string
+}
+
+export interface JsNotificationResult {
+  hasNotifications: boolean
+  message?: string
+  notificationCount: number
 }
 
 /** Result of model routing decision */
@@ -137,6 +184,12 @@ export interface JsSkillDefinition {
   argumentHint?: string
 }
 
+export interface JsVerificationResult {
+  allPassed: boolean
+  results: Array<JsGoalCheckResult>
+  iteration: number
+}
+
 /** Get list of agent names only (lighter weight than full definitions) */
 export declare function listAgentNames(): Array<string>
 
@@ -150,6 +203,8 @@ export declare function listAgentNames(): Array<string>
  */
 export declare function listAgents(): Array<JsAgentDefinition>
 
+export declare function listGoalsFromConfig(directory: string): Array<JsGoalConfig>
+
 /** List all registered hooks */
 export declare function listHooks(): Array<string>
 
@@ -160,6 +215,12 @@ export declare function listHooks(): Array<string>
  * List of skill names loaded from the skills/ directory
  */
 export declare function listSkills(): Array<string>
+
+/** Process a background task event (task.completed or task.failed) */
+export declare function notifyBackgroundEvent(eventJson: string): void
+
+/** Register a background task for tracking */
+export declare function registerBackgroundTask(taskId: string, sessionId: string, parentSessionId: string, description: string, agent: string): void
 
 /**
  * Route a task to the appropriate model tier
@@ -186,51 +247,3 @@ export declare function routeTaskPrompt(prompt: string): JsRoutingResult
  * Routing result with model, tier, and reasoning
  */
 export declare function routeTaskWithAgent(prompt: string, agentType?: string | undefined | null): JsRoutingResult
-
-// ============================================================================
-// Background Task Notification Bindings
-// ============================================================================
-
-/** Result of checking for background notifications */
-export interface JsNotificationResult {
-  hasNotifications: boolean
-  message?: string
-  notificationCount: number
-}
-
-/**
- * Check for pending background task notifications for a session
- *
- * # Arguments
- * * `sessionId` - The session ID to check notifications for
- *
- * # Returns
- * Notification result with message if notifications are pending
- */
-export declare function checkNotifications(sessionId: string): JsNotificationResult
-
-/**
- * Process a background task event (task.completed or task.failed)
- *
- * # Arguments
- * * `eventJson` - JSON string with event type and properties
- */
-export declare function notifyBackgroundEvent(eventJson: string): void
-
-/**
- * Register a background task for tracking
- *
- * # Arguments
- * * `taskId` - Unique task identifier
- * * `sessionId` - Child session ID
- * * `parentSessionId` - Parent session ID to notify
- * * `description` - Task description
- * * `agent` - Agent name running the task
- */
-export declare function registerBackgroundTask(
-  taskId: string,
-  sessionId: string,
-  parentSessionId: string,
-  description: string,
-  agent: string
-): void
