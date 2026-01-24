@@ -148,16 +148,6 @@ pub fn get_agent_definitions_with_loader(
             "Quick documentation lookups (Haiku). Use for simple documentation queries.",
         ),
         (
-            "explore-medium",
-            ModelType::Sonnet,
-            "Thorough codebase search with reasoning (Sonnet). Use when search requires more reasoning.",
-        ),
-        (
-            "explore-high",
-            ModelType::Opus,
-            "Complex architectural search for deep system understanding (Opus). Use for architectural mapping and design pattern discovery.",
-        ),
-        (
             "designer-low",
             ModelType::Haiku,
             "Simple styling and minor UI tweaks (Haiku). Use for trivial frontend work.",

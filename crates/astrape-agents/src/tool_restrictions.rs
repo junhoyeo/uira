@@ -100,8 +100,6 @@ impl ToolRestrictionsRegistry {
             "executor-low",
             "executor-high",
             "researcher-low",
-            "explore-medium",
-            "explore-high",
             "designer-low",
             "designer-high",
             "qa-tester-high",
