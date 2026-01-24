@@ -53,12 +53,8 @@ struct ChatPart {
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
-    id: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct MessageInfo {
+    #[allow(dead_code)]
     info: MessageMeta,
     parts: Vec<MessagePart>,
 }
@@ -68,6 +64,7 @@ struct MessageMeta {
     #[allow(dead_code)]
     id: String,
     #[serde(default)]
+    #[allow(dead_code)]
     role: Option<String>,
 }
 
@@ -175,32 +172,74 @@ impl TyposChecker {
             return Ok(false);
         }
 
+        let grouped = self.group_typos_by_keyword(&typos);
+        let unique_count = grouped.len();
+
         println!(
-            "{} Found {} potential typo(s)",
+            "{} Found {} typo(s) ({} unique)",
             "!".yellow().bold(),
-            typos.len()
+            typos.len(),
+            unique_count
         );
 
         self.ensure_opencode_server()?;
+
+        let unique_typos: Vec<&TypoEntry> = grouped.values().map(|v| v[0]).collect();
+        let decisions = self.process_typos_batch_unique(&unique_typos)?;
+
+        let decision_map: HashMap<String, Decision> = unique_typos
+            .iter()
+            .zip(decisions.into_iter())
+            .map(|(t, d)| (t.typo.clone(), d))
+            .collect();
 
         let mut applied = 0;
         let mut ignored = 0;
         let mut errors = 0;
 
-        for typo in &typos {
-            match self.process_typo(typo) {
-                Ok(Decision::Apply) => {
-                    self.apply_fix(typo)?;
-                    applied += 1;
+        println!();
+        for (typo_word, occurrences) in &grouped {
+            let decision = decision_map.get(typo_word).unwrap_or(&Decision::Skip);
+            let corrections = occurrences[0].corrections.join(", ");
+
+            let status = match decision {
+                Decision::Apply => format!("{}", "APPLY".green()),
+                Decision::Ignore => format!("{}", "IGNORE".yellow()),
+                Decision::Skip => format!("{}", "SKIP".dimmed()),
+            };
+
+            println!(
+                "  {} '{}' → '{}' ({} occurrences) [{}]",
+                "→".cyan(),
+                typo_word.red(),
+                corrections.green(),
+                occurrences.len(),
+                status
+            );
+
+            for occ in occurrences {
+                println!("      {}:{}", occ.path.dimmed(), occ.line_num);
+
+                match decision {
+                    Decision::Apply => match self.apply_fix(occ) {
+                        Ok(()) => applied += 1,
+                        Err(e) => {
+                            eprintln!("        {} {}", "✗".red(), e);
+                            errors += 1;
+                        }
+                    },
+                    Decision::Ignore => {}
+                    Decision::Skip => {}
                 }
-                Ok(Decision::Ignore) => {
-                    self.add_to_ignore_list(&typo.typo)?;
-                    ignored += 1;
-                }
-                Ok(Decision::Skip) => {}
-                Err(e) => {
-                    eprintln!("  {} Error processing typo: {}", "✗".red(), e);
-                    errors += 1;
+            }
+
+            if matches!(decision, Decision::Ignore) {
+                match self.add_to_ignore_list(typo_word) {
+                    Ok(()) => ignored += 1,
+                    Err(e) => {
+                        eprintln!("    {} {}", "✗".red(), e);
+                        errors += 1;
+                    }
                 }
             }
         }
@@ -217,6 +256,17 @@ impl TyposChecker {
         );
 
         Ok(errors == 0)
+    }
+
+    fn group_typos_by_keyword<'a>(
+        &self,
+        typos: &'a [TypoEntry],
+    ) -> HashMap<String, Vec<&'a TypoEntry>> {
+        let mut grouped: HashMap<String, Vec<&TypoEntry>> = HashMap::new();
+        for typo in typos {
+            grouped.entry(typo.typo.clone()).or_default().push(typo);
+        }
+        grouped
     }
 
     fn find_typos(&self, files: &[String]) -> Result<Vec<TypoEntry>> {
@@ -326,57 +376,73 @@ impl TyposChecker {
         Ok(resp.id)
     }
 
-    fn process_typo(&mut self, typo: &TypoEntry) -> Result<Decision> {
-        let corrections = typo.corrections.join(", ");
-
-        let mut pre_ai_ctx = HookContext::new();
-        pre_ai_ctx.set_env("FILE", &typo.path);
-        pre_ai_ctx.set_env("LINE", &typo.line_num.to_string());
-        pre_ai_ctx.set_env("TYPO", &typo.typo);
-        pre_ai_ctx.set_env("CORRECTIONS", &corrections);
-        if !self.run_hook(HookEvent::PreAi, &pre_ai_ctx)? {
-            return Ok(Decision::Skip);
+    fn process_typos_batch_unique(&mut self, typos: &[&TypoEntry]) -> Result<Vec<Decision>> {
+        for typo in typos {
+            let corrections = typo.corrections.join(", ");
+            let mut pre_ai_ctx = HookContext::new();
+            pre_ai_ctx.set_env("FILE", &typo.path);
+            pre_ai_ctx.set_env("LINE", &typo.line_num.to_string());
+            pre_ai_ctx.set_env("TYPO", &typo.typo);
+            pre_ai_ctx.set_env("CORRECTIONS", &corrections);
+            let _ = self.run_hook(HookEvent::PreAi, &pre_ai_ctx);
         }
 
-        let context = self.get_file_context(&typo.path, typo.line_num)?;
+        let mut typo_list = String::new();
+        for (i, typo) in typos.iter().enumerate() {
+            let corrections = typo.corrections.join(", ");
+            let context = self.get_file_context(&typo.path, typo.line_num)?;
+            let line_content = self.get_line(&typo.path, typo.line_num)?;
 
-        println!();
-        println!(
-            "  {} {}:{} - '{}' → '{}'",
-            "?".yellow().bold(),
-            typo.path.dimmed(),
-            typo.line_num,
-            typo.typo.red(),
-            corrections.green()
-        );
-
-        let session_id = self.get_or_create_session()?;
-        let prompt = format!(
-            r#"I found a potential typo in code. Analyze if this should be fixed or ignored.
-
+            typo_list.push_str(&format!(
+                r#"
+[TYPO {}]
 File: {}
 Line {}: {}
-
 Typo: "{}"
 Suggested corrections: {}
-
-Context (surrounding lines):
+Context:
 ```
 {}
 ```
+"#,
+                i + 1,
+                typo.path,
+                typo.line_num,
+                line_content,
+                typo.typo,
+                corrections,
+                context
+            ));
+        }
 
-Respond with EXACTLY one of these:
-- "APPLY" if this is a real typo that should be fixed
-- "IGNORE" if this is intentional (variable name, technical term, proper noun, abbreviation)
-- "SKIP" if you're unsure
+        let session_id = self.get_or_create_session()?;
+        let prompt = format!(
+            r#"I found {} unique potential typos in code. For EACH typo, analyze if it should be fixed or ignored.
 
-Just respond with the single word, nothing else."#,
-            typo.path,
-            typo.line_num,
-            self.get_line(&typo.path, typo.line_num)?,
-            typo.typo,
-            corrections,
-            context
+{}
+
+Respond with EXACTLY {} lines, one decision per typo in order.
+Each line must be EXACTLY one of: APPLY, IGNORE, or SKIP
+- APPLY: Real typo that should be fixed
+- IGNORE: Intentional (variable name, technical term, proper noun, abbreviation)
+- SKIP: Unsure
+
+Example response for 3 typos:
+APPLY
+IGNORE
+SKIP
+
+Your response (one word per line, {} lines total):"#,
+            typos.len(),
+            typo_list,
+            typos.len(),
+            typos.len()
+        );
+
+        println!(
+            "  {} Analyzing {} unique typo(s) with AI...",
+            "→".dimmed(),
+            typos.len()
         );
 
         let (provider_id, model_id) = self.config.parse_model();
@@ -401,85 +467,69 @@ Just respond with the single word, nothing else."#,
             .send()
             .context("Failed to send message")?;
 
-        let chat_resp: ChatResponse = resp.json().context("Failed to parse chat response")?;
+        let message: MessageInfo = resp.json().context("Failed to parse AI response")?;
 
-        let ai_text = self.wait_for_response(&session_id, &chat_resp.id)?;
+        let ai_text = self.extract_text_from_message(&message);
+        let decisions = self.parse_batch_decisions(&ai_text, typos.len());
 
-        let decision = if ai_text.contains("APPLY") {
-            println!("    {} AI: Apply fix", "→".green());
-            Decision::Apply
-        } else if ai_text.contains("IGNORE") {
-            println!("    {} AI: Ignore (adding to config)", "→".yellow());
-            Decision::Ignore
-        } else {
-            println!("    {} AI: Skip (uncertain)", "→".dimmed());
-            Decision::Skip
-        };
+        for (typo, decision) in typos.iter().zip(decisions.iter()) {
+            let mut post_ai_ctx = HookContext::new();
+            post_ai_ctx.set_env("FILE", &typo.path);
+            post_ai_ctx.set_env("TYPO", &typo.typo);
+            post_ai_ctx.set_env("DECISION", &format!("{:?}", decision));
+            let _ = self.run_hook(HookEvent::PostAi, &post_ai_ctx);
+        }
 
-        let mut post_ai_ctx = HookContext::new();
-        post_ai_ctx.set_env("FILE", &typo.path);
-        post_ai_ctx.set_env("TYPO", &typo.typo);
-        post_ai_ctx.set_env("DECISION", &format!("{:?}", decision));
-        let _ = self.run_hook(HookEvent::PostAi, &post_ai_ctx);
+        println!("  {} AI analysis complete", "✓".green());
 
-        Ok(decision)
+        Ok(decisions)
     }
 
-    fn find_assistant_response(
-        &self,
-        messages: &[MessageInfo],
-        user_message_id: &str,
-    ) -> Option<String> {
-        let mut passed_user_message = false;
-        for msg in messages {
-            if msg.info.id == user_message_id {
-                passed_user_message = true;
-                continue;
-            }
-            if !passed_user_message {
-                continue;
-            }
-            let is_assistant = msg.info.role.as_deref().map_or(true, |r| r == "assistant");
-            if !is_assistant {
-                continue;
-            }
-            for part in &msg.parts {
-                if part.part_type == "text" {
-                    if let Some(text) = &part.text {
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            return Some(trimmed.to_uppercase());
-                        }
-                    }
+    fn extract_text_from_message(&self, message: &MessageInfo) -> String {
+        let mut text = String::new();
+        for part in &message.parts {
+            if part.part_type == "text" {
+                if let Some(t) = &part.text {
+                    text.push_str(t);
+                    text.push('\n');
                 }
             }
         }
-        None
+        text
     }
 
-    fn wait_for_response(&self, session_id: &str, user_message_id: &str) -> Result<String> {
-        for _ in 0..60 {
-            std::thread::sleep(Duration::from_millis(500));
+    fn parse_batch_decisions(&self, ai_text: &str, expected_count: usize) -> Vec<Decision> {
+        let mut decisions = Vec::with_capacity(expected_count);
+        let upper = ai_text.to_uppercase();
 
-            let resp = self
-                .client
-                .get(format!(
-                    "http://{}:{}/session/{}/message",
-                    self.host, self.port, session_id
-                ))
-                .send()
-                .context("Failed to get messages")?;
+        for line in upper.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
 
-            let messages: Vec<MessageInfo> = resp.json().context("Failed to parse messages")?;
+            let decision = if trimmed.contains("APPLY") {
+                Decision::Apply
+            } else if trimmed.contains("IGNORE") {
+                Decision::Ignore
+            } else if trimmed.contains("SKIP") {
+                Decision::Skip
+            } else {
+                continue;
+            };
 
-            if let Some(assistant_response) =
-                self.find_assistant_response(&messages, user_message_id)
-            {
-                return Ok(assistant_response);
+            decisions.push(decision);
+
+            if decisions.len() >= expected_count {
+                break;
             }
         }
 
-        anyhow::bail!("Timeout waiting for AI response")
+        while decisions.len() < expected_count {
+            decisions.push(Decision::Skip);
+        }
+
+        decisions
     }
 
     fn get_file_context(&self, path: &str, line_num: u32) -> Result<String> {
