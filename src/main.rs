@@ -1,11 +1,11 @@
 mod config;
-mod executor;
+mod hooks;
 mod linter;
 mod typos;
 
 use clap::{Parser, Subcommand};
 use config::Config;
-use executor::HookExecutor;
+use hooks::HookExecutor;
 use linter::Linter;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
