@@ -133,6 +133,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrape-agents"
+version = "0.1.0"
+dependencies = [
+ "astrape-sdk",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "astrape-claude"
 version = "0.1.0"
 dependencies = [
@@ -172,12 +182,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrape-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "astrape-core"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "astrape-features"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "astrape-sdk",
+ "chrono",
+ "futures",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -212,6 +248,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrape-mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "astrape-napi"
 version = "0.1.0"
 dependencies = [
@@ -238,6 +285,16 @@ name = "astrape-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "astrape-tools"
+version = "0.1.0"
+dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
