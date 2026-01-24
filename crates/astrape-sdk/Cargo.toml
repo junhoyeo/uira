@@ -11,6 +11,7 @@ repository.workspace = true
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -18,6 +19,9 @@ anyhow = { workspace = true }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
+
+# Internal crates
+astrape-config = { path = "../astrape-config" }
 
 # napi-rs for Node.js interop (will be used for SDK calls)
 # napi = { version = "2.16", features = ["async", "serde-json"] }

@@ -255,18 +255,84 @@ continue working until everything is done."#
         let config_paths = Self::find_config_files(working_dir);
 
         for path in config_paths {
-            // Note: We can't use astrape_config::load_config_from_file directly
-            // because it returns AstrapeConfig, not PluginConfig
-            // For now, we'll return None and rely on options_config
-            // This can be enhanced later to convert AstrapeConfig to PluginConfig
             if path.exists() {
-                // TODO: Load and convert AstrapeConfig to PluginConfig
-                // For now, just return None to use defaults
-                return None;
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    // Try YAML first
+                    if let Ok(config) = serde_yaml::from_str::<PluginConfig>(&content) {
+                        return Some(config);
+                    }
+                    // Try JSON
+                    if let Ok(config) = serde_json::from_str::<PluginConfig>(&content) {
+                        return Some(config);
+                    }
+
+                    // Try loading as AstrapeConfig and convert
+                    if let Ok(astrape_config) = serde_yaml::from_str::<astrape_config::AstrapeConfig>(&content) {
+                        return Some(Self::convert_astrape_to_plugin_config(&astrape_config));
+                    }
+                    if let Ok(astrape_config) = serde_json::from_str::<astrape_config::AstrapeConfig>(&content) {
+                        return Some(Self::convert_astrape_to_plugin_config(&astrape_config));
+                    }
+                }
             }
         }
 
         None
+    }
+
+    /// Convert AstrapeConfig to PluginConfig
+    fn convert_astrape_to_plugin_config(astrape: &astrape_config::AstrapeConfig) -> PluginConfig {
+        use crate::config::*;
+
+        // Convert agent settings
+        let agents = if !astrape.agents.agents.is_empty() {
+            Some(AgentsConfig::default())
+        } else {
+            None
+        };
+
+        // Convert MCP servers
+        let mcp_servers = if !astrape.mcp.servers.is_empty() {
+            let mut config = McpServersConfig::default();
+
+            // Check for specific known servers
+            if let Some(exa) = astrape.mcp.servers.get("exa") {
+                config.exa = Some(ExaConfig {
+                    enabled: Some(true),
+                    api_key: exa.env.get("EXA_API_KEY").cloned(),
+                });
+            }
+
+            if astrape.mcp.servers.contains_key("context7") {
+                config.context7 = Some(Context7Config {
+                    enabled: Some(true),
+                });
+            }
+
+            Some(config)
+        } else {
+            None
+        };
+
+        PluginConfig {
+            agents,
+            features: Some(FeaturesConfig {
+                parallel_execution: Some(true),
+                lsp_tools: Some(false),
+                ast_tools: Some(false),
+                continuation_enforcement: Some(true),
+                auto_context_injection: Some(true),
+            }),
+            mcp_servers,
+            permissions: Some(PermissionsConfig {
+                allow_bash: Some(true),
+                allow_edit: Some(true),
+                allow_write: Some(true),
+                max_background_tasks: Some(5),
+            }),
+            magic_keywords: None,
+            routing: None,
+        }
     }
 
     /// Find configuration files in standard locations
@@ -441,7 +507,60 @@ continue working until everything is done."#
 
     /// Process a prompt (applies magic keywords)
     pub fn process_prompt(&self, prompt: &str) -> String {
-        // TODO: Implement magic keyword processing
+        let lowercase = prompt.to_lowercase();
+
+        // Define magic keywords and their activation messages
+        let keywords = &[
+            ("autopilot", "[AUTOPILOT MODE ACTIVATED]"),
+            ("ultrawork", "[ULTRAWORK MODE ACTIVATED]"),
+            ("ulw", "[ULTRAWORK MODE ACTIVATED]"),
+            ("ralph", "[RALPH MODE ACTIVATED]"),
+            ("plan", "[PLANNING MODE]"),
+            ("ecomode", "[ECOMODE ACTIVATED]"),
+            ("eco", "[ECOMODE ACTIVATED]"),
+            ("ultrapilot", "[ULTRAPILOT MODE ACTIVATED]"),
+            ("ralplan", "[RALPLAN MODE ACTIVATED]"),
+        ];
+
+        // Check for magic keywords in the prompt
+        for (keyword, prefix) in keywords {
+            if lowercase.contains(keyword) {
+                // Check config to see if this keyword is enabled
+                let is_enabled = match *keyword {
+                    "ultrawork" | "ulw" => {
+                        self.config
+                            .magic_keywords
+                            .as_ref()
+                            .and_then(|k| k.ultrawork.as_ref())
+                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .unwrap_or(true) // Default enabled
+                    }
+                    "plan" => {
+                        self.config
+                            .magic_keywords
+                            .as_ref()
+                            .and_then(|k| k.search.as_ref())
+                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .unwrap_or(true) // Default enabled
+                    }
+                    "analyze" => {
+                        self.config
+                            .magic_keywords
+                            .as_ref()
+                            .and_then(|k| k.analyze.as_ref())
+                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .unwrap_or(true) // Default enabled
+                    }
+                    _ => true, // Other keywords always enabled
+                };
+
+                if is_enabled {
+                    return format!("{}\n\n{}", prefix, prompt);
+                }
+            }
+        }
+
+        // No magic keywords detected, return original prompt
         prompt.to_string()
     }
 
