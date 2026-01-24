@@ -249,16 +249,6 @@ impl Default for VerifyOptions {
     }
 }
 
-pub async fn verify_goal(project_root: &Path, goal: &GoalConfig) -> GoalCheckResult {
-    let runner = GoalRunner::new(project_root);
-    runner.check_goal(goal).await
-}
-
-pub async fn verify_goals(project_root: &Path, goals: &[GoalConfig]) -> VerificationResult {
-    let runner = GoalRunner::new(project_root);
-    runner.check_all(goals).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
