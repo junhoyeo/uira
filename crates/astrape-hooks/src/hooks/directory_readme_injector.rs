@@ -389,10 +389,17 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::tempdir;
 
-    // Mutex to serialize tests that modify environment variables
+    // Mutex to serialize tests that modify environment variables.
+    // Environment variables are process-global, so tests that modify them
+    // must run sequentially to avoid race conditions causing flaky failures.
     lazy_static! {
         static ref ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
     }
+
+    const ENV_LOCK_ERROR: &str =
+        "ENV_TEST_LOCK poisoned: a previous test panicked while holding the lock. \
+        This usually means a test that modifies environment variables failed. \
+        Run `cargo test -- --test-threads=1` to debug.";
 
     #[test]
     fn test_truncate_content() {
@@ -407,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_find_readme_md_up_order_and_bounds() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _lock = ENV_TEST_LOCK.lock().expect(ENV_LOCK_ERROR);
 
         let storage = tempdir().unwrap();
         std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());
@@ -438,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_process_tool_execution_caches_per_session_and_persists() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _lock = ENV_TEST_LOCK.lock().expect(ENV_LOCK_ERROR);
 
         let storage = tempdir().unwrap();
         std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());

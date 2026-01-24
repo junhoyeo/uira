@@ -2159,10 +2159,17 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::tempdir;
 
-    // Mutex to serialize tests that modify environment variables
+    // Mutex to serialize tests that modify environment variables.
+    // Environment variables are process-global, so tests that modify them
+    // must run sequentially to avoid race conditions causing flaky failures.
     lazy_static! {
         static ref ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
     }
+
+    const ENV_LOCK_ERROR: &str =
+        "ENV_TEST_LOCK poisoned: a previous test panicked while holding the lock. \
+        This usually means a test that modifies environment variables failed. \
+        Run `cargo test -- --test-threads=1` to debug.";
 
     #[test]
     fn test_parse_skill_file_requires_frontmatter() {
@@ -2232,7 +2239,7 @@ Body"#;
 
     #[test]
     fn test_find_and_load_skills_project_overrides_user() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _lock = ENV_TEST_LOCK.lock().expect(ENV_LOCK_ERROR);
 
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
@@ -2282,7 +2289,7 @@ Project content"#;
 
     #[test]
     fn test_find_matching_skills_scoring() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _lock = ENV_TEST_LOCK.lock().expect(ENV_LOCK_ERROR);
 
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
@@ -2319,7 +2326,7 @@ X"#;
 
     #[test]
     fn test_write_skill_and_reload() {
-        let _lock = ENV_TEST_LOCK.lock().unwrap();
+        let _lock = ENV_TEST_LOCK.lock().expect(ENV_LOCK_ERROR);
 
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
