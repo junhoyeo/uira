@@ -144,6 +144,8 @@ pub struct JsHookInput {
     pub directory: Option<String>,
     pub stop_reason: Option<String>,
     pub user_requested: Option<bool>,
+    /// Path to transcript JSONL file for accessing conversation history
+    pub transcript_path: Option<String>,
 }
 
 /// Execute hooks for a specific event
@@ -187,6 +189,7 @@ pub async fn execute_hook(event: String, input: JsHookInput) -> napi::Result<JsH
         directory: input.directory.clone(),
         stop_reason: input.stop_reason,
         user_requested: input.user_requested,
+        transcript_path: input.transcript_path,
         extra: HashMap::new(),
     };
 

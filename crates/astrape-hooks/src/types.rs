@@ -124,6 +124,11 @@ pub struct HookInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_requested: Option<bool>,
 
+    /// Path to transcript JSONL file for accessing conversation history
+    /// This is passed from StopInput which already has this field in astrape-core
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
+
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
@@ -157,6 +162,60 @@ impl HookInput {
                 .to_string_lossy()
                 .to_string()
         })
+    }
+
+    /// Get the last assistant text response from transcript JSONL
+    ///
+    /// Parses the transcript file (if available) and extracts the last
+    /// assistant message's text content.
+    pub fn get_last_assistant_response(&self) -> Option<String> {
+        let transcript_path = self.transcript_path.as_ref()?;
+        let path = std::path::Path::new(transcript_path);
+        if !path.exists() {
+            return None;
+        }
+
+        let content = std::fs::read_to_string(path).ok()?;
+
+        // Parse JSONL from end to find last assistant message
+        for line in content.lines().rev() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) {
+                if entry.get("type").and_then(|v| v.as_str()) == Some("progress") {
+                    if let Some(data) = entry.get("data") {
+                        if let Some(msg) = data.get("message") {
+                            if msg.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+                                if let Some(content) = msg
+                                    .get("message")
+                                    .and_then(|m| m.get("content"))
+                                    .and_then(|c| c.as_array())
+                                {
+                                    let texts: Vec<&str> = content
+                                        .iter()
+                                        .filter_map(|item| {
+                                            if item.get("type").and_then(|t| t.as_str())
+                                                == Some("text")
+                                            {
+                                                item.get("text").and_then(|t| t.as_str())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+
+                                    if !texts.is_empty() {
+                                        return Some(texts.join("\n"));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -221,6 +280,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
 
@@ -242,6 +302,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
 
@@ -270,6 +331,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
 
@@ -298,5 +360,45 @@ mod tests {
         assert!(output.should_continue);
         assert!(output.message.is_none());
         assert!(output.reason.is_none());
+    }
+
+    #[test]
+    fn test_get_last_assistant_response_no_transcript() {
+        let input = HookInput {
+            session_id: None,
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            directory: None,
+            stop_reason: None,
+            user_requested: None,
+            transcript_path: None,
+            extra: HashMap::new(),
+        };
+
+        assert!(input.get_last_assistant_response().is_none());
+    }
+
+    #[test]
+    fn test_get_last_assistant_response_missing_file() {
+        let input = HookInput {
+            session_id: None,
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            directory: None,
+            stop_reason: None,
+            user_requested: None,
+            transcript_path: Some("/nonexistent/path/transcript.jsonl".to_string()),
+            extra: HashMap::new(),
+        };
+
+        assert!(input.get_last_assistant_response().is_none());
     }
 }

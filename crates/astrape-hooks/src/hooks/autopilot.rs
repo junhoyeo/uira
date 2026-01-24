@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
+use crate::hooks::ralph::RalphHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const AUTOPILOT_STATE_FILE: &str = "autopilot-state.json";
@@ -232,6 +233,13 @@ impl AutopilotHook {
             .unwrap_or(false)
     }
 
+    /// Check if autopilot should pause for ralph
+    pub fn is_ralph_active(directory: &str) -> bool {
+        RalphHook::read_state(Some(directory))
+            .map(|s| s.active)
+            .unwrap_or(false)
+    }
+
     pub fn start(
         directory: &str,
         task: &str,
@@ -380,6 +388,11 @@ impl Hook for AutopilotHook {
         };
 
         if !state.active {
+            return Ok(HookOutput::pass());
+        }
+
+        // If ralph is active, let it handle continuation
+        if Self::is_ralph_active(&context.directory) {
             return Ok(HookOutput::pass());
         }
 
