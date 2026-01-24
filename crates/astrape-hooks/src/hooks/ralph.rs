@@ -1091,6 +1091,8 @@ impl Hook for RalphHook {
                     goals_result.as_ref(),
                 );
 
+                // Fail-open: if no goals configured, config missing, or config parse error,
+                // default to passing. Goals are optional and shouldn't block indefinitely.
                 let goals_gate_passed = goals_result.as_ref().map(|g| g.all_passed).unwrap_or(true);
 
                 let exit_allowed = if state.require_dual_condition {
