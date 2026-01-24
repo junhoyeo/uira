@@ -63,12 +63,14 @@ crates/
 ├── astrape-features/ # Skills, model routing
 └── astrape-core/     # Shared types
 
-plugin/               # Claude Code plugin package
-├── .claude-plugin/   # Plugin manifest
-├── agents/           # 32 agent definitions
-├── skills/           # Skill definitions
-├── hooks/            # Bun-powered hooks
-└── native/           # NAPI bindings
+packages/
+├── claude-plugin/    # Claude Code plugin package
+│   ├── .claude-plugin/   # Plugin manifest
+│   ├── agents/           # 32 agent definitions
+│   ├── commands/         # Skill definitions
+│   ├── hooks/            # Bun-powered hooks
+│   └── native/           # NAPI bindings
+└── bridge/           # TypeScript bridge to Claude Agent SDK
 ```
 
 ## Development
@@ -81,7 +83,10 @@ cargo build --release
 cd crates/astrape-napi && bun run build
 
 # Copy native module to plugin
-cp crates/astrape-napi/astrape.darwin-arm64.node plugin/native/
+cp crates/astrape-napi/astrape.darwin-arm64.node packages/claude-plugin/native/
+
+# Build bridge (for SDK integration)
+cd packages/bridge && npm run build
 
 # Run tests
 cargo test

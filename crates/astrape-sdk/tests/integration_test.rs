@@ -3,10 +3,10 @@ use std::path::Path;
 
 fn bridge_available() -> bool {
     let candidates = [
-        "./bridge/dist/index.js",
-        "../bridge/dist/index.js",
-        "../../bridge/dist/index.js",
-        "../../../bridge/dist/index.js",
+        "./packages/bridge/dist/index.js",
+        "../packages/bridge/dist/index.js",
+        "../../packages/bridge/dist/index.js",
+        "../../../packages/bridge/dist/index.js",
     ];
     candidates.iter().any(|p| Path::new(p).exists())
 }
@@ -53,7 +53,7 @@ fn test_session_with_options() {
 #[ignore]
 fn test_bridge_ping() {
     if !bridge_available() {
-        eprintln!("Bridge not built. Run 'npm run build' in bridge/ directory.");
+        eprintln!("Bridge not built. Run 'npm run build' in packages/bridge/ directory.");
         return;
     }
 
@@ -66,7 +66,7 @@ fn test_bridge_ping() {
 #[ignore]
 fn test_full_integration() {
     if !bridge_available() {
-        eprintln!("Bridge not built. Run 'npm run build' in bridge/ directory.");
+        eprintln!("Bridge not built. Run 'npm run build' in packages/bridge/ directory.");
         return;
     }
 

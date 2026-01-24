@@ -23,10 +23,10 @@
   ],
   "scripts": {
     "build": "bun run build:native && bun run copy:native",
-    "build:native": "cd ../crates/astrape-napi && bun run build",
-    "copy:native": "cp ../crates/astrape-napi/index.js ../crates/astrape-napi/index.d.ts native/",
+    "build:native": "cd ../../crates/astrape-napi && bun run build",
+    "copy:native": "cp ../../crates/astrape-napi/index.js ../../crates/astrape-napi/index.d.ts native/",
     "postinstall": "bun run build:binary || echo 'Native build skipped - using prebuilt if available'",
-    "build:binary": "cd ../crates/astrape-napi && cargo build --release && bun run build && cp *.node ../../plugin/native/",
+    "build:binary": "cd ../../crates/astrape-napi && cargo build --release && bun run build && cp *.node ../../packages/claude-plugin/native/",
     "test": "bun test",
     "test:hooks": "echo '{\"prompt\": \"ultrawork test\"}' | bun hooks/user-prompt-submit.mjs"
   },
