@@ -1,6 +1,7 @@
 mod config;
 mod executor;
 mod linter;
+mod typos;
 
 use clap::{Parser, Subcommand};
 use config::Config;
@@ -10,6 +11,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
+use typos::TyposChecker;
 
 #[derive(Parser)]
 #[command(name = "astrape")]
@@ -33,6 +35,12 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
+    Typos {
+        #[arg(long, help = "Use AI to decide whether to apply fixes or ignore")]
+        ai: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
+    },
 }
 
 fn main() {
@@ -43,6 +51,7 @@ fn main() {
         Commands::Install => install_command(),
         Commands::Run { hook } => run_command(&hook),
         Commands::Lint { files } => lint_command(&files),
+        Commands::Typos { ai, files } => typos_command(ai, &files),
     };
 
     if let Err(e) = result {
@@ -204,6 +213,34 @@ fn lint_command(files: &[String]) -> anyhow::Result<()> {
 
     if !success {
         process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn typos_command(ai: bool, files: &[String]) -> anyhow::Result<()> {
+    if ai {
+        println!("🔍 Checking for typos with AI assistance...\n");
+        let mut checker = TyposChecker::new();
+        let success = checker.run(files)?;
+        if !success {
+            process::exit(1);
+        }
+    } else {
+        println!("🔍 Checking for typos...\n");
+        let mut cmd = std::process::Command::new("typos");
+        if files.is_empty() {
+            cmd.arg(".");
+        } else {
+            cmd.args(files);
+        }
+        let status = cmd.status().map_err(|_| {
+            anyhow::anyhow!("Failed to run typos. Is it installed? Run: cargo install typos-cli")
+        })?;
+        if !status.success() {
+            process::exit(1);
+        }
+        println!("✓ No typos found");
     }
 
     Ok(())
