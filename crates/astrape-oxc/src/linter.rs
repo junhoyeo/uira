@@ -192,6 +192,9 @@ impl Linter {
         let mut visitor = LintVisitor::new(filename.to_string(), source, self);
         visitor.visit_program(&ret.program);
 
+        // Finalize to emit diagnostics for rules that require post-processing
+        visitor.finalize();
+
         Ok(visitor.diagnostics)
     }
 }
@@ -265,6 +268,53 @@ impl<'a> LintVisitor<'a> {
             suggestion: suggestion.map(|s| s.to_string()),
         });
     }
+
+    /// Finalize linting and emit diagnostics for rules that require post-processing
+    fn finalize(&mut self) {
+        // PreferConst: emit warnings for let declarations that were never reassigned
+        if self.config.has_rule(LintRule::PreferConst) {
+            // Collect diagnostics first to avoid borrow conflicts
+            let const_diagnostics: Vec<_> = self
+                .let_declarations
+                .iter()
+                .filter(|(_, _, reassigned)| !reassigned)
+                .map(|(name, offset, _)| {
+                    let (line, column) = self.get_line_col(*offset);
+                    LintDiagnostic {
+                        file: self.file.clone(),
+                        line,
+                        column,
+                        message: format!("'{}' is never reassigned. Use 'const' instead", name),
+                        rule: "prefer-const".to_string(),
+                        severity: Severity::Warning,
+                        suggestion: Some("Replace 'let' with 'const'".to_string()),
+                    }
+                })
+                .collect();
+            self.diagnostics.extend(const_diagnostics);
+        }
+
+        // NoUnusedVars: emit warnings for declared variables that were never used
+        if self.config.has_rule(LintRule::NoUnusedVars) {
+            let unused_diagnostics: Vec<_> = self
+                .declared_vars
+                .difference(&self.used_vars)
+                .filter(|name| !name.starts_with('_')) // Skip intentionally unused
+                .map(|name| LintDiagnostic {
+                    file: self.file.clone(),
+                    line: 1, // We don't track declaration location for this rule
+                    column: 1,
+                    message: format!("'{}' is declared but never used", name),
+                    rule: "no-unused-vars".to_string(),
+                    severity: Severity::Warning,
+                    suggestion: Some(
+                        "Remove the unused variable or prefix with underscore".to_string(),
+                    ),
+                })
+                .collect();
+            self.diagnostics.extend(unused_diagnostics);
+        }
+    }
 }
 
 impl<'a> Visit<'a> for LintVisitor<'a> {
@@ -322,7 +372,7 @@ impl<'a> Visit<'a> for LintVisitor<'a> {
                         "eval() is a security risk and should be avoided",
                         "no-eval",
                         Severity::Error,
-                        Some("Use safer alternatives like JSON.parse() or Function constructor"),
+                        Some("Use safer alternatives like JSON.parse() for data or restructure code to avoid dynamic evaluation"),
                     );
                 }
             }
@@ -543,6 +593,48 @@ mod tests {
             .lint_source("test.js", "const x = 1; function foo() { return x; }")
             .unwrap();
 
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_prefer_const() {
+        let linter = Linter::new(vec![LintRule::PreferConst]);
+        let diagnostics = linter
+            .lint_source("test.js", "let x = 1; console.log(x);")
+            .unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "prefer-const");
+        assert!(diagnostics[0].message.contains("never reassigned"));
+    }
+
+    #[test]
+    fn test_prefer_const_reassigned() {
+        let linter = Linter::new(vec![LintRule::PreferConst]);
+        let diagnostics = linter.lint_source("test.js", "let x = 1; x = 2;").unwrap();
+
+        // Should not warn because x is reassigned
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_no_unused_vars() {
+        let linter = Linter::new(vec![LintRule::NoUnusedVars]);
+        let diagnostics = linter.lint_source("test.js", "const unused = 1;").unwrap();
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].rule, "no-unused-vars");
+        assert!(diagnostics[0].message.contains("never used"));
+    }
+
+    #[test]
+    fn test_no_unused_vars_underscore() {
+        let linter = Linter::new(vec![LintRule::NoUnusedVars]);
+        let diagnostics = linter
+            .lint_source("test.js", "const _intentionallyUnused = 1;")
+            .unwrap();
+
+        // Should not warn for underscore-prefixed variables
         assert!(diagnostics.is_empty());
     }
 }

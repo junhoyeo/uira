@@ -200,8 +200,8 @@ impl StdioMcpClientBuilder {
 /// use astrape_mcp::client::McpClient;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let mut client = StdioMcpClient::builder("uvx")
-///     .args(["grep-mcp"])
+/// let mut client = StdioMcpClient::builder("npx")
+///     .args(["-y", "@anthropic/context7-mcp"])
 ///     .build();
 ///
 /// client.connect().await?;
@@ -247,8 +247,8 @@ impl StdioMcpClient {
     /// ```rust,no_run
     /// use astrape_mcp::client::StdioMcpClient;
     ///
-    /// let client = StdioMcpClient::builder("uvx")
-    ///     .args(["grep-mcp"])
+    /// let client = StdioMcpClient::builder("npx")
+    ///     .args(["-y", "@anthropic/context7-mcp"])
     ///     .build();
     /// ```
     pub fn builder<S: Into<String>>(command: S) -> StdioMcpClientBuilder {

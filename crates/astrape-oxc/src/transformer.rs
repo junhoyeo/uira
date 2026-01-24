@@ -76,12 +76,14 @@ impl Transformer {
     }
 
     /// Transform source code
+    ///
+    /// Note: The `config` parameter is reserved for future use. Currently, transformation
+    /// behavior is determined by the file extension (e.g., `.ts` for TypeScript, `.tsx` for JSX).
     pub fn transform_source(
         filename: &str,
         source: &str,
-        config: Option<TransformConfig>,
+        _config: Option<TransformConfig>,
     ) -> TransformResult {
-        let _config = config.unwrap_or_default();
         let allocator = Allocator::default();
         let source_type = SourceType::from_path(filename).unwrap_or_default();
 

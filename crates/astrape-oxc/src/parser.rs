@@ -114,10 +114,21 @@ impl AstParser {
                 errors: ret
                     .errors
                     .iter()
-                    .map(|e| ParseError {
-                        message: e.to_string(),
-                        line: 1,
-                        column: 1,
+                    .map(|e| {
+                        // Extract offset from error labels if available
+                        let offset = e
+                            .labels
+                            .as_ref()
+                            .and_then(|labels| labels.first())
+                            .map(|label| label.offset())
+                            .unwrap_or(0);
+
+                        let (line, column) = Self::offset_to_line_col(source, offset);
+                        ParseError {
+                            message: e.to_string(),
+                            line,
+                            column,
+                        }
                     })
                     .collect(),
                 program: None,
@@ -131,6 +142,26 @@ impl AstParser {
             errors: vec![],
             program: Some(program_info),
         })
+    }
+
+    /// Convert byte offset to line and column numbers (1-indexed)
+    fn offset_to_line_col(source: &str, offset: usize) -> (u32, u32) {
+        let mut line = 1u32;
+        let mut col = 1u32;
+
+        for (i, ch) in source.char_indices() {
+            if i >= offset {
+                break;
+            }
+            if ch == '\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+
+        (line, col)
     }
 
     fn extract_program_info(program: &Program) -> ProgramInfo {
