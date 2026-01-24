@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  commands:
+    - name: fmt
+      run: cargo fmt --check
+    - name: clippy
+      run: cargo clippy -- -D warnings
+    - name: test
+      run: cargo test
+
+post-commit:
+  parallel: false
+  commands:
+    - name: auto-push
+      run: git push origin HEAD
