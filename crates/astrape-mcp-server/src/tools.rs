@@ -1,11 +1,38 @@
 //! Tool execution for the MCP server
 
+use ast_grep_language::{LanguageExt, SupportLang};
 use astrape_oxc::{LintRule, Linter, Severity};
 use astrape_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
-use serde_json::Value;
+use glob::glob;
+use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
+use walkdir::WalkDir;
+
+fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "typescript" => &["ts", "tsx", "mts", "cts"],
+        "javascript" => &["js", "jsx", "mjs", "cjs"],
+        "python" => &["py", "pyi"],
+        "rust" => &["rs"],
+        "go" => &["go"],
+        "java" => &["java"],
+        "c" => &["c", "h"],
+        "cpp" => &["cpp", "hpp", "cc", "cxx", "c++", "h++"],
+        "ruby" => &["rb", "rake"],
+        "swift" => &["swift"],
+        "kotlin" => &["kt", "kts"],
+        "css" => &["css"],
+        "html" => &["html", "htm"],
+        "json" => &["json"],
+        "yaml" => &["yaml", "yml"],
+        "bash" => &["sh", "bash"],
+        _ => &[],
+    }
+}
 
 fn extract_text(output: ToolOutput) -> String {
     output
@@ -32,6 +59,72 @@ impl ToolExecutor {
         }
     }
 
+    fn collect_files_for_ast(&self, args: &Value, lang: &str) -> Result<Vec<PathBuf>, String> {
+        let extensions = get_extensions_for_lang(lang);
+        let mut files = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(paths) = args["paths"].as_array() {
+            for path in paths {
+                if let Some(p) = path.as_str() {
+                    let full_path = self.root_path.join(p);
+                    if full_path.is_file() && seen.insert(full_path.clone()) {
+                        files.push(full_path);
+                    } else if full_path.is_dir() {
+                        self.walk_dir_for_extensions(&full_path, extensions, &mut files, &mut seen);
+                    }
+                }
+            }
+        }
+
+        if let Some(globs) = args["globs"].as_array() {
+            for g in globs {
+                if let Some(pattern) = g.as_str() {
+                    let full_pattern = self.root_path.join(pattern);
+                    if let Ok(entries) = glob(full_pattern.to_string_lossy().as_ref()) {
+                        for entry in entries.flatten() {
+                            if entry.is_file() && seen.insert(entry.clone()) {
+                                files.push(entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if files.is_empty() {
+            self.walk_dir_for_extensions(&self.root_path, extensions, &mut files, &mut seen);
+        }
+
+        Ok(files)
+    }
+
+    fn walk_dir_for_extensions(
+        &self,
+        dir: &PathBuf,
+        extensions: &[&str],
+        files: &mut Vec<PathBuf>,
+        seen: &mut HashSet<PathBuf>,
+    ) {
+        for entry in WalkDir::new(dir)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                !name.starts_with('.') && name != "node_modules" && name != "target"
+            })
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if extensions.contains(&ext) && seen.insert(path.to_path_buf()) {
+                        files.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn execute(&self, tool_name: &str, args: Value) -> Result<String, String> {
         match tool_name {
             // LSP Tools - delegate to language servers
@@ -42,7 +135,7 @@ impl ToolExecutor {
             "lsp_hover" => self.lsp_hover(args).await,
             "lsp_rename" => self.lsp_rename(args).await,
 
-            // AST-grep Tools - use sg CLI
+            // AST-grep Tools - native integration via ast-grep-language
             "ast_search" => self.ast_search(args).await,
             "ast_replace" => self.ast_replace(args).await,
 
@@ -116,114 +209,155 @@ impl ToolExecutor {
             .map_err(|e| e.to_string())
     }
 
-    // =========================================================================
-    // AST-grep Tools Implementation
-    // =========================================================================
-
     async fn ast_search(&self, args: Value) -> Result<String, String> {
         let pattern = args["pattern"].as_str().ok_or("Missing pattern")?;
-        let lang = args["lang"].as_str().ok_or("Missing lang")?;
+        let lang_str = args["lang"].as_str().ok_or("Missing lang")?;
+        let context_lines = args["context"].as_u64().unwrap_or(0) as usize;
 
-        let mut cmd = Command::new("sg");
-        cmd.arg("scan")
-            .arg("--pattern")
-            .arg(pattern)
-            .arg("--lang")
-            .arg(lang)
-            .arg("--json")
-            .current_dir(&self.root_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let lang: SupportLang = lang_str
+            .parse()
+            .map_err(|_| format!("Unsupported language: {}", lang_str))?;
 
-        // Add paths if specified
-        if let Some(paths) = args["paths"].as_array() {
-            for path in paths {
-                if let Some(p) = path.as_str() {
-                    cmd.arg(p);
+        let files = self.collect_files_for_ast(&args, lang_str)?;
+        let mut results = Vec::new();
+
+        for file_path in files {
+            let content = match fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let grep = lang.ast_grep(&content);
+            let root = grep.root();
+
+            for m in root.find_all(pattern) {
+                let node = m.get_node();
+                let start = node.start_pos();
+                let end = node.end_pos();
+                let matched_text = node.text().to_string();
+                let start_line = start.line();
+                let end_line = end.line();
+
+                let mut result = json!({
+                    "file": file_path.to_string_lossy(),
+                    "start": { "line": start_line + 1, "column": start.column(node) + 1 },
+                    "end": { "line": end_line + 1, "column": end.column(node) + 1 },
+                    "text": matched_text,
+                });
+
+                if context_lines > 0 {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let ctx_start = start_line.saturating_sub(context_lines);
+                    let ctx_end = (end_line + context_lines + 1).min(lines.len());
+                    let context: Vec<String> = lines[ctx_start..ctx_end]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:4}| {}", ctx_start + i + 1, line))
+                        .collect();
+                    result["context"] = json!(context.join("\n"));
                 }
+
+                results.push(result);
             }
         }
 
-        // Add globs if specified
-        if let Some(globs) = args["globs"].as_array() {
-            for glob in globs {
-                if let Some(g) = glob.as_str() {
-                    cmd.arg("--globs").arg(g);
-                }
-            }
-        }
-
-        let output = cmd.output().await.map_err(|e| {
-            format!(
-                "Failed to run ast-grep: {}. Install with: cargo install ast-grep",
-                e
-            )
-        })?;
-
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.trim().is_empty() {
-                Ok("No matches found".to_string())
-            } else {
-                Ok(stdout.to_string())
-            }
+        if results.is_empty() {
+            Ok("No matches found".to_string())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("ast-grep error: {}", stderr))
+            serde_json::to_string_pretty(&results)
+                .map_err(|e| format!("Failed to serialize results: {}", e))
         }
     }
 
     async fn ast_replace(&self, args: Value) -> Result<String, String> {
         let pattern = args["pattern"].as_str().ok_or("Missing pattern")?;
         let rewrite = args["rewrite"].as_str().ok_or("Missing rewrite")?;
-        let lang = args["lang"].as_str().ok_or("Missing lang")?;
+        let lang_str = args["lang"].as_str().ok_or("Missing lang")?;
         let dry_run = args["dryRun"].as_bool().unwrap_or(true);
 
-        let mut cmd = Command::new("sg");
-        cmd.arg("scan")
-            .arg("--pattern")
-            .arg(pattern)
-            .arg("--rewrite")
-            .arg(rewrite)
-            .arg("--lang")
-            .arg(lang)
-            .current_dir(&self.root_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let lang: SupportLang = lang_str
+            .parse()
+            .map_err(|_| format!("Unsupported language: {}", lang_str))?;
 
-        if !dry_run {
-            cmd.arg("--update-all");
-        }
+        let files = self.collect_files_for_ast(&args, lang_str)?;
+        let mut results = Vec::new();
+        let mut files_modified = 0;
 
-        // Add paths if specified
-        if let Some(paths) = args["paths"].as_array() {
-            for path in paths {
-                if let Some(p) = path.as_str() {
-                    cmd.arg(p);
-                }
+        for file_path in files {
+            let content = match fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let grep = lang.ast_grep(&content);
+            let root = grep.root();
+            let matches: Vec<_> = root.find_all(pattern).collect();
+
+            if matches.is_empty() {
+                continue;
+            }
+
+            let mut new_content = content.clone();
+            let mut offset: i64 = 0;
+
+            for m in &matches {
+                let node = m.get_node();
+                let edit = m.replace_by(rewrite);
+                let inserted = String::from_utf8_lossy(&edit.inserted_text);
+                let start_byte = (edit.position as i64 + offset) as usize;
+                let end_byte = start_byte + edit.deleted_length;
+
+                let before = &new_content[..start_byte];
+                let after = &new_content[end_byte..];
+                new_content = format!("{}{}{}", before, inserted, after);
+
+                offset += edit.inserted_text.len() as i64 - edit.deleted_length as i64;
+
+                let pos = node.start_pos();
+                results.push(json!({
+                    "file": file_path.to_string_lossy(),
+                    "line": pos.line() + 1,
+                    "original": node.text(),
+                    "replacement": inserted,
+                }));
+            }
+
+            if !dry_run {
+                fs::write(&file_path, &new_content)
+                    .map_err(|e| format!("Failed to write {}: {}", file_path.display(), e))?;
+                files_modified += 1;
             }
         }
 
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| format!("Failed to run ast-grep: {}", e))?;
+        if results.is_empty() {
+            return Ok("No matches found for replacement".to_string());
+        }
 
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if dry_run {
-                if stdout.trim().is_empty() {
-                    Ok("No matches found for replacement".to_string())
-                } else {
-                    Ok(format!("[DRY RUN] Would replace:\n{}", stdout))
-                }
-            } else {
-                Ok(format!("Replaced matches:\n{}", stdout))
-            }
+        let summary = if dry_run {
+            format!(
+                "[DRY RUN] {} replacements in {} files",
+                results.len(),
+                results
+                    .iter()
+                    .map(|r| r["file"].as_str().unwrap_or(""))
+                    .collect::<HashSet<_>>()
+                    .len()
+            )
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("ast-grep error: {}", stderr))
-        }
+            format!(
+                "Applied {} replacements in {} files",
+                results.len(),
+                files_modified
+            )
+        };
+
+        let output = json!({
+            "summary": summary,
+            "replacements": results,
+        });
+
+        serde_json::to_string_pretty(&output)
+            .map_err(|e| format!("Failed to serialize results: {}", e))
     }
 
     async fn run_oxc_lint(&self, file_path: &str, severity_filter: &str) -> Result<String, String> {
