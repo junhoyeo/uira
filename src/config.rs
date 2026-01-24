@@ -18,9 +18,6 @@ pub struct AiConfig {
     pub model: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -41,13 +38,25 @@ impl AiConfig {
     fn default_disable_mcp() -> bool {
         true
     }
+
+    pub fn parse_model(&self) -> (String, String) {
+        let model_str = self
+            .model
+            .as_deref()
+            .unwrap_or("anthropic/claude-sonnet-4-20250514");
+
+        if let Some((provider, model)) = model_str.split_once('/') {
+            (provider.to_string(), model.to_string())
+        } else {
+            ("anthropic".to_string(), model_str.to_string())
+        }
+    }
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
             model: None,
-            provider: None,
             host: None,
             port: None,
             disable_tools: true,

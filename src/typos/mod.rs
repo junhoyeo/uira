@@ -12,8 +12,6 @@ use crate::config::AiConfig;
 
 const DEFAULT_OPENCODE_PORT: u16 = 4096;
 const DEFAULT_OPENCODE_HOST: &str = "127.0.0.1";
-const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
-const DEFAULT_PROVIDER: &str = "anthropic";
 
 #[derive(Debug, Deserialize)]
 pub struct TypoEntry {
@@ -335,16 +333,7 @@ Just respond with the single word, nothing else."#,
             context
         );
 
-        let model_id = self
-            .config
-            .model
-            .clone()
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        let provider_id = self
-            .config
-            .provider
-            .clone()
-            .unwrap_or_else(|| DEFAULT_PROVIDER.to_string());
+        let (provider_id, model_id) = self.config.parse_model();
 
         let body = ChatBody {
             model_id,
@@ -531,19 +520,33 @@ mod tests {
         assert!(checker.config.disable_mcp);
 
         let config = AiConfig {
-            model: Some("claude-sonnet-4-20250514".to_string()),
-            provider: Some("anthropic".to_string()),
+            model: Some("openai/gpt-4o".to_string()),
             disable_tools: false,
             disable_mcp: true,
             ..Default::default()
         };
         let checker_with_config = TyposChecker::new(Some(config));
-        assert_eq!(
-            checker_with_config.config.model,
-            Some("claude-sonnet-4-20250514".to_string())
-        );
+        let (provider, model) = checker_with_config.config.parse_model();
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-4o");
         assert!(!checker_with_config.config.disable_tools);
         assert!(checker_with_config.config.disable_mcp);
+    }
+
+    #[test]
+    fn test_parse_model() {
+        let config = AiConfig::default();
+        let (provider, model) = config.parse_model();
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "claude-sonnet-4-20250514");
+
+        let config = AiConfig {
+            model: Some("anthropic/claude-opus-4-5-high".to_string()),
+            ..Default::default()
+        };
+        let (provider, model) = config.parse_model();
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "claude-opus-4-5-high");
     }
 
     #[test]
