@@ -1,6 +1,10 @@
 ai:
   model: anthropic/claude-sonnet-4-20250514
 
+agents:
+  explore:
+    model: "opencode/gpt-5-nano"
+
 pre-commit:
   parallel: false  # fmt must run first to auto-fix before clippy checks
   commands:
