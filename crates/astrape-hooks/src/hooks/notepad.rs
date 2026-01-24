@@ -117,10 +117,7 @@ impl NotepadHook {
         let header_pos = content.find(header)?;
         let after_header = &content[header_pos + header.len()..];
 
-        let section_end = after_header
-            .find("\n## ")
-            .map(|pos| pos)
-            .unwrap_or(after_header.len());
+        let section_end = after_header.find("\n## ").unwrap_or(after_header.len());
 
         let section = &after_header[..section_end];
 
@@ -317,8 +314,7 @@ impl NotepadHook {
         };
 
         // Parse entries: ### YYYY-MM-DD HH:MM
-        let entry_regex =
-            Regex::new(r"### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)(?=### |$)").unwrap();
+        let entry_regex = Regex::new(r"### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\n([\s\S]*?)").unwrap();
 
         let mut entries: Vec<(String, String)> = Vec::new();
         for cap in entry_regex.captures_iter(&working_memory) {

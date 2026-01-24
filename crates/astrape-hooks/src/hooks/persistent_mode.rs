@@ -14,7 +14,9 @@ use std::sync::RwLock;
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::ralph::RalphHook;
-use crate::hooks::todo_continuation::{StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT};
+use crate::hooks::todo_continuation::{
+    StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
+};
 use crate::hooks::ultrawork::UltraworkHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
@@ -62,10 +64,7 @@ pub fn reset_todo_continuation_attempts(session_id: &str) {
     attempts.remove(session_id);
 }
 
-fn check_ralph_loop(
-    session_id: Option<&str>,
-    directory: &str,
-) -> Option<PersistentModeResult> {
+fn check_ralph_loop(session_id: Option<&str>, directory: &str) -> Option<PersistentModeResult> {
     let state = RalphHook::read_state(Some(directory))?;
 
     if !state.active {
@@ -158,7 +157,9 @@ fn check_ultrawork(
         UltraworkHook::deactivate(Some(directory));
         return Some(PersistentModeResult {
             should_block: false,
-            message: "[ULTRAWORK COMPLETE] All tasks finished. Ultrawork mode deactivated. Well done!".to_string(),
+            message:
+                "[ULTRAWORK COMPLETE] All tasks finished. Ultrawork mode deactivated. Well done!"
+                    .to_string(),
             mode: PersistentMode::None,
             metadata: PersistentModeMetadata::default(),
         });
@@ -191,9 +192,7 @@ fn check_todo_continuation(
         return None;
     }
 
-    let attempt_count = session_id
-        .map(|sid| track_todo_continuation_attempt(sid))
-        .unwrap_or(1);
+    let attempt_count = session_id.map(track_todo_continuation_attempt).unwrap_or(1);
 
     if attempt_count > MAX_TODO_CONTINUATION_ATTEMPTS {
         return Some(PersistentModeResult {
@@ -263,7 +262,8 @@ pub fn check_persistent_modes(
         }
     }
 
-    let todo_result = TodoContinuationHook::check_incomplete_todos(session_id, directory, stop_context);
+    let todo_result =
+        TodoContinuationHook::check_incomplete_todos(session_id, directory, stop_context);
     let has_incomplete_todos = todo_result.count > 0;
 
     if let Some(result) = check_ralph_loop(session_id, directory) {

@@ -121,7 +121,7 @@ impl TodoContinuationHook {
                 if let Ok(entries) = fs::read_dir(&todos_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        if path.extension().map_or(false, |e| e == "json") {
+                        if path.extension().is_some_and(|e| e == "json") {
                             paths.push(path);
                         }
                     }
@@ -216,12 +216,19 @@ impl TodoContinuationHook {
     /// Get the next pending todo
     pub fn get_next_pending_todo(result: &IncompleteTodosResult) -> Option<&Todo> {
         // First try to find one that's in_progress
-        if let Some(todo) = result.todos.iter().find(|t| t.status == TodoStatus::InProgress) {
+        if let Some(todo) = result
+            .todos
+            .iter()
+            .find(|t| t.status == TodoStatus::InProgress)
+        {
             return Some(todo);
         }
 
         // Otherwise return first pending
-        result.todos.iter().find(|t| t.status == TodoStatus::Pending)
+        result
+            .todos
+            .iter()
+            .find(|t| t.status == TodoStatus::Pending)
     }
 
     /// Format todo status string

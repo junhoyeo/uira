@@ -18,9 +18,7 @@ pub use persistent_mode::{
     PersistentModeMetadata, PersistentModeResult,
 };
 pub use ralph::{RalphHook, RalphOptions, RalphState};
-pub use think_mode::{
-    ThinkModeHook, ThinkModeState, ThinkingConfig, THINKING_CONFIGS,
-};
+pub use think_mode::{ThinkModeHook, ThinkModeState, ThinkingConfig, THINKING_CONFIGS};
 pub use todo_continuation::{
     IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
     TODO_CONTINUATION_PROMPT,
