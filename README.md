@@ -210,17 +210,3 @@ cargo test --workspace
 # Run CLI
 cargo run -p astrape -- agent list
 ```
-
-## Stats
-
-| Metric | Value |
-|--------|-------|
-| Crates | 14 |
-| Lines of Rust | 37,000+ |
-| Agents | 32 |
-| Hooks | 22 |
-| Tests | 400+ |
-
-## License
-
-MIT
