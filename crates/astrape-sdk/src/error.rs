@@ -5,31 +5,30 @@ use thiserror::Error;
 /// SDK error types
 #[derive(Error, Debug)]
 pub enum SdkError {
-    /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// Session error
     #[error("Session error: {0}")]
     Session(String),
 
-    /// Agent error
     #[error("Agent error: {0}")]
     Agent(String),
 
-    /// SDK integration error (napi-rs)
     #[error("SDK integration error: {0}")]
     Integration(String),
 
-    /// Serialization error
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    #[error("Bridge error: {0}")]
+    Bridge(String),
 
-    /// IO error
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Generic error
     #[error("{0}")]
     Other(String),
 }

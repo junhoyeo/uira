@@ -5,28 +5,39 @@
 //!
 //! # Architecture
 //!
-//! The SDK uses napi-rs to call the TypeScript SDK from Rust.
+//! The SDK uses a TypeScript bridge subprocess to call the SDK from Rust.
 //! This allows Astrape to leverage the existing SDK without reimplementing it.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use astrape_sdk::{AstrapeSession, SessionOptions, AgentConfig};
+//! use astrape_sdk::{SdkBridge, QueryParams};
 //!
-//! let session = AstrapeSession::new(SessionOptions::default()).await?;
-//! let result = session.invoke_agent("explore", "find auth logic").await?;
+//! let mut bridge = SdkBridge::new()?;
+//! assert!(bridge.ping()?);
+//!
+//! let params = QueryParams {
+//!     prompt: "Hello, Claude!".to_string(),
+//!     options: None,
+//! };
+//! let mut rx = bridge.query(params)?;
+//! while let Some(msg) = rx.recv().await {
+//!     println!("{:?}", msg);
+//! }
 //! ```
 
-mod types;
 mod agent;
-mod session;
+mod bridge;
 mod config;
-mod mcp;
 mod error;
+mod mcp;
+mod session;
+mod types;
 
-pub use types::*;
 pub use agent::*;
-pub use session::*;
+pub use bridge::*;
 pub use config::*;
-pub use mcp::*;
 pub use error::*;
+pub use mcp::*;
+pub use session::*;
+pub use types::*;
