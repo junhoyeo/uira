@@ -248,7 +248,7 @@ Just talk naturally - Astrape activates automatically:
 |----------|--------|
 | **Analysis** | architect, architect-medium, architect-low, analyst, critic |
 | **Execution** | executor, executor-high, executor-low |
-| **Search** | explore, explore-medium, explore-high |
+| **Search** | explore |
 | **Design** | designer, designer-high, designer-low |
 | **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
 | **Security** | security-reviewer, security-reviewer-low |
