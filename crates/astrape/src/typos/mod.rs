@@ -663,10 +663,6 @@ Your response (one word per line, {} lines total):"#,
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn get_modified_files(&self) -> &HashSet<String> {
-        &self.modified_files
-    }
 }
 
 impl Default for TyposChecker {

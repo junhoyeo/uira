@@ -18,20 +18,6 @@ pub enum HookEvent {
     PostFix,
 }
 
-impl HookEvent {
-    #[allow(dead_code)]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            HookEvent::PreCheck => "pre-check",
-            HookEvent::PostCheck => "post-check",
-            HookEvent::PreAi => "pre-ai",
-            HookEvent::PostAi => "post-ai",
-            HookEvent::PreFix => "pre-fix",
-            HookEvent::PostFix => "post-fix",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HookMatcher {
     #[serde(default)]
@@ -120,12 +106,6 @@ impl HookContext {
         Self::default()
     }
 
-    #[allow(dead_code)]
-    pub fn with_env(mut self, key: &str, value: &str) -> Self {
-        self.env.insert(key.to_string(), value.to_string());
-        self
-    }
-
     pub fn set_env(&mut self, key: &str, value: &str) {
         self.env.insert(key.to_string(), value.to_string());
     }
@@ -133,8 +113,6 @@ impl HookContext {
 
 #[derive(Debug, Clone)]
 pub struct HookResult {
-    #[allow(dead_code)]
-    pub success: bool,
     pub should_continue: bool,
     pub message: Option<String>,
     pub output: Option<String>,
@@ -143,7 +121,6 @@ pub struct HookResult {
 impl Default for HookResult {
     fn default() -> Self {
         Self {
-            success: true,
             should_continue: true,
             message: None,
             output: None,
@@ -243,7 +220,6 @@ impl AiHookExecutor {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
         let mut result = HookResult {
-            success: output.status.success(),
             should_continue: true,
             message: None,
             output: if stdout.is_empty() {
@@ -286,16 +262,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_hook_event_as_str() {
-        assert_eq!(HookEvent::PreCheck.as_str(), "pre-check");
-        assert_eq!(HookEvent::PostAi.as_str(), "post-ai");
-    }
-
-    #[test]
     fn test_hook_context() {
-        let ctx = HookContext::new()
-            .with_env("FILE", "test.rs")
-            .with_env("TYPO", "teh");
+        let mut ctx = HookContext::new();
+        ctx.set_env("FILE", "test.rs");
+        ctx.set_env("TYPO", "teh");
 
         assert_eq!(ctx.env.get("FILE"), Some(&"test.rs".to_string()));
         assert_eq!(ctx.env.get("TYPO"), Some(&"teh".to_string()));
@@ -308,7 +278,6 @@ mod tests {
         let context = HookContext::new();
 
         let result = executor.execute(HookEvent::PreCheck, &context).unwrap();
-        assert!(result.success);
         assert!(result.should_continue);
     }
 
@@ -316,7 +285,8 @@ mod tests {
     fn test_matches_context_wildcard() {
         let config = HooksConfig::default();
         let executor = AiHookExecutor::new(config);
-        let context = HookContext::new().with_env("FILE", "test.rs");
+        let mut context = HookContext::new();
+        context.set_env("FILE", "test.rs");
 
         assert!(executor.matches_context("*", &context));
         assert!(executor.matches_context("*.rs", &context));
@@ -327,9 +297,9 @@ mod tests {
     fn test_expand_variables() {
         let config = HooksConfig::default();
         let executor = AiHookExecutor::new(config);
-        let context = HookContext::new()
-            .with_env("FILE", "test.rs")
-            .with_env("TYPO", "teh");
+        let mut context = HookContext::new();
+        context.set_env("FILE", "test.rs");
+        context.set_env("TYPO", "teh");
 
         let cmd = "echo $FILE has typo: ${TYPO}";
         let expanded = executor.expand_variables(cmd, &context);

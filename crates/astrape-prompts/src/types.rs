@@ -44,6 +44,7 @@ pub enum ModelType {
     Opus,
     Sonnet,
     Haiku,
+    Inherit,
 }
 
 impl ModelType {
@@ -52,6 +53,7 @@ impl ModelType {
             Self::Opus => "opus",
             Self::Sonnet => "sonnet",
             Self::Haiku => "haiku",
+            Self::Inherit => "inherit",
         }
     }
 }
@@ -245,6 +247,7 @@ mod tests {
         assert_eq!(ModelType::Opus.as_str(), "opus");
         assert_eq!(ModelType::Sonnet.as_str(), "sonnet");
         assert_eq!(ModelType::Haiku.as_str(), "haiku");
+        assert_eq!(ModelType::Inherit.as_str(), "inherit");
     }
 
     #[test]
