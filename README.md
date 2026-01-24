@@ -51,6 +51,9 @@ git commit        # Hooks run automatically
 `astrape.yml`:
 
 ```yaml
+ai:
+  model: claude-sonnet-4-20250514
+
 pre-commit:
   parallel: true
   commands:
@@ -68,6 +71,12 @@ post-commit:
     - name: auto-push
       run: git push origin HEAD
 ```
+
+### AI Config
+
+| Key | Description |
+|-----|-------------|
+| `ai.model` | Default model for AI features (used by `typos --ai`) |
 
 ### Variable Expansion
 

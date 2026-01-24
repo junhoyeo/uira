@@ -26,6 +26,8 @@ pub struct TypoEntry {
 #[derive(Debug, Serialize)]
 struct SessionCreateBody {
     title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,10 +64,11 @@ pub struct TyposChecker {
     client: reqwest::blocking::Client,
     session_id: Option<String>,
     server_was_started: bool,
+    model: Option<String>,
 }
 
 impl TyposChecker {
-    pub fn new() -> Self {
+    pub fn new(model: Option<String>) -> Self {
         Self {
             client: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(120))
@@ -73,6 +76,7 @@ impl TyposChecker {
                 .unwrap(),
             session_id: None,
             server_was_started: false,
+            model,
         }
     }
 
@@ -225,6 +229,7 @@ impl TyposChecker {
 
         let body = SessionCreateBody {
             title: "astrape-typos".to_string(),
+            model: self.model.clone(),
         };
 
         let resp: Session = self
@@ -399,7 +404,7 @@ Just respond with the single word, nothing else."#,
 
 impl Default for TyposChecker {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -428,8 +433,15 @@ mod tests {
 
     #[test]
     fn test_typos_checker_creation() {
-        let checker = TyposChecker::new();
+        let checker = TyposChecker::new(None);
         assert!(checker.session_id.is_none());
         assert!(!checker.server_was_started);
+        assert!(checker.model.is_none());
+
+        let checker_with_model = TyposChecker::new(Some("claude-sonnet-4-20250514".to_string()));
+        assert_eq!(
+            checker_with_model.model,
+            Some("claude-sonnet-4-20250514".to_string())
+        );
     }
 }

@@ -5,8 +5,17 @@ use std::path::Path;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiConfig>,
+
     #[serde(flatten)]
     pub hooks: HashMap<String, HookConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AiConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -65,7 +74,7 @@ impl Config {
         hooks.insert("pre-commit".to_string(), pre_commit);
         hooks.insert("post-commit".to_string(), post_commit);
 
-        Config { hooks }
+        Config { ai: None, hooks }
     }
 
     pub fn to_yaml(&self) -> anyhow::Result<String> {
