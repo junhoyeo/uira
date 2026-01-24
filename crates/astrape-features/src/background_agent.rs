@@ -461,8 +461,9 @@ impl BackgroundManager {
             if status.is_terminal() {
                 task.completed_at = Some(Utc::now());
                 // Release concurrency slot on terminal status to prevent resource leak
-                if let Some(key) = &task.concurrency_key {
-                    self.concurrency.release(key);
+                // Use take() to atomically clear the key, preventing double-release
+                if let Some(key) = task.concurrency_key.take() {
+                    self.concurrency.release(&key);
                 }
             }
             let updated = task.clone();
@@ -480,8 +481,9 @@ impl BackgroundManager {
             task.status = BackgroundTaskStatus::Completed;
             task.completed_at = Some(Utc::now());
             task.result = Some(result);
-            if let Some(key) = &task.concurrency_key {
-                self.concurrency.release(key);
+            // Use take() to atomically clear the key, preventing double-release
+            if let Some(key) = task.concurrency_key.take() {
+                self.concurrency.release(&key);
             }
             let updated = task.clone();
             drop(tasks);
@@ -498,8 +500,9 @@ impl BackgroundManager {
             task.status = BackgroundTaskStatus::Error;
             task.completed_at = Some(Utc::now());
             task.error = Some(error);
-            if let Some(key) = &task.concurrency_key {
-                self.concurrency.release(key);
+            // Use take() to atomically clear the key, preventing double-release
+            if let Some(key) = task.concurrency_key.take() {
+                self.concurrency.release(&key);
             }
             let updated = task.clone();
             drop(tasks);
@@ -518,8 +521,9 @@ impl BackgroundManager {
             }
             task.status = BackgroundTaskStatus::Cancelled;
             task.completed_at = Some(Utc::now());
-            if let Some(key) = &task.concurrency_key {
-                self.concurrency.release(key);
+            // Use take() to atomically clear the key, preventing double-release
+            if let Some(key) = task.concurrency_key.take() {
+                self.concurrency.release(&key);
             }
             let updated = task.clone();
             drop(tasks);

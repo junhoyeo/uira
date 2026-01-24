@@ -126,7 +126,11 @@ pub fn route_with_escalation(
     // Merge config first since merge_with_default takes ownership
     let merged = config.clone().merge_with_default();
     let mut decision = route_task(context, config);
-    if decision.confidence < merged.escalation_threshold && can_escalate(decision.tier) {
+    // Only escalate if escalation is enabled (defaults to false)
+    if merged.escalation_enabled
+        && decision.confidence < merged.escalation_threshold
+        && can_escalate(decision.tier)
+    {
         let original_tier = decision.tier;
         let new_tier = escalate_model(original_tier);
         decision.tier = new_tier;
