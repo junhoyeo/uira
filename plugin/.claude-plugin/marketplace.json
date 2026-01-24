@@ -4,7 +4,7 @@
   "description": "Native Rust multi-agent orchestration - high-performance hooks, 32 agents, intelligent model routing",
   "owner": {
     "name": "Junho Yeo",
-    "email": "junho@astrape.dev"
+    "email": "i@junho.io"
   },
   "plugins": [
     {
@@ -13,7 +13,7 @@
       "version": "0.1.0",
       "author": {
         "name": "Junho Yeo",
-        "email": "junho@astrape.dev"
+        "email": "i@junho.io"
       },
       "source": "./",
       "category": "productivity",
