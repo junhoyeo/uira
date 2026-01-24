@@ -186,3 +186,51 @@ export declare function routeTaskPrompt(prompt: string): JsRoutingResult
  * Routing result with model, tier, and reasoning
  */
 export declare function routeTaskWithAgent(prompt: string, agentType?: string | undefined | null): JsRoutingResult
+
+// ============================================================================
+// Background Task Notification Bindings
+// ============================================================================
+
+/** Result of checking for background notifications */
+export interface JsNotificationResult {
+  hasNotifications: boolean
+  message?: string
+  notificationCount: number
+}
+
+/**
+ * Check for pending background task notifications for a session
+ *
+ * # Arguments
+ * * `sessionId` - The session ID to check notifications for
+ *
+ * # Returns
+ * Notification result with message if notifications are pending
+ */
+export declare function checkNotifications(sessionId: string): JsNotificationResult
+
+/**
+ * Process a background task event (task.completed or task.failed)
+ *
+ * # Arguments
+ * * `eventJson` - JSON string with event type and properties
+ */
+export declare function notifyBackgroundEvent(eventJson: string): void
+
+/**
+ * Register a background task for tracking
+ *
+ * # Arguments
+ * * `taskId` - Unique task identifier
+ * * `sessionId` - Child session ID
+ * * `parentSessionId` - Parent session ID to notify
+ * * `description` - Task description
+ * * `agent` - Agent name running the task
+ */
+export declare function registerBackgroundTask(
+  taskId: string,
+  sessionId: string,
+  parentSessionId: string,
+  description: string,
+  agent: string
+): void

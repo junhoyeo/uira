@@ -1,214 +1,229 @@
 ![Astrape](./.github/assets/cover.jpg)
 
 <div align="center">
-  <h1>Astrape ⚡</h1>
+  <h1>Astrape</h1>
+  <p>Native Rust-powered multi-agent orchestration for Claude Code</p>
 </div>
 
-> Lightning-fast Rust-native multi-agent orchestration system with git hooks, native linting, and AI-assisted workflows
-
-Astrape (Greek: "lightning") is a complete Rust port of [oh-my-claudecode](https://github.com/anthropics/oh-my-claudecode), providing multi-agent orchestration, smart model routing, and AI-assisted development tools.
+Astrape (Greek: "lightning") provides high-performance multi-agent orchestration, smart model routing, and AI-assisted development tools as a Claude Code plugin.
 
 ## Features
 
-### Core Orchestration
-- **32 Specialized Agents** - Analyst, Architect, Designer, Executor, Explorer, and more
-- **Smart Model Routing** - Automatically select Haiku/Sonnet/Opus based on task complexity
-- **Hook System** - 22 hooks for Claude Code integration (autopilot, ultrawork, ralph, etc.)
-- **MCP Integration** - Stdio client for Model Context Protocol servers
-- **Skill System** - Load and execute skill templates from SKILL.md files
+- **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Researcher, and more with tiered variants (Haiku/Sonnet/Opus)
+- **Smart Model Routing** - Automatically select the right model based on task complexity
+- **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
+- **MCP Server** - LSP and AST-grep tools exposed via Model Context Protocol
+- **OXC-Powered Tools** - Fast JavaScript/TypeScript linting, parsing, transformation, and minification
+- **Comment Checker** - Tree-sitter powered detection of problematic comments/docstrings
+- **Background Task Notifications** - Track and notify on background agent completions
+- **Skill System** - Extensible skill templates (ultrawork, analyze, plan, search)
+- **Git Hooks** - Configurable pre/post commit hooks via `astrape.yml`
 
-### Git Hooks & Linting
-- **Native Rust** - No Node.js runtime, single binary
-- **oxc-powered linting** - Uses oxc parser for AST-based JS/TS lint rules
-- **AI-assisted typos** - Smart spell checking with context-aware AI decisions
-- **Parallel execution** - Hooks run concurrently via Rayon
+## Git Hooks
 
-### Node.js Bindings
-- **NAPI bindings** - Use from Node.js/TypeScript
-- **Hook execution** - Run hooks from JavaScript
-- **Agent access** - Query agent definitions and routing
-
-## Install
-
-```bash
-cargo install astrape
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/junhoyeo/Astrape astrape
-cd astrape
-cargo install --path crates/astrape
-```
-
-## Quick Start
-
-### Git Hooks
-
-```bash
-astrape init      # Creates astrape.yml
-astrape install   # Installs git hooks
-git commit        # Hooks run automatically
-```
-
-### Agent Orchestration
-
-```bash
-astrape agent list              # List all 32 agents
-astrape agent info executor     # Show agent details
-astrape skill list              # List available skills
-astrape session start           # Start orchestration session
-```
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `astrape init` | Create default config file |
-| `astrape install` | Install git hooks to `.git/hooks/` |
-| `astrape run <hook>` | Run a specific hook manually |
-| `astrape lint [files]` | Lint JS/TS files with native oxc |
-| `astrape typos [--ai]` | Check for typos (optionally AI-assisted) |
-| `astrape hook install` | Install Claude Code AI hooks |
-| `astrape hook list` | List installed AI hooks |
-| `astrape agent list` | List all available agents |
-| `astrape agent info <name>` | Show agent details |
-| `astrape session start` | Start new SDK session |
-| `astrape session status` | Check session state |
-| `astrape skill list` | List available skills |
-| `astrape skill show <name>` | Display skill template |
-
-## Architecture
-
-### Crate Structure
-
-```
-crates/
-├── astrape/                 # CLI binary
-├── astrape-agents/          # 32 agent definitions
-├── astrape-hooks/           # 22 hook implementations
-├── astrape-features/        # State, routing, verification
-├── astrape-tools/           # Tool handlers (delegate, background, skill)
-├── astrape-mcp/             # MCP stdio client
-├── astrape-sdk/             # Session management
-├── astrape-config/          # Configuration schema
-├── astrape-napi/            # Node.js bindings
-├── astrape-comment-checker/ # Tree-sitter comment detection
-├── astrape-prompts/         # Prompt builder
-├── astrape-core/            # Core types
-├── astrape-hook/            # Hook traits
-└── astrape-claude/          # Claude Code integration
-```
-
-### Agent Tiers
-
-| Tier | Model | Use Case |
-|------|-------|----------|
-| LOW | Haiku | Quick lookups, simple tasks |
-| MEDIUM | Sonnet | Standard implementation work |
-| HIGH | Opus | Complex reasoning, architecture |
-
-### Available Agents
-
-| Category | Agents |
-|----------|--------|
-| Analysis | architect, architect-medium, architect-low, analyst, critic |
-| Execution | executor, executor-high, executor-low |
-| Search | explore, explore-medium, explore-high |
-| Design | designer, designer-high, designer-low |
-| Testing | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
-| Security | security-reviewer, security-reviewer-low |
-| Build | build-fixer, build-fixer-low |
-| Research | researcher, researcher-low, scientist, scientist-high, scientist-low |
-| Documentation | writer |
-| Visual | vision |
-| Planning | planner |
-| Code Review | code-reviewer, code-reviewer-low |
-
-### Hook Events
-
-| Event | Description |
-|-------|-------------|
-| `UserPromptSubmit` | Before user prompt is processed |
-| `Stop` | When agent stops |
-| `SessionStart` | Session initialization |
-| `PreToolUse` | Before tool execution |
-| `PostToolUse` | After tool execution |
-
-## Configuration
-
-### `astrape.yml`
+Astrape provides a standalone CLI for git hook management. Configure hooks in `astrape.yml`:
 
 ```yaml
 ai:
   model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
 
-hooks:
-  pre_commit:
-    parallel: true
-    commands:
-      - name: fmt
-        run: cargo fmt --check
-      - name: lint
-        run: astrape lint {staged_files}
-        glob: "**/*.{js,ts,jsx,tsx}"
+pre-commit:
+  parallel: false  # fmt must run first before clippy
+  commands:
+    - name: fmt
+      run: |
+        staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+        [ -z "$staged" ] && exit 0
+        echo "$staged" | xargs cargo fmt --
+        echo "$staged" | xargs git add
+    - name: clippy
+      run: cargo clippy -- -D warnings
+    - name: typos
+      run: ./target/debug/astrape typos --ai --stage
 
-mcp:
-  servers:
-    filesystem:
-      command: npx
-      args: ["-y", "@anthropic/mcp-filesystem", "/path"]
+post-commit:
+  commands:
+    - name: auto-push
+      run: git push origin HEAD
 ```
 
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `ASTRAPE_CONFIG` | Custom config file path |
-| `ASTRAPE_MODEL` | Override default model |
-| `ANTHROPIC_API_KEY` | API key for Claude |
-
-## Node.js Usage
-
-```typescript
-import {
-  listAgents,
-  getAgent,
-  routeTaskPrompt,
-  executeHook,
-  getSkill
-} from '@astrape/native';
-
-// List all agents
-const agents = listAgents();
-
-// Get specific agent
-const executor = getAgent('executor');
-
-// Route a task to appropriate model
-const routing = routeTaskPrompt('Implement user authentication');
-console.log(routing.model, routing.tier, routing.reasoning);
-
-// Execute hook
-const result = await executeHook('UserPromptSubmit', JSON.stringify({
-  prompt: 'ultrawork: fix all errors'
-}));
-
-// Get skill template
-const skill = getSkill('autopilot');
+Install hooks with:
+```bash
+astrape install
 ```
+
+## Quick Start
+
+### As Claude Code Plugin
+
+```bash
+# Clone and build
+git clone https://github.com/junhoyeo/Astrape astrape
+cd astrape
+cargo build --release
+
+# Build NAPI bindings
+cd crates/astrape-napi && bun run build
+
+# Copy native module to plugin
+cp *.node ../../packages/claude-plugin/native/
+
+# Install plugin in Claude Code
+# Add packages/claude-plugin to your Claude Code plugins
+```
+
+### Usage in Claude Code
+
+Just talk naturally - Astrape activates automatically:
+
+```
+"ultrawork: fix all TypeScript errors"    → Maximum parallel execution
+"analyze why this test fails"             → Deep investigation mode
+"search for authentication handling"      → Comprehensive codebase search
+"plan the new API design"                 → Strategic planning interview
+```
+
+## Agents
+
+| Category | Agents |
+|----------|--------|
+| **Analysis** | architect, architect-medium, architect-low, analyst, critic |
+| **Execution** | executor, executor-high, executor-low |
+| **Search** | explore, explore-medium, explore-high |
+| **Design** | designer, designer-high, designer-low |
+| **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
+| **Security** | security-reviewer, security-reviewer-low |
+| **Build** | build-fixer, build-fixer-low |
+| **Research** | researcher, researcher-low, scientist, scientist-high, scientist-low |
+| **Other** | writer, vision, planner, code-reviewer, code-reviewer-low |
+
+### Model Tiers
+
+| Tier | Model | Use Case |
+|------|-------|----------|
+| LOW | Haiku | Quick lookups, simple tasks |
+| MEDIUM | Sonnet | Standard implementation |
+| HIGH | Opus | Complex reasoning, architecture |
+
+## Skills
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
+| `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
+| `/astrape:search` | `search`, `find` | Comprehensive codebase search |
+| `/astrape:plan` | `plan` | Strategic planning |
+| `/astrape:help` | - | Usage guide |
+
+## MCP Server
+
+The `astrape-mcp` binary exposes development tools via the Model Context Protocol:
+
+### LSP Tools
+| Tool | Description |
+|------|-------------|
+| `lsp_goto_definition` | Jump to symbol definition |
+| `lsp_find_references` | Find all references to a symbol |
+| `lsp_symbols` | List symbols in a file or workspace |
+| `lsp_diagnostics` | Get errors and warnings |
+| `lsp_hover` | Get type info and documentation |
+| `lsp_rename` | Rename a symbol across files |
+
+### AST Tools
+| Tool | Description |
+|------|-------------|
+| `ast_search` | Search code patterns with ast-grep |
+| `ast_replace` | Search and replace code patterns |
+
+## OXC Tools
+
+The `astrape-oxc` crate provides fast JavaScript/TypeScript tooling powered by [OXC](https://oxc.rs):
+
+### Linter
+10 built-in rules: `no-console`, `no-debugger`, `no-alert`, `no-eval`, `no-var`, `prefer-const`, `no-unused-vars`, `no-empty-function`, `no-duplicate-keys`, `no-param-reassign`
+
+### Parser
+Returns structured AST information including imports, exports, functions, classes, and variables.
+
+### Transformer
+Transpile TypeScript and JSX to JavaScript with configurable target ES version.
+
+### Minifier
+Minify JavaScript with optional mangling and compression, returning compression stats.
+
+## Hooks
+
+| Event | Handler |
+|-------|---------|
+| `UserPromptSubmit` | Keyword detection, background notifications |
+| `PreToolUse` | README injection, tool validation |
+| `PostToolUse` | Comment checker, background task tracking |
+| `SessionStart` | State initialization |
+| `Stop` | Continuation control |
 
 ## Development
 
 ```bash
 # Build all crates
-cargo build --workspace
+cargo build --workspace --release
+
+# Build NAPI module
+cd crates/astrape-napi && bun run build
 
 # Run tests
 cargo test --workspace
 
-# Run CLI
-cargo run -p astrape -- agent list
+# Build comment-checker
+cargo build --release -p astrape-comment-checker
 ```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Claude Code                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+          ┌──────────────────────────┼──────────────────────────┐
+          ▼                          ▼                          ▼
+┌───────────────────┐  ┌───────────────────────┐  ┌───────────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │  │  astrape-comment-checker  │
+│  (NAPI Bindings)  │  │     (MCP Server)      │  │    (Comment Detection)    │
+└───────────────────┘  └───────────────────────┘  └───────────────────────────┘
+          │                          │
+          │              ┌───────────┴───────────┐
+          │              ▼                       ▼
+          │    ┌─────────────────┐    ┌─────────────────┐
+          │    │  astrape-tools  │    │   astrape-oxc   │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │
+          │    └─────────────────┘    └─────────────────┘
+          │
+          ├──────────────────┬──────────────────┬──────────────────┐
+          ▼                  ▼                  ▼                  ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  astrape-hooks  │ │ astrape-agents  │ │astrape-features │ │  astrape-hook   │
+│   (22 Hooks)    │ │  (32 Agents)    │ │ (Skills/Router) │ │ (Keyword Match) │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            astrape (CLI)                                    │
+│                     Git Hooks · Typo Check · Dev Tools                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+The plugin uses native Rust NAPI bindings for performance-critical operations:
+
+| Crate | Description |
+|-------|-------------|
+| **astrape** | Standalone CLI for git hooks and dev tools |
+| **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
+| **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
+| **astrape-tools** | LSP client, tool registry, and orchestration utilities |
+| **astrape-hook** | Keyword detection and pattern matching |
+| **astrape-hooks** | Hook implementations (22 hooks) |
+| **astrape-agents** | Agent definitions and prompt loading |
+| **astrape-features** | Model routing, skills, state management |
+| **astrape-napi** | Node.js bindings exposing Rust to the plugin |
+| **astrape-comment-checker** | Tree-sitter based comment detection |
+| **astrape-core** | Shared types and utilities |
+| **astrape-config** | Configuration loading and management |

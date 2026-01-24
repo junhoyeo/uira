@@ -132,9 +132,9 @@ impl SdkBridge {
 
     fn find_bridge_path() -> SdkResult<String> {
         let candidates = [
-            "./bridge/dist/index.js",
-            "../bridge/dist/index.js",
-            "../../bridge/dist/index.js",
+            "./packages/bridge/dist/index.js",
+            "../packages/bridge/dist/index.js",
+            "../../packages/bridge/dist/index.js",
         ];
 
         for candidate in &candidates {
@@ -144,7 +144,7 @@ impl SdkBridge {
         }
 
         Err(SdkError::Bridge(
-            "Could not find bridge. Run 'npm run build' in bridge/ directory".to_string(),
+            "Could not find bridge. Run 'npm run build' in packages/bridge/ directory".to_string(),
         ))
     }
 

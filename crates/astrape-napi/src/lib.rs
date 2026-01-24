@@ -472,6 +472,93 @@ pub fn list_skills() -> Vec<String> {
 }
 
 // ============================================================================
+// Background Task Notification Bindings
+// ============================================================================
+
+#[napi(object)]
+pub struct JsBackgroundTask {
+    pub id: String,
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub description: String,
+    pub agent: String,
+    pub status: String,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+#[napi(object)]
+pub struct JsNotificationResult {
+    pub has_notifications: bool,
+    pub message: Option<String>,
+    pub notification_count: u32,
+}
+
+/// Check for pending background task notifications for a session
+#[napi]
+pub fn check_notifications(session_id: String) -> JsNotificationResult {
+    let result = astrape_hooks::hooks::background_notification::check_background_notifications(
+        &session_id,
+        None,
+    );
+    JsNotificationResult {
+        has_notifications: result.has_notifications,
+        message: result.message,
+        notification_count: result.tasks.len() as u32,
+    }
+}
+
+/// Process a background task event (task.completed or task.failed)
+#[napi]
+pub fn notify_background_event(event_json: String) {
+    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&event_json) {
+        astrape_hooks::hooks::background_notification::handle_background_event_public(&event);
+    }
+}
+
+/// Register a background task for tracking
+#[napi]
+pub fn register_background_task(
+    task_id: String,
+    session_id: String,
+    parent_session_id: String,
+    description: String,
+    agent: String,
+) {
+    use astrape_hooks::hooks::background_notification::{
+        background_tasks_dir, BackgroundTask, BackgroundTaskStatus,
+    };
+    use chrono::Utc;
+
+    let task = BackgroundTask {
+        id: task_id.clone(),
+        session_id,
+        parent_session_id,
+        description,
+        prompt: String::new(),
+        agent,
+        status: BackgroundTaskStatus::Running,
+        queued_at: None,
+        started_at: Utc::now(),
+        completed_at: None,
+        result: None,
+        error: None,
+        progress: None,
+        concurrency_key: None,
+        parent_model: None,
+    };
+
+    // Persist to disk
+    if let Some(tasks_dir) = background_tasks_dir() {
+        let _ = std::fs::create_dir_all(&tasks_dir);
+        if let Ok(json) = serde_json::to_string_pretty(&task) {
+            let path = tasks_dir.join(format!("{}.json", &task_id));
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

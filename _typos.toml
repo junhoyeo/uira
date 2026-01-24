@@ -1,4 +1,5 @@
 [default.extend-words]
-teh = "teh"
+preceeding = "preceeding"
+trivias = "trivias"
 unparseable = "unparseable"
-preceeding = "preceeding" # Typo in Claude Code
+teh = "teh"

@@ -10,6 +10,7 @@ pub mod keyword_detector;
 pub mod learner;
 pub mod non_interactive_env;
 pub mod notepad;
+pub mod orchestrator_constants;
 pub mod persistent_mode;
 pub mod plugin_patterns;
 pub mod preemptive_compaction;
@@ -41,10 +42,11 @@ pub use autopilot::{
     AutopilotState, AUTOPILOT_STATE_FILE,
 };
 pub use background_notification::{
-    check_background_notifications, process_background_notification, BackgroundNotificationHook,
-    BackgroundNotificationHookConfig, BackgroundNotificationHookInput,
-    BackgroundNotificationHookOutput, BackgroundNotificationManager, BackgroundTask,
-    BackgroundTaskStatus, NotificationCheckResult, TaskProgress,
+    background_tasks_dir, check_background_notifications, handle_background_event_public,
+    process_background_notification, BackgroundNotificationHook, BackgroundNotificationHookConfig,
+    BackgroundNotificationHookInput, BackgroundNotificationHookOutput,
+    BackgroundNotificationManager, BackgroundTask, BackgroundTaskStatus, NotificationCheckResult,
+    TaskProgress, MANAGER,
 };
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
 pub use directory_readme_injector::{
@@ -79,6 +81,11 @@ pub use notepad::{
     NotepadConfig, NotepadHook, NotepadStats, PriorityContextResult, PruneResult,
     DEFAULT_NOTEPAD_CONFIG, MANUAL_HEADER, NOTEPAD_FILENAME, PRIORITY_HEADER,
     WORKING_MEMORY_HEADER,
+};
+pub use orchestrator_constants::{
+    boulder_continuation_prompt, is_allowed_path, is_source_file, is_write_edit_tool,
+    orchestrator_delegation_required, ALLOWED_PATH_PATTERNS, DIRECT_WORK_REMINDER,
+    SINGLE_TASK_DIRECTIVE, VERIFICATION_REMINDER, WARNED_EXTENSIONS, WRITE_EDIT_TOOLS,
 };
 pub use persistent_mode::{
     check_persistent_modes, reset_todo_continuation_attempts, PersistentMode, PersistentModeHook,

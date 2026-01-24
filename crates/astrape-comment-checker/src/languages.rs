@@ -64,8 +64,8 @@ impl LanguageRegistry {
         match name {
             "python" => Some(tree_sitter_python::LANGUAGE.into()),
             "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
-            "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-            "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
+            "typescript" => Some(tree_sitter_typescript_codemod::LANGUAGE_TYPESCRIPT.into()),
+            "tsx" => Some(tree_sitter_typescript_codemod::LANGUAGE_TSX.into()),
             "go" => Some(tree_sitter_go::LANGUAGE.into()),
             "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
             "c" => Some(tree_sitter_c::LANGUAGE.into()),

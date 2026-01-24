@@ -201,7 +201,7 @@ impl StdioMcpClientBuilder {
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut client = StdioMcpClient::builder("npx")
-///     .args(["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+///     .args(["-y", "@anthropic/context7-mcp"])
 ///     .build();
 ///
 /// client.connect().await?;
@@ -248,7 +248,7 @@ impl StdioMcpClient {
     /// use astrape_mcp::client::StdioMcpClient;
     ///
     /// let client = StdioMcpClient::builder("npx")
-    ///     .args(["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+    ///     .args(["-y", "@anthropic/context7-mcp"])
     ///     .build();
     /// ```
     pub fn builder<S: Into<String>>(command: S) -> StdioMcpClientBuilder {
