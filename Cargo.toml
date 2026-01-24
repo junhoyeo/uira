@@ -15,6 +15,7 @@ members = [
   "crates/astrape-tools",
   "crates/astrape-config",
   "crates/astrape-mcp",
+  "crates/astrape-mcp-server",
 ]
 
 [workspace.package]

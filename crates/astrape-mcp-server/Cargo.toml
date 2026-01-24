@@ -1,0 +1,21 @@
+[package]
+name = "astrape-mcp-server"
+description = "MCP server exposing LSP and AST-grep tools for Claude Code"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "astrape-mcp"
+path = "src/main.rs"
+
+[dependencies]
+astrape-tools = { path = "../astrape-tools" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

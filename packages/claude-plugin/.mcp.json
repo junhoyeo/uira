@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "astrape-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/../../target/release/astrape-mcp",
+      "args": [],
+      "env": {}
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/context7-mcp"],
+      "env": {}
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${HOME}"],
+      "env": {}
+    }
+  }
+}
