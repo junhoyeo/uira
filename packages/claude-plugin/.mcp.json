@@ -9,11 +9,6 @@
       "command": "npx",
       "args": ["-y", "@anthropic/context7-mcp"],
       "env": {}
-    },
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${HOME}"],
-      "env": {}
     }
   }
 }
