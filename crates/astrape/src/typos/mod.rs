@@ -279,7 +279,7 @@ impl TyposChecker {
 
     fn start_server(&self) -> Result<()> {
         Command::new("opencode")
-            .args(["--server"])
+            .args(["serve"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
