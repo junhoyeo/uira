@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "astrape",
+  "description": "Native Rust multi-agent orchestration - high-performance hooks, 32 agents, intelligent model routing",
+  "owner": {
+    "name": "Junho Yeo",
+    "email": "i@junho.io"
+  },
+  "plugins": [
+    {
+      "name": "astrape",
+      "description": "Native Rust-powered Claude Code plugin with high-performance NAPI hooks, 32 agent variants, and intelligent model routing.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Junho Yeo",
+        "email": "i@junho.io"
+      },
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/junhoyeo/astrape",
+      "tags": ["multi-agent", "orchestration", "native", "rust", "napi", "high-performance"]
+    }
+  ]
+}
