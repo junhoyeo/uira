@@ -839,6 +839,11 @@ impl RalphHook {
         }
 
         let config = astrape_config::load_config(Some(&config_path)).ok()?;
+
+        if !config.goals.auto_verify {
+            return None;
+        }
+
         let goals = &config.goals.goals;
 
         if goals.is_empty() {
