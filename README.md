@@ -56,8 +56,8 @@ agents:
 
 ```bash
 # Provider preference (default: openai)
-# Supported: openai, google (anthropic not yet implemented)
-PREFERRED_PROVIDER=openai|google
+# Options: openai, google (anthropic not yet implemented)
+PREFERRED_PROVIDER=openai
 
 # Model mapping for legacy mode
 BIG_MODEL=gpt-4.1              # Maps Claude Sonnet
