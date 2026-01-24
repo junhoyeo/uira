@@ -332,11 +332,14 @@ fn format_command(check: bool, files: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    // Filter non_rust to only include JS/TS files for oxfmt
+    // Filter non_rust to only include JS/TS files or directories for oxfmt
     let js_ts_extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
     let js_ts_files: Vec<&String> = non_rust
         .into_iter()
-        .filter(|p| js_ts_extensions.iter().any(|ext| p.ends_with(ext)))
+        .filter(|p| {
+            // Allow directories (oxfmt can handle them)
+            std::path::Path::new(p).is_dir() || js_ts_extensions.iter().any(|ext| p.ends_with(ext))
+        })
         .collect();
 
     if files.is_empty() || !js_ts_files.is_empty() {
