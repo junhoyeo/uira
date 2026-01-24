@@ -439,7 +439,7 @@ Just respond with the single word, nothing else."#,
             if !passed_user_message {
                 continue;
             }
-            let is_assistant = msg.info.role.as_deref().map_or(true, |r| r == "assistant");
+            let is_assistant = msg.info.role.as_deref().is_none_or(|r| r == "assistant");
             if !is_assistant {
                 continue;
             }

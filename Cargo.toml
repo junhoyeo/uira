@@ -6,6 +6,7 @@ members = [
     "crates/astrape-claude",
     "crates/astrape-napi",
     "crates/astrape-sdk",
+    "crates/astrape-comment-checker",
     "crates/astrape",
 ]
 
@@ -22,6 +23,7 @@ astrape-core = { path = "crates/astrape-core" }
 astrape-hook = { path = "crates/astrape-hook" }
 astrape-claude = { path = "crates/astrape-claude" }
 astrape-sdk = { path = "crates/astrape-sdk" }
+astrape-comment-checker = { path = "crates/astrape-comment-checker" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
