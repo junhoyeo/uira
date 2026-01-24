@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
+use crate::hooks::ralph::RalphHook;
 use crate::hooks::todo_continuation::TodoContinuationHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
@@ -202,6 +203,22 @@ impl UltraworkHook {
         } else {
             None
         }
+    }
+
+    /// Check if ultrawork should defer to ralph
+    pub fn should_defer_to_ralph(directory: Option<&str>) -> bool {
+        if let Some(state) = Self::read_state(directory) {
+            if state.linked_to_ralph == Some(true) {
+                // Check if ralph is still active
+                if RalphHook::read_state(directory)
+                    .map(|s| s.active)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Check if ultrawork should be reinforced

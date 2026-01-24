@@ -3,6 +3,7 @@ pub mod astrape_orchestrator;
 pub mod auto_slash_command;
 pub mod autopilot;
 pub mod background_notification;
+pub mod circuit_breaker;
 pub mod directory_readme_injector;
 pub mod empty_message_sanitizer;
 pub mod keyword_detector;
@@ -45,6 +46,7 @@ pub use background_notification::{
     BackgroundNotificationHookOutput, BackgroundNotificationManager, BackgroundTask,
     BackgroundTaskStatus, NotificationCheckResult, TaskProgress,
 };
+pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
 pub use directory_readme_injector::{
     clear_injected_paths, get_readmes_for_path, load_injected_paths, save_injected_paths,
     DirectoryReadmeInjectorHook, InjectedPathsData, README_FILENAME, TRACKED_TOOLS,
@@ -95,7 +97,10 @@ pub use preemptive_compaction::{
     COMPACTION_SUCCESS_MESSAGE, CONTEXT_CRITICAL_MESSAGE, CONTEXT_WARNING_MESSAGE,
     CRITICAL_THRESHOLD, DEFAULT_THRESHOLD, MAX_WARNINGS, MIN_TOKENS_FOR_COMPACTION,
 };
-pub use ralph::{RalphHook, RalphOptions, RalphState};
+pub use ralph::{
+    CompletionSignal, CompletionSignals, IterationRecord, RalphHook, RalphOptions, RalphProgress,
+    RalphState, RalphStatusBlock, RalphStatusValue, SignalType, TestsStatus, WorkType,
+};
 pub use recovery::{
     detect_context_limit_error, detect_edit_error, detect_recoverable_error,
     handle_context_window_recovery, handle_edit_error_recovery, handle_recovery,

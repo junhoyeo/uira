@@ -662,7 +662,6 @@ Your response (one word per line, {} lines total):"#,
 
         Ok(())
     }
-
 }
 
 impl Default for TyposChecker {

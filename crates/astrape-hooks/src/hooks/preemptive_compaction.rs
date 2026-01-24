@@ -493,6 +493,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
         let ctx = HookContext::new(Some("sess".to_string()), "/tmp".to_string());
@@ -531,6 +532,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
         let ctx = HookContext::new(Some("sess-cooldown".to_string()), "/tmp".to_string());

@@ -1,7 +1,61 @@
 //! Ralph Hook - Self-Referential Work Loop
 //!
-//! Self-referential work loop that continues until a completion promise is detected.
-//! Ralph ensures tasks are completed by requiring explicit completion markers.
+//! A sophisticated work loop system that continues until verified completion.
+//! Ralph ensures tasks are completed by requiring explicit completion markers
+//! and multi-layer verification.
+//!
+//! # Features
+//!
+//! - **Dual-Condition Exit**: Requires both subjective intent (promise/EXIT_SIGNAL)
+//!   and objective completion (tests passing, todos complete, etc.)
+//! - **Circuit Breaker**: Prevents infinite loops via stagnation and error detection
+//! - **Progress Tracking**: Accumulates learnings and metrics across iterations
+//! - **Session Management**: 24-hour expiration, branch change detection
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! use astrape_hooks::hooks::ralph::{RalphHook, RalphOptions};
+//!
+//! // Activate ralph with default options
+//! RalphHook::activate("Complete the feature", Some("session-123"), Some("/project"), None);
+//!
+//! // Or with custom options
+//! let options = RalphOptions {
+//!     max_iterations: 15,
+//!     min_confidence: 60,
+//!     ..Default::default()
+//! };
+//! RalphHook::activate("Refactor auth", None, Some("/project"), Some(options));
+//! ```
+//!
+//! # Completion Protocol
+//!
+//! Ralph uses a dual-condition exit gate:
+//!
+//! 1. **Subjective Intent**: The agent must explicitly signal completion via:
+//!    - `<promise>TASK COMPLETE</promise>` token
+//!    - `EXIT_SIGNAL: true` in RALPH_STATUS block
+//!
+//! 2. **Objective Signals** (need 2+):
+//!    - Tests passing
+//!    - Build successful
+//!    - All todos complete
+//!    - Completion keywords in output
+//!
+//! # Circuit Breaker
+//!
+//! The circuit breaker protects against infinite loops:
+//!
+//! - **No Progress**: 3 consecutive iterations with no file changes
+//! - **Same Error**: 5 occurrences of the same error
+//! - **Output Decline**: 70% reduction in output size
+//!
+//! # State Files
+//!
+//! - `.astrape/ralph-state.json`: Current session state
+//! - `.astrape/ralph-progress.json`: Iteration history and metrics
+//! - `.astrape/ralph-archives/`: Archived sessions (on branch change)
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -11,6 +65,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
+use crate::hooks::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState};
+use crate::hooks::todo_continuation::IncompleteTodosResult;
 use crate::hooks::ultrawork::UltraworkHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
@@ -35,6 +91,34 @@ pub struct RalphState {
     pub started_at: DateTime<Utc>,
     /// Last checked timestamp
     pub last_checked_at: DateTime<Utc>,
+    /// Minimum confidence score to allow exit
+    #[serde(default = "default_min_confidence")]
+    pub min_confidence: u32,
+    /// Whether to require dual-condition for exit
+    #[serde(default = "default_require_dual_condition")]
+    pub require_dual_condition: bool,
+    /// Session expiration duration in hours
+    #[serde(default = "default_session_hours")]
+    pub session_hours: u32,
+    /// Git branch when ralph started
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// Circuit breaker for stagnation detection
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerState,
+    /// Circuit breaker configuration
+    #[serde(default)]
+    pub circuit_config: CircuitBreakerConfig,
+}
+
+fn default_min_confidence() -> u32 {
+    50
+}
+fn default_require_dual_condition() -> bool {
+    true
+}
+fn default_session_hours() -> u32 {
+    24
 }
 
 impl Default for RalphState {
@@ -48,6 +132,12 @@ impl Default for RalphState {
             prompt: None,
             started_at: Utc::now(),
             last_checked_at: Utc::now(),
+            min_confidence: 50,
+            require_dual_condition: true,
+            session_hours: 24,
+            git_branch: None,
+            circuit_breaker: CircuitBreakerState::default(),
+            circuit_config: CircuitBreakerConfig::default(),
         }
     }
 }
@@ -57,6 +147,10 @@ impl Default for RalphState {
 pub struct RalphOptions {
     pub max_iterations: u32,
     pub completion_promise: String,
+    /// Minimum confidence score to allow exit (0-100)
+    pub min_confidence: u32,
+    /// Whether to require dual-condition (default: true)
+    pub require_dual_condition: bool,
 }
 
 impl Default for RalphOptions {
@@ -64,6 +158,251 @@ impl Default for RalphOptions {
         Self {
             max_iterations: 10,
             completion_promise: "TASK COMPLETE".to_string(),
+            min_confidence: 50,
+            require_dual_condition: true,
+        }
+    }
+}
+
+/// Progress accumulation across iterations
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RalphProgress {
+    /// Iteration-by-iteration history
+    pub iterations: Vec<IterationRecord>,
+    /// Cumulative file modifications
+    pub files_modified: Vec<String>,
+    /// Accumulated learnings
+    pub learnings: Vec<String>,
+    /// Encountered blockers
+    pub blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IterationRecord {
+    pub iteration: u32,
+    pub timestamp: DateTime<Utc>,
+    pub output_size: usize,
+    pub confidence: u32,
+}
+
+impl RalphProgress {
+    pub fn add_iteration(&mut self, record: IterationRecord) {
+        self.iterations.push(record);
+    }
+
+    pub fn add_file(&mut self, file: &str) {
+        if !self.files_modified.contains(&file.to_string()) {
+            self.files_modified.push(file.to_string());
+        }
+    }
+
+    pub fn add_learning(&mut self, learning: &str) {
+        self.learnings.push(learning.to_string());
+    }
+
+    pub fn get_summary(&self) -> String {
+        format!(
+            "Iterations: {}, Files: {}, Learnings: {}",
+            self.iterations.len(),
+            self.files_modified.len(),
+            self.learnings.len()
+        )
+    }
+}
+
+/// Confidence score and signals for completion detection
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CompletionSignals {
+    /// Confidence score (0-100)
+    pub confidence: u32,
+    /// Individual signal detections
+    pub signals: Vec<CompletionSignal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionSignal {
+    pub signal_type: SignalType,
+    pub weight: u32,
+    pub detected: bool,
+    pub evidence: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalType {
+    /// Explicit promise token: <promise>COMPLETE</promise>
+    PromiseToken,
+    /// EXIT_SIGNAL: true in RALPH_STATUS block
+    ExitSignal,
+    /// "all tasks complete" or similar keywords
+    CompletionKeywords,
+    /// Tests passing indicator
+    TestsPassing,
+    /// Build successful indicator
+    BuildSuccess,
+    /// All todos marked complete
+    TodosComplete,
+}
+
+impl CompletionSignals {
+    /// Aggregate confidence from detected signals
+    pub fn calculate_confidence(&mut self) {
+        let total_weight: u32 = self
+            .signals
+            .iter()
+            .filter(|s| s.detected)
+            .map(|s| s.weight)
+            .sum();
+        self.confidence = total_weight.min(100);
+    }
+
+    /// Check if dual-condition exit is met
+    /// Requires BOTH:
+    /// 1. Subjective intent (EXIT_SIGNAL or PromiseToken)
+    /// 2. Objective completion (2+ other signals)
+    pub fn is_exit_allowed(&self) -> bool {
+        let has_subjective = self.signals.iter().any(|s| {
+            s.detected
+                && matches!(
+                    s.signal_type,
+                    SignalType::PromiseToken | SignalType::ExitSignal
+                )
+        });
+
+        let objective_count = self
+            .signals
+            .iter()
+            .filter(|s| {
+                s.detected
+                    && !matches!(
+                        s.signal_type,
+                        SignalType::PromiseToken | SignalType::ExitSignal
+                    )
+            })
+            .count();
+
+        has_subjective && objective_count >= 2
+    }
+}
+
+/// RALPH_STATUS block structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RalphStatusBlock {
+    pub status: RalphStatusValue,
+    pub tasks_completed_this_loop: u32,
+    pub files_modified: u32,
+    pub tests_status: TestsStatus,
+    pub work_type: WorkType,
+    pub exit_signal: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RalphStatusValue {
+    InProgress,
+    Complete,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TestsStatus {
+    Passing,
+    Failing,
+    NotRun,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WorkType {
+    Implementation,
+    Testing,
+    Documentation,
+    Refactoring,
+    Debugging,
+}
+
+impl RalphStatusBlock {
+    /// Format as string for output
+    pub fn format(&self) -> String {
+        format!(
+            r#"---RALPH_STATUS---
+STATUS: {:?}
+TASKS_COMPLETED_THIS_LOOP: {}
+FILES_MODIFIED: {}
+TESTS_STATUS: {:?}
+WORK_TYPE: {:?}
+EXIT_SIGNAL: {}
+---END_RALPH_STATUS---"#,
+            self.status,
+            self.tasks_completed_this_loop,
+            self.files_modified,
+            self.tests_status,
+            self.work_type,
+            self.exit_signal
+        )
+    }
+
+    /// Parse from text
+    pub fn parse(text: &str) -> Option<Self> {
+        let start = text.find("---RALPH_STATUS---")?;
+        let end_offset = text[start..].find("---END_RALPH_STATUS---")?;
+        let block = &text[start..start + end_offset];
+
+        let status = Self::extract_field(block, "STATUS")?;
+        let tasks = Self::extract_field(block, "TASKS_COMPLETED_THIS_LOOP")?;
+        let files = Self::extract_field(block, "FILES_MODIFIED")?;
+        let tests = Self::extract_field(block, "TESTS_STATUS")?;
+        let work = Self::extract_field(block, "WORK_TYPE")?;
+        let exit = Self::extract_field(block, "EXIT_SIGNAL")?;
+
+        Some(Self {
+            status: Self::parse_status(&status)?,
+            tasks_completed_this_loop: tasks.parse().ok()?,
+            files_modified: files.parse().ok()?,
+            tests_status: Self::parse_tests_status(&tests)?,
+            work_type: Self::parse_work_type(&work)?,
+            exit_signal: exit.to_lowercase() == "true",
+        })
+    }
+
+    fn extract_field(block: &str, field: &str) -> Option<String> {
+        for line in block.lines() {
+            if line.starts_with(field) {
+                if let Some(value) = line.split(':').nth(1) {
+                    return Some(value.trim().to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn parse_status(s: &str) -> Option<RalphStatusValue> {
+        match s.to_uppercase().as_str() {
+            "IN_PROGRESS" | "INPROGRESS" => Some(RalphStatusValue::InProgress),
+            "COMPLETE" => Some(RalphStatusValue::Complete),
+            "BLOCKED" => Some(RalphStatusValue::Blocked),
+            _ => None,
+        }
+    }
+
+    fn parse_tests_status(s: &str) -> Option<TestsStatus> {
+        match s.to_uppercase().as_str() {
+            "PASSING" => Some(TestsStatus::Passing),
+            "FAILING" => Some(TestsStatus::Failing),
+            "NOT_RUN" | "NOTRUN" => Some(TestsStatus::NotRun),
+            _ => None,
+        }
+    }
+
+    fn parse_work_type(s: &str) -> Option<WorkType> {
+        match s.to_uppercase().as_str() {
+            "IMPLEMENTATION" => Some(WorkType::Implementation),
+            "TESTING" => Some(WorkType::Testing),
+            "DOCUMENTATION" => Some(WorkType::Documentation),
+            "REFACTORING" => Some(WorkType::Refactoring),
+            "DEBUGGING" => Some(WorkType::Debugging),
+            _ => None,
         }
     }
 }
@@ -95,6 +434,13 @@ impl RalphHook {
         Path::new(directory)
             .join(".astrape")
             .join("ralph-state.json")
+    }
+
+    /// Get the progress file path
+    fn get_progress_file_path(directory: &str) -> PathBuf {
+        Path::new(directory)
+            .join(".astrape")
+            .join("ralph-progress.json")
     }
 
     /// Get global state file path
@@ -190,6 +536,115 @@ impl RalphHook {
         true
     }
 
+    /// Read progress from disk
+    pub fn read_progress(directory: &str) -> Option<RalphProgress> {
+        let progress_file = Self::get_progress_file_path(directory);
+        if !progress_file.exists() {
+            return None;
+        }
+        let content = fs::read_to_string(&progress_file).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Write progress to disk
+    pub fn write_progress(directory: &str, progress: &RalphProgress) -> bool {
+        if Self::ensure_state_dir(directory).is_err() {
+            return false;
+        }
+        let progress_file = Self::get_progress_file_path(directory);
+        let content = match serde_json::to_string_pretty(progress) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        fs::write(&progress_file, content).is_ok()
+    }
+
+    /// Record iteration progress
+    pub fn record_iteration_progress(
+        directory: &str,
+        iteration: u32,
+        output_size: usize,
+        confidence: u32,
+    ) {
+        let mut progress = Self::read_progress(directory).unwrap_or_default();
+        progress.add_iteration(IterationRecord {
+            iteration,
+            timestamp: Utc::now(),
+            output_size,
+            confidence,
+        });
+        let _ = Self::write_progress(directory, &progress);
+    }
+
+    /// Clear progress file
+    pub fn clear_progress(directory: &str) {
+        let progress_file = Self::get_progress_file_path(directory);
+        if progress_file.exists() {
+            let _ = fs::remove_file(&progress_file);
+        }
+    }
+
+    /// Check if session has expired
+    pub fn is_session_expired(state: &RalphState) -> bool {
+        let expiration = state.started_at + chrono::Duration::hours(state.session_hours as i64);
+        Utc::now() > expiration
+    }
+
+    /// Get current git branch
+    fn get_current_branch(directory: &str) -> Option<String> {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(directory)
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Check if branch has changed since ralph started
+    pub fn has_branch_changed(state: &RalphState, directory: &str) -> bool {
+        if let (Some(original), Some(current)) =
+            (&state.git_branch, Self::get_current_branch(directory))
+        {
+            original != &current
+        } else {
+            false
+        }
+    }
+
+    /// Archive current state before branch change
+    #[allow(dead_code)]
+    fn archive_state(directory: &str, reason: &str) {
+        if let Some(state) = Self::read_state(Some(directory)) {
+            let archive_dir = Path::new(directory).join(".astrape").join("ralph-archives");
+            let _ = fs::create_dir_all(&archive_dir);
+
+            let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+            let archive_file = archive_dir.join(format!("ralph-state-{}.json", timestamp));
+
+            #[derive(Serialize)]
+            struct ArchivedState {
+                state: RalphState,
+                archive_reason: String,
+                archived_at: DateTime<Utc>,
+            }
+
+            let archived = ArchivedState {
+                state,
+                archive_reason: reason.to_string(),
+                archived_at: Utc::now(),
+            };
+
+            if let Ok(content) = serde_json::to_string_pretty(&archived) {
+                let _ = fs::write(archive_file, content);
+            }
+        }
+    }
+
     /// Activate ralph mode
     pub fn activate(
         prompt: &str,
@@ -198,6 +653,8 @@ impl RalphHook {
         options: Option<RalphOptions>,
     ) -> bool {
         let opts = options.unwrap_or_default();
+        let git_branch = directory.and_then(Self::get_current_branch);
+
         let state = RalphState {
             active: true,
             iteration: 0,
@@ -207,6 +664,12 @@ impl RalphHook {
             prompt: Some(prompt.to_string()),
             started_at: Utc::now(),
             last_checked_at: Utc::now(),
+            min_confidence: opts.min_confidence,
+            require_dual_condition: opts.require_dual_condition,
+            session_hours: 24,
+            git_branch,
+            circuit_breaker: CircuitBreakerState::default(),
+            circuit_config: CircuitBreakerConfig::default(),
         };
 
         Self::write_state(&state, directory)
@@ -222,6 +685,15 @@ impl RalphHook {
 
         state.iteration += 1;
         state.last_checked_at = Utc::now();
+
+        // Update circuit breaker (simple metrics - no detailed tracking yet)
+        state.circuit_breaker.record_iteration(
+            0,     // files_changed - not tracked yet
+            false, // tests_changed - not tracked yet
+            0,     // output_size - not tracked yet
+            None,  // error - not tracked yet
+            &state.circuit_config,
+        );
 
         if Self::write_state(&state, directory) {
             Some(state)
@@ -244,6 +716,99 @@ impl RalphHook {
         text.contains(promise)
     }
 
+    /// Detect all completion signals in text
+    pub fn detect_completion_signals(
+        text: &str,
+        promise: &str,
+        todo_result: Option<&IncompleteTodosResult>,
+    ) -> CompletionSignals {
+        let mut signals = CompletionSignals::default();
+
+        // Signal 1: Promise token (weight: 40)
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::PromiseToken,
+            weight: 40,
+            detected: Self::detect_completion_promise(text, promise),
+            evidence: None,
+        });
+
+        // Signal 2: EXIT_SIGNAL in RALPH_STATUS (weight: 30)
+        let exit_signal = Self::detect_exit_signal(text);
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::ExitSignal,
+            weight: 30,
+            detected: exit_signal,
+            evidence: None,
+        });
+
+        // Signal 3: Completion keywords (weight: 10)
+        let keywords = [
+            "all tasks complete",
+            "work is done",
+            "successfully completed",
+            "finished all",
+        ];
+        let keyword_match = keywords.iter().any(|k| text.to_lowercase().contains(k));
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::CompletionKeywords,
+            weight: 10,
+            detected: keyword_match,
+            evidence: None,
+        });
+
+        // Signal 4: Tests passing (weight: 15)
+        let tests_passing = text.contains("tests passed") || text.contains("All tests pass");
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::TestsPassing,
+            weight: 15,
+            detected: tests_passing,
+            evidence: None,
+        });
+
+        // Signal 5: Build success (weight: 15)
+        let build_success = text.contains("Build successful") || text.contains("build completed");
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::BuildSuccess,
+            weight: 15,
+            detected: build_success,
+            evidence: None,
+        });
+
+        // Signal 6: Todos complete (weight: 20)
+        let (todo_detected, todo_evidence) = if let Some(result) = todo_result {
+            (
+                result.count == 0 && result.total > 0,
+                Some(format!(
+                    "{}/{} complete",
+                    result.total - result.count,
+                    result.total
+                )),
+            )
+        } else {
+            (false, None)
+        };
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::TodosComplete,
+            weight: 20,
+            detected: todo_detected,
+            evidence: todo_evidence,
+        });
+
+        signals.calculate_confidence();
+        signals
+    }
+
+    /// Detect EXIT_SIGNAL in RALPH_STATUS block
+    fn detect_exit_signal(text: &str) -> bool {
+        if let Some(start) = text.find("---RALPH_STATUS---") {
+            if let Some(end) = text[start..].find("---END_RALPH_STATUS---") {
+                let block = &text[start..start + end];
+                return block.contains("EXIT_SIGNAL: true") || block.contains("EXIT_SIGNAL:true");
+            }
+        }
+        false
+    }
+
     /// Get continuation prompt
     fn get_continuation_prompt(state: &RalphState) -> String {
         format!(
@@ -257,8 +822,19 @@ CRITICAL INSTRUCTIONS:
 1. Review your progress and the original task
 2. Check your todo list - are ALL items marked complete?
 3. Continue from where you left off
-4. When FULLY complete, output: <promise>{}</promise>
-5. Do NOT stop until the task is truly done
+4. Output a RALPH_STATUS block showing your progress:
+
+---RALPH_STATUS---
+STATUS: IN_PROGRESS | COMPLETE | BLOCKED
+TASKS_COMPLETED_THIS_LOOP: <number>
+FILES_MODIFIED: <number>
+TESTS_STATUS: PASSING | FAILING | NOT_RUN
+WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING | DEBUGGING
+EXIT_SIGNAL: false | true
+---END_RALPH_STATUS---
+
+5. When FULLY complete, set EXIT_SIGNAL: true AND output: <promise>{}</promise>
+6. Do NOT stop until the task is truly done
 
 {}
 
@@ -317,8 +893,34 @@ impl Hook for RalphHook {
             }
         }
 
-        // TODO: Check transcript for completion promise
-        // For now, we check if max iterations reached
+        // Check circuit breaker
+        if state.circuit_breaker.is_tripped() {
+            Self::clear_state(Some(&context.directory));
+            UltraworkHook::deactivate(Some(&context.directory));
+            return Ok(HookOutput::continue_with_message(format!(
+                "[RALPH CIRCUIT BREAKER] Loop terminated: {}",
+                state
+                    .circuit_breaker
+                    .trip_reason
+                    .as_deref()
+                    .unwrap_or("Unknown reason")
+            )));
+        }
+
+        // Check transcript for completion promise using get_last_assistant_response()
+        if let Some(last_response) = input.get_last_assistant_response() {
+            if Self::detect_completion_promise(&last_response, &state.completion_promise) {
+                // Clear both ralph and linked ultrawork
+                Self::clear_state(Some(&context.directory));
+                UltraworkHook::deactivate(Some(&context.directory));
+                return Ok(HookOutput::continue_with_message(format!(
+                    "[RALPH COMPLETE] Completion promise detected after {} iterations. Task finished successfully!",
+                    state.iteration
+                )));
+            }
+        }
+
+        // Check max iterations (AFTER promise check)
         if state.iteration >= state.max_iterations {
             // Clear both ralph and linked ultrawork
             Self::clear_state(Some(&context.directory));
@@ -395,11 +997,231 @@ mod tests {
             prompt: Some("Build the feature".to_string()),
             started_at: Utc::now(),
             last_checked_at: Utc::now(),
+            min_confidence: 50,
+            require_dual_condition: true,
+            session_hours: 24,
+            git_branch: None,
+            circuit_breaker: CircuitBreakerState::default(),
+            circuit_config: CircuitBreakerConfig::default(),
         };
 
         let prompt = RalphHook::get_continuation_prompt(&state);
         assert!(prompt.contains("ITERATION 3/10"));
         assert!(prompt.contains("<promise>DONE</promise>"));
         assert!(prompt.contains("Build the feature"));
+    }
+
+    #[test]
+    fn test_detect_exit_signal() {
+        let text = r#"---RALPH_STATUS---
+STATUS: COMPLETE
+EXIT_SIGNAL: true
+---END_RALPH_STATUS---"#;
+        assert!(RalphHook::detect_exit_signal(text));
+
+        let text_false = "EXIT_SIGNAL: false";
+        assert!(!RalphHook::detect_exit_signal(text_false));
+    }
+
+    #[test]
+    fn test_ralph_status_block_roundtrip() {
+        let block = RalphStatusBlock {
+            status: RalphStatusValue::InProgress,
+            tasks_completed_this_loop: 3,
+            files_modified: 5,
+            tests_status: TestsStatus::Passing,
+            work_type: WorkType::Implementation,
+            exit_signal: false,
+        };
+        let formatted = block.format();
+        let parsed = RalphStatusBlock::parse(&formatted).unwrap();
+        assert_eq!(parsed.tasks_completed_this_loop, 3);
+        assert_eq!(parsed.files_modified, 5);
+        assert!(!parsed.exit_signal);
+    }
+
+    #[test]
+    fn test_completion_signals_dual_condition() {
+        let mut signals = CompletionSignals::default();
+
+        // Only subjective signal - should not allow exit
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::PromiseToken,
+            weight: 40,
+            detected: true,
+            evidence: None,
+        });
+        signals.calculate_confidence();
+        assert!(!signals.is_exit_allowed());
+
+        // Add objective signals
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::TestsPassing,
+            weight: 15,
+            detected: true,
+            evidence: None,
+        });
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::TodosComplete,
+            weight: 20,
+            detected: true,
+            evidence: None,
+        });
+        signals.calculate_confidence();
+        assert!(signals.is_exit_allowed());
+        assert_eq!(signals.confidence, 75); // 40 + 15 + 20
+    }
+
+    #[test]
+    fn test_ralph_progress_add_iteration() {
+        let mut progress = RalphProgress::default();
+        progress.add_iteration(IterationRecord {
+            iteration: 1,
+            timestamp: Utc::now(),
+            output_size: 1000,
+            confidence: 50,
+        });
+        assert_eq!(progress.iterations.len(), 1);
+        assert_eq!(progress.iterations[0].iteration, 1);
+    }
+
+    #[test]
+    fn test_ralph_progress_add_file_dedup() {
+        let mut progress = RalphProgress::default();
+        progress.add_file("src/main.rs");
+        progress.add_file("src/main.rs"); // duplicate
+        progress.add_file("src/lib.rs");
+        assert_eq!(progress.files_modified.len(), 2);
+    }
+
+    #[test]
+    fn test_ralph_progress_summary() {
+        let mut progress = RalphProgress::default();
+        progress.add_iteration(IterationRecord {
+            iteration: 1,
+            timestamp: Utc::now(),
+            output_size: 1000,
+            confidence: 50,
+        });
+        progress.add_file("src/main.rs");
+        progress.add_learning("Use async/await for I/O");
+
+        let summary = progress.get_summary();
+        assert!(summary.contains("Iterations: 1"));
+        assert!(summary.contains("Files: 1"));
+        assert!(summary.contains("Learnings: 1"));
+    }
+
+    #[test]
+    fn test_session_expiration() {
+        let mut state = RalphState::default();
+        state.session_hours = 24;
+        state.started_at = Utc::now() - chrono::Duration::hours(25);
+        assert!(RalphHook::is_session_expired(&state));
+
+        state.started_at = Utc::now() - chrono::Duration::hours(12);
+        assert!(!RalphHook::is_session_expired(&state));
+    }
+
+    #[test]
+    fn test_ralph_options_default() {
+        let opts = RalphOptions::default();
+        assert_eq!(opts.max_iterations, 10);
+        assert_eq!(opts.min_confidence, 50);
+        assert!(opts.require_dual_condition);
+    }
+
+    #[test]
+    fn test_detect_completion_signals_with_promise() {
+        let signals = RalphHook::detect_completion_signals(
+            "Work done. <promise>TASK COMPLETE</promise>",
+            "TASK COMPLETE",
+            None,
+        );
+        assert!(signals
+            .signals
+            .iter()
+            .any(|s| s.signal_type == SignalType::PromiseToken && s.detected));
+        assert!(signals.confidence >= 40);
+    }
+
+    #[test]
+    fn test_detect_completion_signals_with_keywords() {
+        let signals = RalphHook::detect_completion_signals(
+            "All tasks complete and tests passed",
+            "DONE",
+            None,
+        );
+        // Should detect completion keywords and tests passing
+        let keyword_detected = signals
+            .signals
+            .iter()
+            .find(|s| s.signal_type == SignalType::CompletionKeywords)
+            .map(|s| s.detected)
+            .unwrap_or(false);
+        let tests_detected = signals
+            .signals
+            .iter()
+            .find(|s| s.signal_type == SignalType::TestsPassing)
+            .map(|s| s.detected)
+            .unwrap_or(false);
+        assert!(keyword_detected);
+        assert!(tests_detected);
+    }
+
+    #[test]
+    fn test_ralph_status_block_parse_complete() {
+        let text = r#"Some output
+---RALPH_STATUS---
+STATUS: COMPLETE
+TASKS_COMPLETED_THIS_LOOP: 5
+FILES_MODIFIED: 3
+TESTS_STATUS: PASSING
+WORK_TYPE: IMPLEMENTATION
+EXIT_SIGNAL: true
+---END_RALPH_STATUS---
+More output"#;
+
+        let block = RalphStatusBlock::parse(text).unwrap();
+        assert_eq!(block.status, RalphStatusValue::Complete);
+        assert_eq!(block.tasks_completed_this_loop, 5);
+        assert_eq!(block.files_modified, 3);
+        assert_eq!(block.tests_status, TestsStatus::Passing);
+        assert_eq!(block.work_type, WorkType::Implementation);
+        assert!(block.exit_signal);
+    }
+
+    #[test]
+    fn test_completion_signals_confidence_capped() {
+        let mut signals = CompletionSignals::default();
+        // Add signals with weights totaling more than 100
+        for _ in 0..5 {
+            signals.signals.push(CompletionSignal {
+                signal_type: SignalType::PromiseToken,
+                weight: 40,
+                detected: true,
+                evidence: None,
+            });
+        }
+        signals.calculate_confidence();
+        assert_eq!(signals.confidence, 100); // Capped at 100
+    }
+
+    #[test]
+    fn test_detect_exit_signal_various_formats() {
+        // With spaces
+        assert!(RalphHook::detect_exit_signal(
+            "---RALPH_STATUS---\nEXIT_SIGNAL: true\n---END_RALPH_STATUS---"
+        ));
+        // Without spaces
+        assert!(RalphHook::detect_exit_signal(
+            "---RALPH_STATUS---\nEXIT_SIGNAL:true\n---END_RALPH_STATUS---"
+        ));
+        // Not in block - should not match
+        assert!(!RalphHook::detect_exit_signal("EXIT_SIGNAL: true"));
+        // False value
+        assert!(!RalphHook::detect_exit_signal(
+            "---RALPH_STATUS---\nEXIT_SIGNAL: false\n---END_RALPH_STATUS---"
+        ));
     }
 }

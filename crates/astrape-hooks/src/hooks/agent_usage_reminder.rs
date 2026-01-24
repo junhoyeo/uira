@@ -362,6 +362,7 @@ mod tests {
             directory: None,
             stop_reason: None,
             user_requested: None,
+            transcript_path: None,
             extra: HashMap::new(),
         };
 
