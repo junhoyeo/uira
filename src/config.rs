@@ -42,20 +42,12 @@ impl Config {
 
         let pre_commit = HookConfig {
             parallel: true,
-            commands: vec![
-                Command {
-                    name: Some("format".to_string()),
-                    run: "astrape fix {staged_files}".to_string(),
-                    glob: Some("**/*.{js,ts,jsx,tsx,json,css}".to_string()),
-                    stage_fixed: true,
-                },
-                Command {
-                    name: Some("lint".to_string()),
-                    run: "astrape check {staged_files}".to_string(),
-                    glob: Some("**/*.{js,ts,jsx,tsx}".to_string()),
-                    stage_fixed: false,
-                },
-            ],
+            commands: vec![Command {
+                name: Some("lint".to_string()),
+                run: "astrape lint {staged_files}".to_string(),
+                glob: Some("**/*.{js,ts,jsx,tsx}".to_string()),
+                stage_fixed: false,
+            }],
         };
 
         hooks.insert("pre-commit".to_string(), pre_commit);
@@ -79,7 +71,7 @@ mod tests {
 
         let pre_commit = &config.hooks["pre-commit"];
         assert!(pre_commit.parallel);
-        assert_eq!(pre_commit.commands.len(), 2);
+        assert_eq!(pre_commit.commands.len(), 1);
     }
 
     #[test]

@@ -3,10 +3,10 @@ name = "astrape"
 version = "0.1.0"
 edition = "2021"
 authors = ["Junho Yeo <i@junho.io>"]
-description = "Lightning-fast Rust-native git hooks manager with opinionated Biome presets"
+description = "Lightning-fast Rust-native git hooks manager with native oxc integration"
 license = "MIT"
 repository = "https://github.com/junhoyeo/astrape"
-keywords = ["git", "hooks", "biome", "linter", "formatter"]
+keywords = ["git", "hooks", "oxc", "linter", "formatter"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
@@ -34,8 +34,8 @@ thiserror = "2.0"
 colored = "2.1"
 console = "0.15"
 
-# Process execution
-which = "7.0"
+# OXC - Native JS/TS toolchain
+oxc = { version = "0.110", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3.14"

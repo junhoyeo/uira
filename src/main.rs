@@ -1,11 +1,11 @@
-mod biome;
 mod config;
 mod executor;
+mod linter;
 
-use biome::{init_biome_config, BiomeRunner};
 use clap::{Parser, Subcommand};
 use config::Config;
 use executor::HookExecutor;
+use linter::Linter;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -29,11 +29,7 @@ enum Commands {
     Run {
         hook: String,
     },
-    Check {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        files: Vec<String>,
-    },
-    Fix {
+    Lint {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
@@ -46,8 +42,7 @@ fn main() {
         Commands::Init { config } => init_command(&config),
         Commands::Install => install_command(),
         Commands::Run { hook } => run_command(&hook),
-        Commands::Check { files } => check_command(&files),
-        Commands::Fix { files } => fix_command(&files),
+        Commands::Lint { files } => lint_command(&files),
     };
 
     if let Err(e) = result {
@@ -61,19 +56,15 @@ fn init_command(config_path: &str) -> anyhow::Result<()> {
 
     let mut created_files = Vec::new();
 
-    if !std::path::Path::new(config_path).exists() {
+    if !Path::new(config_path).exists() {
         let config = Config::default_config();
         let yaml = config.to_yaml()?;
         fs::write(config_path, yaml)?;
         created_files.push(config_path.to_string());
     }
 
-    if init_biome_config()? {
-        created_files.push("biome.json".to_string());
-    }
-
     if created_files.is_empty() {
-        println!("ℹ️  All config files already exist");
+        println!("ℹ️  Config already exists");
     } else {
         println!("✅ Created:");
         for file in &created_files {
@@ -179,7 +170,7 @@ exec astrape run {}
 fn run_command(hook_name: &str) -> anyhow::Result<()> {
     let config_path = "astrape.yml";
 
-    if !std::path::Path::new(config_path).exists() {
+    if !Path::new(config_path).exists() {
         anyhow::bail!(
             "Config file not found: {}. Run 'astrape init' first.",
             config_path
@@ -200,12 +191,56 @@ fn run_command(hook_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn check_command(files: &[String]) -> anyhow::Result<()> {
-    let runner = BiomeRunner::new();
-    runner.check(files)
+fn lint_command(files: &[String]) -> anyhow::Result<()> {
+    let linter = Linter::default();
+
+    let files_to_lint = if files.is_empty() {
+        collect_files_from_cwd()?
+    } else {
+        files.to_vec()
+    };
+
+    let success = linter.run(&files_to_lint)?;
+
+    if !success {
+        process::exit(1);
+    }
+
+    Ok(())
 }
 
-fn fix_command(files: &[String]) -> anyhow::Result<()> {
-    let runner = BiomeRunner::new();
-    runner.fix(files)
+fn collect_files_from_cwd() -> anyhow::Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_files_recursive(Path::new("."), &mut files)?;
+    Ok(files)
+}
+
+fn collect_files_recursive(dir: &Path, files: &mut Vec<String>) -> anyhow::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+
+    let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if dir_name == "node_modules" || dir_name == ".git" || dir_name == "dist" || dir_name == "build"
+    {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_files_recursive(&path, files)?;
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if matches!(
+                ext,
+                "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+            ) {
+                files.push(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    Ok(())
 }
