@@ -65,17 +65,6 @@ pub fn github_server(token: String) -> McpServerConfig {
     .with_env(env)
 }
 
-/// Create filesystem MCP server config
-pub fn filesystem_server(allowed_dirs: Vec<String>) -> McpServerConfig {
-    let mut args = vec![
-        "-y".to_string(),
-        "@modelcontextprotocol/server-filesystem".to_string(),
-    ];
-    args.extend(allowed_dirs);
-
-    McpServerConfig::new("npx", args)
-}
-
 /// Default MCP servers configuration
 pub fn get_default_mcp_servers(
     exa_api_key: Option<String>,
