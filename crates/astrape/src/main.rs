@@ -541,19 +541,14 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
             sorted_agents.sort_by_key(|(name, _)| name.as_str());
 
             // Group agents by base name
-            let mut groups: std::collections::HashMap<String, Vec<(&String, &astrape_sdk::AgentConfig)>> =
-                std::collections::HashMap::new();
+            let mut groups: std::collections::HashMap<
+                String,
+                Vec<(&String, &astrape_sdk::AgentConfig)>,
+            > = std::collections::HashMap::new();
 
             for (name, config) in &sorted_agents {
-                let base_name = name
-                    .split('-')
-                    .next()
-                    .unwrap_or(name)
-                    .to_string();
-                groups
-                    .entry(base_name)
-                    .or_default()
-                    .push((name, config));
+                let base_name = name.split('-').next().unwrap_or(name).to_string();
+                groups.entry(base_name).or_default().push((name, config));
             }
 
             let mut group_names: Vec<_> = groups.keys().cloned().collect();
@@ -567,12 +562,7 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
                         .model
                         .map(|m| format!(" ({})", m))
                         .unwrap_or_default();
-                    println!(
-                        "    {} {}{}",
-                        "•".dimmed(),
-                        name,
-                        model.dimmed()
-                    );
+                    println!("    {} {}{}", "•".dimmed(), name, model.dimmed());
                 }
                 println!();
             }
@@ -605,14 +595,21 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
 
                 // Show first 500 chars of prompt or full if shorter
                 let prompt_preview = if agent.prompt.len() > 500 {
-                    format!("{}...\n\n[truncated, {} total chars]", &agent.prompt[..500], agent.prompt.len())
+                    format!(
+                        "{}...\n\n[truncated, {} total chars]",
+                        &agent.prompt[..500],
+                        agent.prompt.len()
+                    )
                 } else {
                     agent.prompt.clone()
                 };
                 println!("{}", prompt_preview);
                 Ok(())
             } else {
-                anyhow::bail!("Agent '{}' not found. Use 'astrape agent list' to see available agents.", name);
+                anyhow::bail!(
+                    "Agent '{}' not found. Use 'astrape agent list' to see available agents.",
+                    name
+                );
             }
         }
         AgentCommands::Delegate {
@@ -637,14 +634,19 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
 
             // For now, just show what would be delegated
             // Full delegation requires SDK bridge implementation
-            println!("{}", "Note: Full delegation requires active SDK session.".yellow());
+            println!(
+                "{}",
+                "Note: Full delegation requires active SDK session.".yellow()
+            );
             println!("To delegate, use the Task tool in an active Claude session:");
             println!();
             println!(
                 "  Task(subagent_type=\"astrape:{}\", prompt=\"{}\"{})",
                 agent,
                 prompt,
-                model.map(|m| format!(", model=\"{}\"", m)).unwrap_or_default()
+                model
+                    .map(|m| format!(", model=\"{}\"", m))
+                    .unwrap_or_default()
             );
 
             Ok(())
@@ -734,7 +736,12 @@ fn session_command(action: SessionCommands) -> anyhow::Result<()> {
             }
 
             // Check for config files
-            let config_candidates = ["astrape.yaml", "astrape.yml", "astrape.json", ".astrape.yaml"];
+            let config_candidates = [
+                "astrape.yaml",
+                "astrape.yml",
+                "astrape.json",
+                ".astrape.yaml",
+            ];
             let found_config: Vec<_> = config_candidates
                 .iter()
                 .filter(|p| Path::new(p).exists())

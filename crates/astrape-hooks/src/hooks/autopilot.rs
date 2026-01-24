@@ -157,29 +157,23 @@ pub fn detect_any_signal(text: &str) -> Option<AutopilotSignal> {
         AutopilotSignal::PlanningComplete,
     ];
 
-    for s in signals {
-        if detect_signal(text, s) {
-            return Some(s);
-        }
-    }
-
-    None
+    signals.into_iter().find(|&s| detect_signal(text, s))
 }
 
 pub struct AutopilotHook {
-    default_config: AutopilotConfig,
+    _default_config: AutopilotConfig,
 }
 
 impl AutopilotHook {
     pub fn new() -> Self {
         Self {
-            default_config: AutopilotConfig::default(),
+            _default_config: AutopilotConfig::default(),
         }
     }
 
     pub fn with_config(config: AutopilotConfig) -> Self {
         Self {
-            default_config: config,
+            _default_config: config,
         }
     }
 
@@ -241,11 +235,16 @@ impl AutopilotHook {
         task: &str,
         session_id: Option<String>,
         config: Option<AutopilotConfig>,
-    ) -> AutopilotState {
-        let merged_config = config.unwrap_or_else(|| self::AutopilotConfig::default());
+    ) -> Result<AutopilotState, String> {
+        let merged_config = config.unwrap_or_default();
         let state = AutopilotState::new(task.to_string(), session_id, merged_config);
-        let _ = Self::write_state(directory, &state);
-        state
+        if !Self::write_state(directory, &state) {
+            return Err(format!(
+                "Failed to persist autopilot state to {}",
+                directory
+            ));
+        }
+        Ok(state)
     }
 
     pub fn transition(directory: &str, to: AutopilotPhase) -> Result<AutopilotState, String> {
@@ -254,16 +253,15 @@ impl AutopilotHook {
             return Err("autopilot not active".to_string());
         }
         if !validate_transition(state.phase, to) {
-            return Err(format!(
-                "invalid transition: {:?} -> {:?}",
-                state.phase, to
-            ));
+            return Err(format!("invalid transition: {:?} -> {:?}", state.phase, to));
         }
 
         state.phase = to;
         state.updated_at = Utc::now();
-        if matches!(to, AutopilotPhase::Complete | AutopilotPhase::Failed | AutopilotPhase::Cancelled)
-        {
+        if matches!(
+            to,
+            AutopilotPhase::Complete | AutopilotPhase::Failed | AutopilotPhase::Cancelled
+        ) {
             state.active = false;
             state.completed_at = Some(state.updated_at);
         }
@@ -319,9 +317,9 @@ impl AutopilotHook {
                 "## AUTOPILOT PHASE: PLANNING\n\nOriginal task:\n{}\n\nWhen the plan is finished, output: PLANNING_COMPLETE\n",
                 state.original_task
             ),
-            AutopilotPhase::Executing => format!(
-                "## AUTOPILOT PHASE: EXECUTING\n\nExecute the plan and implement the task.\n\nWhen implementation is finished, output: EXECUTION_COMPLETE\n"
-            ),
+            AutopilotPhase::Executing => {
+                "## AUTOPILOT PHASE: EXECUTING\n\nExecute the plan and implement the task.\n\nWhen implementation is finished, output: EXECUTION_COMPLETE\n".to_string()
+            }
             AutopilotPhase::Verifying => {
                 "## AUTOPILOT PHASE: VERIFYING\n\nRun verification (tests/build/lint as applicable).\n\nWhen fully verified, output: AUTOPILOT_COMPLETE\n".to_string()
             }
@@ -362,7 +360,7 @@ impl Default for AutopilotHook {
 impl Hook for AutopilotHook {
     fn name(&self) -> &str {
         "autopilot"
-}
+    }
 
     fn events(&self) -> &[HookEvent] {
         &[HookEvent::Stop]
@@ -428,10 +426,10 @@ impl Hook for AutopilotHook {
 
         // Safety limit.
         if state.iteration >= state.max_iterations {
-            Self::fail(&context.directory, format!(
-                "max iterations ({}) reached",
-                state.max_iterations
-            ));
+            Self::fail(
+                &context.directory,
+                format!("max iterations ({}) reached", state.max_iterations),
+            );
             return Ok(HookOutput::continue_with_message(format!(
                 "[AUTOPILOT STOPPED] Max iterations ({}) reached. State preserved in .omc/autopilot-state.json",
                 state.max_iterations
@@ -503,7 +501,7 @@ mod tests {
 
         assert!(!AutopilotHook::is_active(root));
 
-        let state = AutopilotHook::start(root, "build feature", None, None);
+        let state = AutopilotHook::start(root, "build feature", None, None).unwrap();
         assert!(state.active);
         assert_eq!(state.phase, AutopilotPhase::Planning);
         assert!(AutopilotHook::is_active(root));
@@ -529,7 +527,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
 
-        AutopilotHook::start(root, "task", None, None);
+        AutopilotHook::start(root, "task", None, None).unwrap();
         let state = AutopilotHook::cancel(root, Some("user request")).unwrap();
         assert_eq!(state.phase, AutopilotPhase::Cancelled);
         assert!(!state.active);

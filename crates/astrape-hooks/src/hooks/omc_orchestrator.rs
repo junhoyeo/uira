@@ -377,7 +377,9 @@ pub fn get_git_diff_stats(directory: &str) -> Vec<GitFileStat> {
     if !diff_output.status.success() {
         return Vec::new();
     }
-    let diff = String::from_utf8_lossy(&diff_output.stdout).trim().to_string();
+    let diff = String::from_utf8_lossy(&diff_output.stdout)
+        .trim()
+        .to_string();
     if diff.is_empty() {
         return Vec::new();
     }
@@ -515,7 +517,13 @@ pub fn build_verification_reminder(session_id: Option<&str>) -> String {
 
 pub fn build_boulder_continuation(plan_name: &str, remaining: u32, total: u32) -> String {
     let base = BOULDER_CONTINUATION_PROMPT.replace("{PLAN_NAME}", plan_name);
-    format!("{}\n\n[Status: {}/{} completed, {} remaining]", base, total - remaining, total, remaining)
+    format!(
+        "{}\n\n[Status: {}/{} completed, {} remaining]",
+        base,
+        total - remaining,
+        total,
+        remaining
+    )
 }
 
 fn extract_file_path(tool_input: &serde_json::Value) -> Option<String> {
@@ -573,10 +581,7 @@ pub fn process_orchestrator_pre_tool(input: &ToolExecuteInput) -> ToolExecuteOut
         };
     }
 
-    let file_path = input
-        .tool_input
-        .as_ref()
-        .and_then(extract_file_path);
+    let file_path = input.tool_input.as_ref().and_then(extract_file_path);
 
     if file_path.as_deref().map(is_allowed_path).unwrap_or(true) {
         if let (Some(dir), Some(fp)) = (input.directory.as_deref(), file_path.as_deref()) {
@@ -618,8 +623,8 @@ pub fn process_orchestrator_pre_tool(input: &ToolExecuteInput) -> ToolExecuteOut
         );
     }
 
-    let warning = ORCHESTRATOR_DELEGATION_REQUIRED
-        .replace("$FILE_PATH", file_path.as_deref().unwrap_or(""));
+    let warning =
+        ORCHESTRATOR_DELEGATION_REQUIRED.replace("$FILE_PATH", file_path.as_deref().unwrap_or(""));
 
     ToolExecuteOutput {
         r#continue: true,
@@ -629,17 +634,16 @@ pub fn process_orchestrator_pre_tool(input: &ToolExecuteInput) -> ToolExecuteOut
 }
 
 pub fn process_orchestrator_post_tool(input: &ToolExecuteInput, output: &str) -> ToolExecuteOutput {
-    let work_dir = input
-        .directory
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+    let work_dir = input.directory.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    });
 
     // Write/edit tools
     if is_write_edit_tool(&input.tool_name) {
-        let file_path = input
-            .tool_input
-            .as_ref()
-            .and_then(extract_file_path);
+        let file_path = input.tool_input.as_ref().and_then(extract_file_path);
 
         if file_path
             .as_deref()
@@ -719,7 +723,11 @@ impl Hook for OmcOrchestratorHook {
     }
 
     fn events(&self) -> &[HookEvent] {
-        &[HookEvent::PreToolUse, HookEvent::PostToolUse, HookEvent::SessionIdle]
+        &[
+            HookEvent::PreToolUse,
+            HookEvent::PostToolUse,
+            HookEvent::SessionIdle,
+        ]
     }
 
     async fn execute(
@@ -779,7 +787,9 @@ impl Hook for OmcOrchestratorHook {
             HookEvent::SessionIdle => {
                 let (should_continue, message) = check_boulder_continuation(&context.directory);
                 if should_continue {
-                    Ok(HookOutput::continue_with_message(message.unwrap_or_default()))
+                    Ok(HookOutput::continue_with_message(
+                        message.unwrap_or_default(),
+                    ))
                 } else {
                     Ok(HookOutput::pass())
                 }

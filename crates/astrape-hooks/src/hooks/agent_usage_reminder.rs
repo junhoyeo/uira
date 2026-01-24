@@ -304,7 +304,10 @@ mod tests {
     fn test_normalize_tool_name() {
         assert_eq!(normalize_tool_name("Grep"), "grep");
         assert_eq!(normalize_tool_name("functions.grep"), "grep");
-        assert_eq!(normalize_tool_name("context7_query-docs"), "context7_query-docs");
+        assert_eq!(
+            normalize_tool_name("context7_query-docs"),
+            "context7_query-docs"
+        );
     }
 
     #[test]
@@ -388,7 +391,10 @@ mod tests {
         assert!(out.message.is_none());
 
         // Stop clears state
-        let out = hook.execute(HookEvent::Stop, &input, &context).await.unwrap();
+        let out = hook
+            .execute(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
         assert!(out.message.is_none());
         assert!(load_agent_usage_state("ses_x").is_none());
 

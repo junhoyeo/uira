@@ -529,8 +529,7 @@ fn parse_string_array_value(
         let mut items: Vec<String> = Vec::new();
         let mut consumed = 1usize;
 
-        for j in (current_index + 1)..lines.len() {
-            let next_line = lines[j];
+        for next_line in lines.iter().skip(current_index + 1) {
             if let Some(stripped) = next_line.trim_start().strip_prefix('-') {
                 let item = parse_string_value(stripped.trim());
                 if !item.is_empty() {
@@ -1053,15 +1052,8 @@ pub fn validate_skill_metadata(metadata: &PartialSkillMetadata) -> QualityValida
         }
     }
 
-    if metadata
-        .triggers
-        .as_ref()
-        .map(|v| v.is_empty())
-        .unwrap_or(false)
-    {
-        missing_fields.push("triggers (empty array)".to_string());
-        score -= 20;
-    }
+    // Note: Empty triggers are already penalized as "missing" in the loop above.
+    // We don't apply a separate penalty here to avoid double-counting.
 
     // Source already validated during parsing; keep this for parity.
     score = std::cmp::max(0, score);
@@ -2145,7 +2137,7 @@ impl Hook for LearnerHook {
         if is_learner_request {
             // Return message indicating learner is active
             return Ok(HookOutput::continue_with_message(
-                "Learner hook detected a skill extraction request."
+                "Learner hook detected a skill extraction request.",
             ));
         }
 

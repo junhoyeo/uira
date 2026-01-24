@@ -50,8 +50,9 @@ pub fn append_session_id(
 
     if !state.session_ids.iter().any(|id| id == &session_id) {
         state.session_ids.push(session_id);
-        if write_astrape_state(directory, &state) {
-            return Some(state);
+        // Return None if write fails to signal the operation didn't succeed
+        if !write_astrape_state(directory, &state) {
+            return None;
         }
     }
 

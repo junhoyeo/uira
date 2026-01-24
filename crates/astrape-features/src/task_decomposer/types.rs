@@ -32,7 +32,7 @@ pub enum ComponentRole {
 }
 
 impl ComponentRole {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "frontend" => Self::Frontend,
             "backend" => Self::Backend,

@@ -21,20 +21,19 @@ pub fn tool_definition() -> ToolDefinition {
             },
             "required": ["skill"]
         }),
-        Arc::new(|input: ToolInput| {
-            Box::pin(async move { handle_skill(input).await })
-        }),
+        Arc::new(|input: ToolInput| Box::pin(async move { handle_skill(input).await })),
     )
 }
 
 async fn handle_skill(input: ToolInput) -> Result<ToolOutput, ToolError> {
     // Parse parameters
-    let skill_name = input
-        .get("skill")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing required parameter 'skill'".to_string(),
-        })?;
+    let skill_name =
+        input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing required parameter 'skill'".to_string(),
+            })?;
 
     let args: Vec<String> = input
         .get("args")
@@ -114,7 +113,10 @@ mod tests {
     #[test]
     fn test_apply_arguments() {
         let template = "Commit message: $1\nDescription: $2\nAll args: $@";
-        let args = vec!["feat: add feature".to_string(), "Added cool feature".to_string()];
+        let args = vec![
+            "feat: add feature".to_string(),
+            "Added cool feature".to_string(),
+        ];
 
         let result = apply_arguments(template, &args);
         assert_eq!(

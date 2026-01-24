@@ -7,6 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// Type alias for stale session callback to reduce type complexity.
+pub type StaleSessionCallback = Arc<dyn Fn(&BackgroundTask) + Send + Sync>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackgroundTaskStatus {
@@ -104,7 +107,7 @@ pub struct BackgroundTaskConfig {
     pub task_timeout_ms: Option<u64>,
     pub max_queue_size: Option<usize>,
     pub stale_threshold_ms: Option<u64>,
-    pub on_stale_session: Option<Arc<dyn Fn(&BackgroundTask) + Send + Sync>>,
+    pub on_stale_session: Option<StaleSessionCallback>,
     pub storage_dir: Option<PathBuf>,
 }
 
@@ -296,7 +299,7 @@ impl BackgroundManager {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
-        let ts = Self::base36(now.as_millis() as u128);
+        let ts = Self::base36(now.as_millis());
         let nanos = now.subsec_nanos() as u128;
         let pid = std::process::id() as u128;
         let mixed = (nanos << 32) ^ pid;
@@ -409,6 +412,8 @@ impl BackgroundManager {
 
         let mut tasks = self.tasks.lock().expect("lock");
         let Some(mut updated) = tasks.get(&task.id).cloned() else {
+            // Release the concurrency slot we just acquired before returning error
+            self.concurrency.release(&concurrency_key);
             return Err("Task disappeared".to_string());
         };
 
@@ -455,6 +460,10 @@ impl BackgroundManager {
             task.status = status;
             if status.is_terminal() {
                 task.completed_at = Some(Utc::now());
+                // Release concurrency slot on terminal status to prevent resource leak
+                if let Some(key) = &task.concurrency_key {
+                    self.concurrency.release(key);
+                }
             }
             let updated = task.clone();
             drop(tasks);

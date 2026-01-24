@@ -6,6 +6,7 @@
 //! non-empty content to avoid Anthropic API validation errors.
 
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -32,8 +33,12 @@ pub fn error_patterns() -> ErrorPatterns {
     }
 }
 
-fn tool_part_types() -> HashSet<&'static str> {
-    ["tool", "tool_use", "tool_result"].into_iter().collect()
+lazy_static! {
+    /// Set of part types that represent tool-related content.
+    /// Using lazy_static to avoid allocating a new HashSet on every call.
+    static ref TOOL_PART_TYPES: HashSet<&'static str> = {
+        ["tool", "tool_use", "tool_result"].into_iter().collect()
+    };
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,7 +110,7 @@ pub fn has_text_content(part: &MessagePart) -> bool {
 }
 
 pub fn is_tool_part(part: &MessagePart) -> bool {
-    tool_part_types().contains(part.part_type.as_str())
+    TOOL_PART_TYPES.contains(part.part_type.as_str())
 }
 
 pub fn has_valid_content(parts: &[MessagePart]) -> bool {
@@ -127,7 +132,11 @@ pub fn sanitize_message(
         // Try to replace an existing empty text part first.
         for part in message.parts.iter_mut() {
             if part.part_type == "text" {
-                let empty = part.text.as_deref().map(|t| t.trim().is_empty()).unwrap_or(true);
+                let empty = part
+                    .text
+                    .as_deref()
+                    .map(|t| t.trim().is_empty())
+                    .unwrap_or(true);
                 if empty {
                     part.text = Some(placeholder_text.to_string());
                     part.synthetic = Some(true);
@@ -139,9 +148,16 @@ pub fn sanitize_message(
         // Otherwise inject a new text part before first tool part.
         let insert_index = message.parts.iter().position(is_tool_part);
         let new_part = MessagePart {
-            id: Some(format!("synthetic_{}", crate::hooks::recovery::generate_part_id())),
+            id: Some(format!(
+                "synthetic_{}",
+                crate::hooks::recovery::generate_part_id()
+            )),
             message_id: Some(message.info.id.clone()),
-            session_id: message.info.session_id.clone().or_else(|| Some(String::new())),
+            session_id: message
+                .info
+                .session_id
+                .clone()
+                .or_else(|| Some(String::new())),
             part_type: "text".to_string(),
             text: Some(placeholder_text.to_string()),
             synthetic: Some(true),
@@ -159,12 +175,16 @@ pub fn sanitize_message(
     // Also sanitize any empty text parts that exist alongside valid content.
     let mut sanitized = false;
     for part in message.parts.iter_mut() {
-        if part.part_type == "text" {
-            if part.text.as_deref().map(|t| t.trim() == "").unwrap_or(false) {
-                part.text = Some(placeholder_text.to_string());
-                part.synthetic = Some(true);
-                sanitized = true;
-            }
+        if part.part_type == "text"
+            && part
+                .text
+                .as_deref()
+                .map(|t| t.trim().is_empty())
+                .unwrap_or(false)
+        {
+            part.text = Some(placeholder_text.to_string());
+            part.synthetic = Some(true);
+            sanitized = true;
         }
     }
 
@@ -194,7 +214,9 @@ pub fn sanitize_messages(
     }
 }
 
-fn parse_messages_from_input(input: &HookInput) -> Option<(serde_json::Value, Vec<MessageWithParts>)> {
+fn parse_messages_from_input(
+    input: &HookInput,
+) -> Option<(serde_json::Value, Vec<MessageWithParts>)> {
     let v = input
         .tool_input
         .as_ref()
@@ -214,14 +236,17 @@ fn parse_messages_from_input(input: &HookInput) -> Option<(serde_json::Value, Ve
     None
 }
 
-fn build_modified_input(original: &serde_json::Value, messages: &[MessageWithParts]) -> serde_json::Value {
+fn build_modified_input(
+    original: &serde_json::Value,
+    messages: &[MessageWithParts],
+) -> serde_json::Value {
     if original.is_array() {
-        serde_json::to_value(messages).unwrap_or_else(|_| serde_json::Value::Null)
+        serde_json::to_value(messages).unwrap_or(serde_json::Value::Null)
     } else if original.is_object() {
         let mut obj = original.as_object().cloned().unwrap_or_default();
         obj.insert(
             "messages".to_string(),
-            serde_json::to_value(messages).unwrap_or_else(|_| serde_json::Value::Null),
+            serde_json::to_value(messages).unwrap_or(serde_json::Value::Null),
         );
         serde_json::Value::Object(obj)
     } else {

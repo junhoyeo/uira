@@ -18,7 +18,7 @@ pub struct LspClientImpl {
 
 struct ServerProcess {
     child: Child,
-    next_id: i64,
+    _next_id: i64,
 }
 
 impl LspClientImpl {
@@ -29,7 +29,10 @@ impl LspClientImpl {
         }
     }
 
-    async fn get_or_start_server(&self, language: &str) -> Result<Arc<Mutex<ServerProcess>>, ToolError> {
+    async fn get_or_start_server(
+        &self,
+        language: &str,
+    ) -> Result<Arc<Mutex<ServerProcess>>, ToolError> {
         let servers = self.servers.read().await;
         if let Some(server) = servers.get(language) {
             return Ok(Arc::clone(server));
@@ -37,10 +40,11 @@ impl LspClientImpl {
         drop(servers);
 
         // Start new server
-        let server_config = super::servers::get_server_config(language)
-            .ok_or_else(|| ToolError::ExecutionFailed {
+        let server_config = super::servers::get_server_config(language).ok_or_else(|| {
+            ToolError::ExecutionFailed {
                 message: format!("No LSP server configured for language: {}", language),
-            })?;
+            }
+        })?;
 
         let mut cmd = Command::new(&server_config.command);
         cmd.stdin(Stdio::piped())
@@ -48,13 +52,13 @@ impl LspClientImpl {
             .stderr(Stdio::null());
 
         let child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
-            message: format!("Failed to start LSP server: {}. {}", e, server_config.install_hint),
+            message: format!(
+                "Failed to start LSP server: {}. {}",
+                e, server_config.install_hint
+            ),
         })?;
 
-        let process = Arc::new(Mutex::new(ServerProcess {
-            child,
-            next_id: 1,
-        }));
+        let process = Arc::new(Mutex::new(ServerProcess { child, _next_id: 1 }));
 
         // Send initialize request
         self.send_initialize(&process).await?;
@@ -66,6 +70,7 @@ impl LspClientImpl {
     }
 
     async fn send_initialize(&self, process: &Arc<Mutex<ServerProcess>>) -> Result<(), ToolError> {
+        #[allow(deprecated)]
         let init_params = InitializeParams {
             process_id: Some(std::process::id()),
             root_uri: Some(Url::from_file_path(&self.root_path).unwrap()),
@@ -94,16 +99,23 @@ impl LspClientImpl {
         Ok(())
     }
 
-    async fn send_request(&self, process: &Arc<Mutex<ServerProcess>>, request: Value) -> Result<Value, ToolError> {
+    async fn send_request(
+        &self,
+        process: &Arc<Mutex<ServerProcess>>,
+        request: Value,
+    ) -> Result<Value, ToolError> {
         let mut proc = process.lock().await;
 
         let content = serde_json::to_string(&request).unwrap();
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         if let Some(stdin) = proc.child.stdin.as_mut() {
-            stdin.write_all(message.as_bytes()).await.map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to write to LSP server: {}", e),
-            })?;
+            stdin
+                .write_all(message.as_bytes())
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to write to LSP server: {}", e),
+                })?;
         }
 
         // Read response
@@ -112,9 +124,12 @@ impl LspClientImpl {
             let mut header = String::new();
 
             // Read Content-Length header
-            reader.read_line(&mut header).await.map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to read LSP response: {}", e),
-            })?;
+            reader
+                .read_line(&mut header)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to read LSP response: {}", e),
+                })?;
 
             let content_length = header
                 .trim()
@@ -130,13 +145,16 @@ impl LspClientImpl {
 
             // Read content
             let mut buffer = vec![0; content_length];
-            tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buffer).await.map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to read LSP content: {}", e),
-            })?;
+            tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buffer)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to read LSP content: {}", e),
+                })?;
 
-            let response: Value = serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to parse LSP response: {}", e),
-            })?;
+            let response: Value =
+                serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to parse LSP response: {}", e),
+                })?;
 
             Ok(response)
         } else {
@@ -146,16 +164,23 @@ impl LspClientImpl {
         }
     }
 
-    async fn send_notification(&self, process: &Arc<Mutex<ServerProcess>>, notification: Value) -> Result<(), ToolError> {
+    async fn send_notification(
+        &self,
+        process: &Arc<Mutex<ServerProcess>>,
+        notification: Value,
+    ) -> Result<(), ToolError> {
         let mut proc = process.lock().await;
 
         let content = serde_json::to_string(&notification).unwrap();
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         if let Some(stdin) = proc.child.stdin.as_mut() {
-            stdin.write_all(message.as_bytes()).await.map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to write notification: {}", e),
-            })?;
+            stdin
+                .write_all(message.as_bytes())
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to write notification: {}", e),
+                })?;
         }
 
         Ok(())
@@ -191,21 +216,29 @@ pub trait LspClient: Send + Sync {
 #[async_trait]
 impl LspClient for LspClientImpl {
     async fn goto_definition(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let line = params["line"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing line parameter".to_string(),
-        })? as u32;
+        let line = params["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing line parameter".to_string(),
+            })? as u32;
 
-        let character = params["character"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing character parameter".to_string(),
-        })? as u32;
+        let character = params["character"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing character parameter".to_string(),
+            })? as u32;
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -227,27 +260,37 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 
     async fn find_references(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let line = params["line"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing line parameter".to_string(),
-        })? as u32;
+        let line = params["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing line parameter".to_string(),
+            })? as u32;
 
-        let character = params["character"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing character parameter".to_string(),
-        })? as u32;
+        let character = params["character"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing character parameter".to_string(),
+            })? as u32;
 
         let include_declaration = params["includeDeclaration"].as_bool().unwrap_or(true);
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -272,19 +315,25 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 
     async fn symbols(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
         let scope = params["scope"].as_str().unwrap_or("document");
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -316,17 +365,23 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 
     async fn diagnostics(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -348,25 +403,35 @@ impl LspClient for LspClientImpl {
 
         // Note: In a real implementation, we'd wait for publishDiagnostics notifications
         // For now, returning a placeholder
-        Ok(ToolOutput::text("Diagnostics requested. Language server will publish diagnostics asynchronously."))
+        Ok(ToolOutput::text(
+            "Diagnostics requested. Language server will publish diagnostics asynchronously.",
+        ))
     }
 
     async fn prepare_rename(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let line = params["line"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing line parameter".to_string(),
-        })? as u32;
+        let line = params["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing line parameter".to_string(),
+            })? as u32;
 
-        let character = params["character"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing character parameter".to_string(),
-        })? as u32;
+        let character = params["character"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing character parameter".to_string(),
+            })? as u32;
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -388,29 +453,41 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 
     async fn rename(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let line = params["line"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing line parameter".to_string(),
-        })? as u32;
+        let line = params["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing line parameter".to_string(),
+            })? as u32;
 
-        let character = params["character"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing character parameter".to_string(),
-        })? as u32;
+        let character = params["character"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing character parameter".to_string(),
+            })? as u32;
 
-        let new_name = params["newName"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing newName parameter".to_string(),
-        })?;
+        let new_name = params["newName"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing newName parameter".to_string(),
+            })?;
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -433,25 +510,35 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 
     async fn hover(&self, params: Value) -> Result<ToolOutput, ToolError> {
-        let file_path = params["filePath"].as_str().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing filePath parameter".to_string(),
-        })?;
+        let file_path = params["filePath"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing filePath parameter".to_string(),
+            })?;
 
-        let line = params["line"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing line parameter".to_string(),
-        })? as u32;
+        let line = params["line"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing line parameter".to_string(),
+            })? as u32;
 
-        let character = params["character"].as_u64().ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing character parameter".to_string(),
-        })? as u32;
+        let character = params["character"]
+            .as_u64()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing character parameter".to_string(),
+            })? as u32;
 
-        let language = self.detect_language(file_path).ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Could not detect language from file extension".to_string(),
-        })?;
+        let language =
+            self.detect_language(file_path)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: "Could not detect language from file extension".to_string(),
+                })?;
 
         let server = self.get_or_start_server(&language).await?;
 
@@ -473,6 +560,8 @@ impl LspClient for LspClientImpl {
 
         let response = self.send_request(&server, request).await?;
 
-        Ok(ToolOutput::text(serde_json::to_string_pretty(&response["result"]).unwrap()))
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&response["result"]).unwrap(),
+        ))
     }
 }

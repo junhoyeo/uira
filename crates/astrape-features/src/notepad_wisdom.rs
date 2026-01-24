@@ -255,10 +255,8 @@ fn add_wisdom_entry(
         None => return false,
     };
 
-    if !parent.exists() {
-        if !init_plan_notepad(plan_name, directory.as_ref()) {
-            return false;
-        }
+    if !parent.exists() && !init_plan_notepad(plan_name, directory.as_ref()) {
+        return false;
     }
 
     let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();

@@ -14,10 +14,11 @@ pub use hooks::{
         AUTOPILOT_STATE_FILE,
     },
     background_notification::{
-        check_background_notifications, process_background_notification, BackgroundNotificationHook,
-        BackgroundNotificationHookConfig, BackgroundNotificationHookInput,
-        BackgroundNotificationHookOutput, BackgroundNotificationManager, BackgroundTask,
-        BackgroundTaskStatus, NotificationCheckResult, TaskProgress,
+        check_background_notifications, process_background_notification,
+        BackgroundNotificationHook, BackgroundNotificationHookConfig,
+        BackgroundNotificationHookInput, BackgroundNotificationHookOutput,
+        BackgroundNotificationManager, BackgroundTask, BackgroundTaskStatus,
+        NotificationCheckResult, TaskProgress,
     },
     keyword_detector::{KeywordDetectorHook, KeywordType},
     notepad::{

@@ -50,8 +50,11 @@ pub fn route_task(context: RoutingContext, config: RoutingConfigOverrides) -> Ro
 
     let tier = match tier_sel {
         TierSelection::Explicit => {
-            // Explicit was handled above.
-            ModelTier::Medium
+            // This branch should never be reached because explicit_model is checked
+            // and returned early at the top of this function.
+            unreachable!(
+                "TierSelection::Explicit should be handled by early return for explicit_model"
+            )
         }
         TierSelection::Tier(t) => t,
     };
@@ -120,7 +123,27 @@ pub fn route_with_escalation(
     context: RoutingContext,
     config: RoutingConfigOverrides,
 ) -> RoutingDecision {
-    route_task(context, config)
+    // Merge config first since merge_with_default takes ownership
+    let merged = config.clone().merge_with_default();
+    let mut decision = route_task(context, config);
+    if decision.confidence < merged.escalation_threshold && can_escalate(decision.tier) {
+        let original_tier = decision.tier;
+        let new_tier = escalate_model(original_tier);
+        decision.tier = new_tier;
+        decision.model = merged.tier_models.for_tier(new_tier).to_string();
+        decision.model_type = tier_to_model_type(new_tier);
+        decision.escalated = true;
+        decision.original_tier = Some(original_tier);
+        decision.reasons.push(format!(
+            "Escalated from {} to {} (confidence {:.2} < threshold {:.2})",
+            original_tier.as_str(),
+            new_tier.as_str(),
+            decision.confidence,
+            merged.escalation_threshold
+        ));
+    }
+
+    decision
 }
 
 pub fn explain_routing(context: RoutingContext, config: RoutingConfigOverrides) -> String {

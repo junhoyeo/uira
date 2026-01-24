@@ -54,7 +54,9 @@ pub fn category_configs() -> HashMap<DelegationCategory, CategoryConfig> {
             temperature: 0.1,
             thinking_budget: ThinkingBudget::Low,
             description: "Simple lookups, straightforward tasks, basic operations".to_string(),
-            prompt_append: Some("Be concise and efficient. Focus on accuracy and speed.".to_string()),
+            prompt_append: Some(
+                "Be concise and efficient. Focus on accuracy and speed.".to_string(),
+            ),
         },
     );
 
@@ -78,6 +80,17 @@ pub fn category_configs() -> HashMap<DelegationCategory, CategoryConfig> {
             temperature: 0.3,
             thinking_budget: ThinkingBudget::Low,
             description: "Default for simple tasks when category is not specified".to_string(),
+            prompt_append: None,
+        },
+    );
+
+    configs.insert(
+        DelegationCategory::UnspecifiedMedium,
+        CategoryConfig {
+            tier: ComplexityTier::Medium,
+            temperature: 0.5,
+            thinking_budget: ThinkingBudget::Medium,
+            description: "Default for moderate tasks when category is not specified".to_string(),
             prompt_append: None,
         },
     );
@@ -113,9 +126,25 @@ fn category_keywords() -> HashMap<DelegationCategory, Vec<&'static str>> {
     keywords.insert(
         DelegationCategory::VisualEngineering,
         vec![
-            "ui", "ux", "design", "frontend", "component", "style", "css", "visual", "layout",
-            "responsive", "interface", "dashboard", "form", "button", "theme", "color",
-            "typography", "animation", "interactive",
+            "ui",
+            "ux",
+            "design",
+            "frontend",
+            "component",
+            "style",
+            "css",
+            "visual",
+            "layout",
+            "responsive",
+            "interface",
+            "dashboard",
+            "form",
+            "button",
+            "theme",
+            "color",
+            "typography",
+            "animation",
+            "interactive",
         ],
     );
 
@@ -172,6 +201,7 @@ fn category_keywords() -> HashMap<DelegationCategory, Vec<&'static str>> {
     );
 
     keywords.insert(DelegationCategory::UnspecifiedLow, vec![]);
+    keywords.insert(DelegationCategory::UnspecifiedMedium, vec![]);
     keywords.insert(DelegationCategory::UnspecifiedHigh, vec![]);
 
     keywords
@@ -180,9 +210,7 @@ fn category_keywords() -> HashMap<DelegationCategory, Vec<&'static str>> {
 /// Resolve a category to its full configuration
 pub fn resolve_category(category: DelegationCategory) -> ResolvedCategory {
     let configs = category_configs();
-    let config = configs
-        .get(&category)
-        .expect("Unknown delegation category");
+    let config = configs.get(&category).expect("Unknown delegation category");
 
     ResolvedCategory {
         category,
@@ -196,7 +224,7 @@ pub fn resolve_category(category: DelegationCategory) -> ResolvedCategory {
 
 /// Check if a string is a valid delegation category
 pub fn is_valid_category(category: &str) -> bool {
-    DelegationCategory::from_str(category).is_some()
+    DelegationCategory::parse(category).is_some()
 }
 
 /// Get all available categories
@@ -208,6 +236,7 @@ pub fn get_all_categories() -> Vec<DelegationCategory> {
         DelegationCategory::Quick,
         DelegationCategory::Writing,
         DelegationCategory::UnspecifiedLow,
+        DelegationCategory::UnspecifiedMedium,
         DelegationCategory::UnspecifiedHigh,
     ]
 }
@@ -248,7 +277,9 @@ pub fn detect_category_from_prompt(task_prompt: &str) -> Option<DelegationCatego
     for category in get_all_categories() {
         if matches!(
             category,
-            DelegationCategory::UnspecifiedLow | DelegationCategory::UnspecifiedHigh
+            DelegationCategory::UnspecifiedLow
+                | DelegationCategory::UnspecifiedMedium
+                | DelegationCategory::UnspecifiedHigh
         ) {
             continue;
         }
@@ -274,7 +305,8 @@ pub fn get_category_for_task(context: &CategoryContext) -> ResolvedCategory {
     if let Some(tier) = context.explicit_tier {
         let category = match tier {
             ComplexityTier::Low => DelegationCategory::UnspecifiedLow,
-            _ => DelegationCategory::UnspecifiedHigh,
+            ComplexityTier::Medium => DelegationCategory::UnspecifiedMedium,
+            ComplexityTier::High => DelegationCategory::UnspecifiedHigh,
         };
         return resolve_category(category);
     }
@@ -296,7 +328,10 @@ pub fn get_category_for_task(context: &CategoryContext) -> ResolvedCategory {
 /// Get tier from category (for backward compatibility)
 pub fn get_category_tier(category: DelegationCategory) -> ComplexityTier {
     let configs = category_configs();
-    configs.get(&category).map(|c| c.tier).unwrap_or(ComplexityTier::Medium)
+    configs
+        .get(&category)
+        .map(|c| c.tier)
+        .unwrap_or(ComplexityTier::Medium)
 }
 
 /// Get temperature from category

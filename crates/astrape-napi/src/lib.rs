@@ -190,9 +190,12 @@ pub async fn execute_hook(event: String, input: JsHookInput) -> napi::Result<JsH
         extra: HashMap::new(),
     };
 
-    let directory = input
-        .directory
-        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+    let directory = input.directory.unwrap_or_else(|| {
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    });
     let context = HookContext::new(input.session_id, directory);
 
     let registry = default_hooks();
@@ -567,7 +570,8 @@ mod tests {
 
     #[test]
     fn test_route_task_with_agent() {
-        let result = route_task_with_agent("find auth code".to_string(), Some("explore".to_string()));
+        let result =
+            route_task_with_agent("find auth code".to_string(), Some("explore".to_string()));
         // Explore agent should stay low tier
         assert_eq!(result.tier, "LOW");
     }

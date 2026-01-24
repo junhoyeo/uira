@@ -19,7 +19,7 @@ pub fn load_config_from_file(path: &Path) -> Result<AstrapeConfig> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-    let config = if path.extension().map_or(false, |ext| ext == "json") {
+    let config = if path.extension().is_some_and(|ext| ext == "json") {
         serde_json::from_str(&content).context("Failed to parse JSON configuration")?
     } else {
         serde_yaml::from_str(&content).context("Failed to parse YAML configuration")?
@@ -117,11 +117,16 @@ fn expand_env_string(s: &str) -> String {
                     result.push('}');
                 }
             } else {
-                // $VAR syntax
-                let var_name: String = chars
-                    .by_ref()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
+                // $VAR syntax - use peek() to avoid consuming the delimiter
+                let mut var_name = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        var_name.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
                 if !var_name.is_empty() {
                     if let Ok(value) = env::var(&var_name) {
                         result.push_str(&value);
@@ -157,6 +162,14 @@ mod tests {
         env::set_var("TEST_VAR", "test_value");
         let result = expand_env_string("prefix_$TEST_VAR");
         assert_eq!(result, "prefix_test_value");
+    }
+
+    #[test]
+    fn test_expand_env_string_preserves_space_after_var() {
+        env::set_var("TEST_VAR2", "value");
+        // This test ensures the space after the variable is preserved (bug fix)
+        let result = expand_env_string("hello $TEST_VAR2 world");
+        assert_eq!(result, "hello value world");
     }
 
     #[test]

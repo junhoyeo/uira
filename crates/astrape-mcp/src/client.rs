@@ -247,11 +247,11 @@ impl StdioMcpClient {
     /// ```rust,no_run
     /// use astrape_mcp::client::StdioMcpClient;
     ///
-    /// let client = StdioMcpClient::new("npx")
+    /// let client = StdioMcpClient::builder("npx")
     ///     .args(["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
     ///     .build();
     /// ```
-    pub fn new<S: Into<String>>(command: S) -> StdioMcpClientBuilder {
+    pub fn builder<S: Into<String>>(command: S) -> StdioMcpClientBuilder {
         StdioMcpClientBuilder {
             command: command.into(),
             args: Vec::new(),
@@ -261,7 +261,7 @@ impl StdioMcpClient {
 
     /// Create a StdioMcpClient from an `McpServerConfig`.
     pub fn from_config(config: &crate::types::McpServerConfig) -> Self {
-        let mut builder = Self::new(&config.command).args(config.args.clone());
+        let mut builder = Self::builder(&config.command).args(config.args.clone());
         if let Some(env) = &config.env {
             builder = builder.envs(env.clone());
         }
@@ -274,11 +274,7 @@ impl StdioMcpClient {
     }
 
     /// Send a JSON-RPC request and read the response.
-    async fn send_request(
-        &self,
-        method: &str,
-        params: Option<Value>,
-    ) -> McpResult<Value> {
+    async fn send_request(&self, method: &str, params: Option<Value>) -> McpResult<Value> {
         if !self.connected {
             return Err(McpClientError::NotConnected);
         }
@@ -297,9 +293,7 @@ impl StdioMcpClient {
         // Send the request
         {
             let mut stdin_guard = self.stdin.lock().await;
-            let stdin = stdin_guard
-                .as_mut()
-                .ok_or(McpClientError::NotConnected)?;
+            let stdin = stdin_guard.as_mut().ok_or(McpClientError::NotConnected)?;
             stdin.write_all(&request_bytes).await.map_err(|e| {
                 McpClientError::ConnectionError(format!("Failed to write to stdin: {}", e))
             })?;
@@ -312,9 +306,7 @@ impl StdioMcpClient {
         loop {
             let line = {
                 let mut stdout_guard = self.stdout.lock().await;
-                let stdout = stdout_guard
-                    .as_mut()
-                    .ok_or(McpClientError::NotConnected)?;
+                let stdout = stdout_guard.as_mut().ok_or(McpClientError::NotConnected)?;
                 let mut line = String::new();
                 let bytes_read = stdout.read_line(&mut line).await.map_err(|e| {
                     McpClientError::ConnectionError(format!("Failed to read from stdout: {}", e))
@@ -377,9 +369,7 @@ impl StdioMcpClient {
             }
         });
 
-        let result = self
-            .send_request("initialize", Some(init_params))
-            .await?;
+        let result = self.send_request("initialize", Some(init_params)).await?;
 
         // Parse capabilities from the server's response
         let server_caps = result.get("capabilities").cloned().unwrap_or(Value::Null);
@@ -431,10 +421,7 @@ impl McpClient for StdioMcpClient {
         }
 
         let mut child = cmd.spawn().map_err(|e| {
-            McpClientError::ConnectionError(format!(
-                "Failed to spawn '{}': {}",
-                self.command, e
-            ))
+            McpClientError::ConnectionError(format!("Failed to spawn '{}': {}", self.command, e))
         })?;
 
         let stdin = child.stdin.take().ok_or_else(|| {
@@ -487,10 +474,7 @@ impl McpClient for StdioMcpClient {
             .send_request("tools/list", Some(serde_json::json!({})))
             .await?;
 
-        let tools_value = result
-            .get("tools")
-            .cloned()
-            .unwrap_or(Value::Array(vec![]));
+        let tools_value = result.get("tools").cloned().unwrap_or(Value::Array(vec![]));
 
         let raw_tools: Vec<Value> = serde_json::from_value(tools_value).map_err(|e| {
             McpClientError::ProtocolError(format!("Invalid tools list response: {}", e))
@@ -586,10 +570,9 @@ impl McpClient for StdioMcpClient {
             .cloned()
             .unwrap_or(Value::Array(vec![]));
 
-        let raw_resources: Vec<Value> =
-            serde_json::from_value(resources_value).map_err(|e| {
-                McpClientError::ProtocolError(format!("Invalid resources list response: {}", e))
-            })?;
+        let raw_resources: Vec<Value> = serde_json::from_value(resources_value).map_err(|e| {
+            McpClientError::ProtocolError(format!("Invalid resources list response: {}", e))
+        })?;
 
         let resources = raw_resources
             .into_iter()
@@ -627,9 +610,7 @@ impl McpClient for StdioMcpClient {
             "uri": uri
         });
 
-        let result = self
-            .send_request("resources/read", Some(params))
-            .await?;
+        let result = self.send_request("resources/read", Some(params)).await?;
 
         // MCP resources/read returns {"contents": [{"uri": ..., "text": ...}]}
         let text = result
@@ -654,10 +635,9 @@ impl McpClient for StdioMcpClient {
             .cloned()
             .unwrap_or(Value::Array(vec![]));
 
-        let raw_prompts: Vec<Value> =
-            serde_json::from_value(prompts_value).map_err(|e| {
-                McpClientError::ProtocolError(format!("Invalid prompts list response: {}", e))
-            })?;
+        let raw_prompts: Vec<Value> = serde_json::from_value(prompts_value).map_err(|e| {
+            McpClientError::ProtocolError(format!("Invalid prompts list response: {}", e))
+        })?;
 
         let prompts = raw_prompts
             .into_iter()
@@ -719,9 +699,7 @@ impl McpClient for StdioMcpClient {
             "arguments": arguments
         });
 
-        let result = self
-            .send_request("prompts/get", Some(params))
-            .await?;
+        let result = self.send_request("prompts/get", Some(params)).await?;
 
         // MCP prompts/get returns {"messages": [{"role": ..., "content": {"type": "text", "text": ...}}]}
         let text = result
@@ -734,7 +712,9 @@ impl McpClient for StdioMcpClient {
                 if let Some(s) = c.as_str() {
                     Some(s.to_string())
                 } else {
-                    c.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    c.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
                 }
             })
             .unwrap_or_default();

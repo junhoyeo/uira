@@ -221,6 +221,7 @@ dependencies = [
  "astrape-sdk",
  "chrono",
  "futures",
+ "lazy_static",
  "parking_lot",
  "regex",
  "serde",

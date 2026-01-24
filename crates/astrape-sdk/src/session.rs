@@ -237,7 +237,10 @@ continue working until everything is done."#
     }
 
     /// Load and merge configuration from files
-    fn load_and_merge_config(working_dir: &Path, options_config: Option<PluginConfig>) -> PluginConfig {
+    fn load_and_merge_config(
+        working_dir: &Path,
+        options_config: Option<PluginConfig>,
+    ) -> PluginConfig {
         // Try to load config from standard locations
         let loaded_config = Self::find_and_load_config(working_dir);
 
@@ -267,10 +270,14 @@ continue working until everything is done."#
                     }
 
                     // Try loading as AstrapeConfig and convert
-                    if let Ok(astrape_config) = serde_yaml::from_str::<astrape_config::AstrapeConfig>(&content) {
+                    if let Ok(astrape_config) =
+                        serde_yaml::from_str::<astrape_config::AstrapeConfig>(&content)
+                    {
                         return Some(Self::convert_astrape_to_plugin_config(&astrape_config));
                     }
-                    if let Ok(astrape_config) = serde_json::from_str::<astrape_config::AstrapeConfig>(&content) {
+                    if let Ok(astrape_config) =
+                        serde_json::from_str::<astrape_config::AstrapeConfig>(&content)
+                    {
                         return Some(Self::convert_astrape_to_plugin_config(&astrape_config));
                     }
                 }
@@ -366,7 +373,10 @@ continue working until everything is done."#
             }
 
             // ~/.config/astrape/config.yaml
-            let xdg_config = home_path.join(".config").join("astrape").join("config.yaml");
+            let xdg_config = home_path
+                .join(".config")
+                .join("astrape")
+                .join("config.yaml");
             if xdg_config.exists() {
                 paths.push(xdg_config);
             }
@@ -532,7 +542,11 @@ continue working until everything is done."#
                             .magic_keywords
                             .as_ref()
                             .and_then(|k| k.ultrawork.as_ref())
-                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .map(|keywords| {
+                                keywords
+                                    .iter()
+                                    .any(|k| lowercase.contains(&k.to_lowercase()))
+                            })
                             .unwrap_or(true) // Default enabled
                     }
                     "plan" => {
@@ -540,7 +554,11 @@ continue working until everything is done."#
                             .magic_keywords
                             .as_ref()
                             .and_then(|k| k.search.as_ref())
-                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .map(|keywords| {
+                                keywords
+                                    .iter()
+                                    .any(|k| lowercase.contains(&k.to_lowercase()))
+                            })
                             .unwrap_or(true) // Default enabled
                     }
                     "analyze" => {
@@ -548,7 +566,11 @@ continue working until everything is done."#
                             .magic_keywords
                             .as_ref()
                             .and_then(|k| k.analyze.as_ref())
-                            .map(|keywords| keywords.iter().any(|k| lowercase.contains(&k.to_lowercase())))
+                            .map(|keywords| {
+                                keywords
+                                    .iter()
+                                    .any(|k| lowercase.contains(&k.to_lowercase()))
+                            })
                             .unwrap_or(true) // Default enabled
                     }
                     _ => true, // Other keywords always enabled

@@ -17,11 +17,12 @@ pub enum DelegationCategory {
     Quick,
     Writing,
     UnspecifiedLow,
+    UnspecifiedMedium,
     UnspecifiedHigh,
 }
 
 impl DelegationCategory {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "visual-engineering" | "visualengineering" => Some(Self::VisualEngineering),
             "ultrabrain" => Some(Self::Ultrabrain),
@@ -29,6 +30,7 @@ impl DelegationCategory {
             "quick" => Some(Self::Quick),
             "writing" => Some(Self::Writing),
             "unspecified-low" | "unspecifiedlow" => Some(Self::UnspecifiedLow),
+            "unspecified-medium" | "unspecifiedmedium" => Some(Self::UnspecifiedMedium),
             "unspecified-high" | "unspecifiedhigh" => Some(Self::UnspecifiedHigh),
             _ => None,
         }
@@ -42,6 +44,7 @@ impl DelegationCategory {
             Self::Quick => "quick",
             Self::Writing => "writing",
             Self::UnspecifiedLow => "unspecified-low",
+            Self::UnspecifiedMedium => "unspecified-medium",
             Self::UnspecifiedHigh => "unspecified-high",
         }
     }
