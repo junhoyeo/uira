@@ -87,6 +87,7 @@ pub struct TyposChecker {
 }
 
 impl TyposChecker {
+    #[allow(dead_code)]
     pub fn new(config: Option<AiConfig>) -> Self {
         Self::with_hooks(config, None)
     }

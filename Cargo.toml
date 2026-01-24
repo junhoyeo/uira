@@ -5,6 +5,7 @@ members = [
     "crates/astrape-hook",
     "crates/astrape-claude",
     "crates/astrape-napi",
+    "crates/astrape-sdk",
     "crates/astrape",
 ]
 
@@ -20,6 +21,10 @@ repository = "https://github.com/junhoyeo/astrape"
 astrape-core = { path = "crates/astrape-core" }
 astrape-hook = { path = "crates/astrape-hook" }
 astrape-claude = { path = "crates/astrape-claude" }
+astrape-sdk = { path = "crates/astrape-sdk" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
 
 # CLI framework
 clap = { version = "4.5", features = ["derive", "cargo"] }

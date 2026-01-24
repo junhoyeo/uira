@@ -19,6 +19,7 @@ pub enum HookEvent {
 }
 
 impl HookEvent {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             HookEvent::PreCheck => "pre-check",
@@ -119,6 +120,7 @@ impl HookContext {
         Self::default()
     }
 
+    #[allow(dead_code)]
     pub fn with_env(mut self, key: &str, value: &str) -> Self {
         self.env.insert(key.to_string(), value.to_string());
         self
@@ -131,6 +133,7 @@ impl HookContext {
 
 #[derive(Debug, Clone)]
 pub struct HookResult {
+    #[allow(dead_code)]
     pub success: bool,
     pub should_continue: bool,
     pub message: Option<String>,

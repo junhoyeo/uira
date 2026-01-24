@@ -8,7 +8,7 @@ pre-commit:
     - name: test
       run: cargo test
     - name: typos
-      run: astrape typos
+      run: astrape typos --ai
 
 post-commit:
   parallel: false
