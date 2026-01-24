@@ -242,6 +242,8 @@ pub enum SignalType {
     BuildSuccess,
     /// All todos marked complete
     TodosComplete,
+    /// All configured goals passing their target scores
+    GoalsPassing,
 }
 
 impl CompletionSignals {
@@ -717,15 +719,22 @@ impl RalphHook {
         text.contains(promise)
     }
 
-    /// Detect all completion signals in text
     pub fn detect_completion_signals(
         text: &str,
         promise: &str,
         todo_result: Option<&IncompleteTodosResult>,
     ) -> CompletionSignals {
+        Self::detect_completion_signals_with_goals(text, promise, todo_result, None)
+    }
+
+    pub fn detect_completion_signals_with_goals(
+        text: &str,
+        promise: &str,
+        todo_result: Option<&IncompleteTodosResult>,
+        goals_result: Option<&astrape_goals::VerificationResult>,
+    ) -> CompletionSignals {
         let mut signals = CompletionSignals::default();
 
-        // Signal 1: Promise token (weight: 40)
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::PromiseToken,
             weight: 40,
@@ -733,7 +742,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 2: EXIT_SIGNAL in RALPH_STATUS (weight: 30)
         let exit_signal = Self::detect_exit_signal(text);
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::ExitSignal,
@@ -742,7 +750,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 3: Completion keywords (weight: 10)
         let keywords = [
             "all tasks complete",
             "work is done",
@@ -757,7 +764,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 4: Tests passing (weight: 15)
         let tests_passing = text.contains("tests passed") || text.contains("All tests pass");
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::TestsPassing,
@@ -766,7 +772,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 5: Build success (weight: 15)
         let build_success = text.contains("Build successful") || text.contains("build completed");
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::BuildSuccess,
@@ -775,7 +780,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 6: Todos complete (weight: 20)
         let (todo_detected, todo_evidence) = if let Some(result) = todo_result {
             (
                 result.count == 0 && result.total > 0,
@@ -795,11 +799,27 @@ impl RalphHook {
             evidence: todo_evidence,
         });
 
+        let (goals_detected, goals_evidence) = if let Some(result) = goals_result {
+            let passed = result.results.iter().filter(|r| r.passed).count();
+            let total = result.results.len();
+            (
+                result.all_passed && total > 0,
+                Some(format!("{}/{} goals passed", passed, total)),
+            )
+        } else {
+            (false, None)
+        };
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::GoalsPassing,
+            weight: 25,
+            detected: goals_detected,
+            evidence: goals_evidence,
+        });
+
         signals.calculate_confidence();
         signals
     }
 
-    /// Detect EXIT_SIGNAL in RALPH_STATUS block
     fn detect_exit_signal(text: &str) -> bool {
         if let Some(start) = text.find("---RALPH_STATUS---") {
             if let Some(end) = text[start..].find("---END_RALPH_STATUS---") {
@@ -808,6 +828,25 @@ impl RalphHook {
             }
         }
         false
+    }
+
+    pub async fn check_goals_from_config(
+        directory: &str,
+    ) -> Option<astrape_goals::VerificationResult> {
+        let config_path = std::path::Path::new(directory).join("astrape.yml");
+        if !config_path.exists() {
+            return None;
+        }
+
+        let config = astrape_config::load_config(Some(&config_path)).ok()?;
+        let goals = &config.goals.goals;
+
+        if goals.is_empty() {
+            return None;
+        }
+
+        let runner = astrape_goals::GoalRunner::new(directory);
+        Some(runner.check_all(goals).await)
     }
 
     /// Get continuation prompt

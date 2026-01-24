@@ -23,6 +23,10 @@ pub struct AstrapeConfig {
     /// AI hooks for typos checking and other workflows
     #[serde(default)]
     pub ai_hooks: Option<AiHooksConfig>,
+
+    /// Score-based verification goals
+    #[serde(default)]
+    pub goals: GoalsConfig,
 }
 
 /// HUD configuration
@@ -292,6 +296,114 @@ pub struct AiHookCommand {
     pub on_fail: Option<String>,
 }
 
+// ============================================================================
+// Goal Verification Configuration
+// ============================================================================
+
+/// Goal configuration for score-based verification
+///
+/// Goals define measurable success criteria that can be checked during
+/// agent loops (ralph, ultrawork). Each goal runs a command that outputs
+/// a score (0-100), and the goal passes when the score meets the target.
+///
+/// # Example
+///
+/// ```yaml
+/// goals:
+///   - name: pixel-match
+///     workspace: .astrape/goals/pixel-match/
+///     command: bun run check.ts
+///     target: 99.9
+///
+///   - name: test-coverage
+///     command: bun run coverage --json | jq '.total'
+///     target: 80
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalConfig {
+    /// Unique name for this goal
+    pub name: String,
+
+    /// Working directory for the command (relative to project root)
+    /// If specified, the command runs inside this directory.
+    /// Useful for isolating goal-specific files (reference images, scripts, etc.)
+    #[serde(default)]
+    pub workspace: Option<String>,
+
+    /// Command to execute that outputs a score (0-100) to stdout
+    /// The command must:
+    /// - Exit with code 0 on success
+    /// - Print a single number (0-100) to stdout
+    /// - Use stderr for logging/debug output
+    pub command: String,
+
+    /// Target score threshold (0-100) to consider the goal passed
+    pub target: f64,
+
+    /// Optional timeout in seconds for the command (default: 60)
+    #[serde(default = "default_goal_timeout")]
+    pub timeout_secs: u64,
+
+    /// Whether this goal is enabled (default: true)
+    #[serde(default = "default_goal_enabled")]
+    pub enabled: bool,
+
+    /// Optional description of what this goal measures
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+fn default_goal_timeout() -> u64 {
+    60
+}
+
+fn default_goal_enabled() -> bool {
+    true
+}
+
+/// Goals configuration section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalsConfig {
+    /// List of goal definitions
+    #[serde(default)]
+    pub goals: Vec<GoalConfig>,
+
+    /// Check interval in seconds for continuous verification (default: 30)
+    #[serde(default = "default_check_interval")]
+    pub check_interval_secs: u64,
+
+    /// Maximum iterations before giving up (default: 100)
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: u32,
+
+    /// Whether to run goals automatically at end of each iteration (default: true)
+    #[serde(default = "default_auto_verify")]
+    pub auto_verify: bool,
+}
+
+impl Default for GoalsConfig {
+    fn default() -> Self {
+        Self {
+            goals: Vec::new(),
+            check_interval_secs: default_check_interval(),
+            max_iterations: default_max_iterations(),
+            auto_verify: default_auto_verify(),
+        }
+    }
+}
+
+fn default_check_interval() -> u64 {
+    30
+}
+
+fn default_max_iterations() -> u32 {
+    100
+}
+
+fn default_auto_verify() -> bool {
+    true
+}
+
 // Default value functions
 
 fn default_hud_preset() -> String {
@@ -422,5 +534,90 @@ hooks:
         assert_eq!(config.ai.model, "anthropic/claude-sonnet-4-20250514");
         assert!(config.hooks.pre_commit.is_some());
         assert!(config.hooks.post_commit.is_some());
+    }
+
+    #[test]
+    fn test_deserialize_goal_config() {
+        let yaml = r#"
+name: pixel-match
+workspace: .astrape/goals/pixel-match/
+command: bun run check.ts
+target: 99.9
+"#;
+        let goal: GoalConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(goal.name, "pixel-match");
+        assert_eq!(
+            goal.workspace,
+            Some(".astrape/goals/pixel-match/".to_string())
+        );
+        assert_eq!(goal.command, "bun run check.ts");
+        assert!((goal.target - 99.9).abs() < 0.01);
+        assert_eq!(goal.timeout_secs, 60);
+        assert!(goal.enabled);
+    }
+
+    #[test]
+    fn test_deserialize_goals_config() {
+        let yaml = r#"
+goals:
+  - name: pixel-match
+    workspace: .astrape/goals/pixel-match/
+    command: bun run check.ts
+    target: 99.9
+  - name: test-coverage
+    command: "bun run coverage --json | jq '.total'"
+    target: 80
+    enabled: false
+check_interval_secs: 15
+max_iterations: 50
+"#;
+        let config: GoalsConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.goals.len(), 2);
+        assert_eq!(config.goals[0].name, "pixel-match");
+        assert_eq!(config.goals[1].name, "test-coverage");
+        assert!(!config.goals[1].enabled);
+        assert_eq!(config.check_interval_secs, 15);
+        assert_eq!(config.max_iterations, 50);
+    }
+
+    #[test]
+    fn test_deserialize_config_with_goals() {
+        let yaml = r#"
+ai:
+  model: anthropic/claude-sonnet-4-20250514
+
+goals:
+  goals:
+    - name: lighthouse-perf
+      command: ./scripts/lighthouse-check.sh
+      target: 90
+"#;
+        let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.goals.goals.len(), 1);
+        assert_eq!(config.goals.goals[0].name, "lighthouse-perf");
+        assert!((config.goals.goals[0].target - 90.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_goal_config_defaults() {
+        let yaml = r#"
+name: simple
+command: echo 100
+target: 100
+"#;
+        let goal: GoalConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(goal.timeout_secs, 60);
+        assert!(goal.enabled);
+        assert!(goal.workspace.is_none());
+        assert!(goal.description.is_none());
+    }
+
+    #[test]
+    fn test_goals_config_defaults() {
+        let config = GoalsConfig::default();
+        assert!(config.goals.is_empty());
+        assert_eq!(config.check_interval_secs, 30);
+        assert_eq!(config.max_iterations, 100);
+        assert!(config.auto_verify);
     }
 }

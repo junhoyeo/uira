@@ -559,6 +559,143 @@ pub fn register_background_task(
 }
 
 // ============================================================================
+// Goal Verification Bindings
+// ============================================================================
+
+#[napi(object)]
+pub struct JsGoalCheckResult {
+    pub name: String,
+    pub score: f64,
+    pub target: f64,
+    pub passed: bool,
+    pub duration_ms: u32,
+    pub error: Option<String>,
+}
+
+impl From<astrape_goals::GoalCheckResult> for JsGoalCheckResult {
+    fn from(r: astrape_goals::GoalCheckResult) -> Self {
+        Self {
+            name: r.name,
+            score: r.score,
+            target: r.target,
+            passed: r.passed,
+            duration_ms: r.duration_ms as u32,
+            error: r.error,
+        }
+    }
+}
+
+#[napi(object)]
+pub struct JsVerificationResult {
+    pub all_passed: bool,
+    pub results: Vec<JsGoalCheckResult>,
+    pub iteration: u32,
+}
+
+impl From<astrape_goals::VerificationResult> for JsVerificationResult {
+    fn from(r: astrape_goals::VerificationResult) -> Self {
+        Self {
+            all_passed: r.all_passed,
+            results: r.results.into_iter().map(JsGoalCheckResult::from).collect(),
+            iteration: r.iteration,
+        }
+    }
+}
+
+#[napi(object)]
+pub struct JsGoalConfig {
+    pub name: String,
+    pub workspace: Option<String>,
+    pub command: String,
+    pub target: f64,
+    pub timeout_secs: u32,
+    pub enabled: bool,
+    pub description: Option<String>,
+}
+
+impl From<JsGoalConfig> for astrape_config::schema::GoalConfig {
+    fn from(g: JsGoalConfig) -> Self {
+        Self {
+            name: g.name,
+            workspace: g.workspace,
+            command: g.command,
+            target: g.target,
+            timeout_secs: g.timeout_secs as u64,
+            enabled: g.enabled,
+            description: g.description,
+        }
+    }
+}
+
+#[napi]
+pub async fn check_goal(directory: String, goal: JsGoalConfig) -> napi::Result<JsGoalCheckResult> {
+    let runner = astrape_goals::GoalRunner::new(&directory);
+    let goal_config: astrape_config::schema::GoalConfig = goal.into();
+    let result = runner.check_goal(&goal_config).await;
+    Ok(JsGoalCheckResult::from(result))
+}
+
+#[napi]
+pub async fn check_goals(
+    directory: String,
+    goals: Vec<JsGoalConfig>,
+) -> napi::Result<JsVerificationResult> {
+    let runner = astrape_goals::GoalRunner::new(&directory);
+    let goal_configs: Vec<astrape_config::schema::GoalConfig> =
+        goals.into_iter().map(|g| g.into()).collect();
+    let result = runner.check_all(&goal_configs).await;
+    Ok(JsVerificationResult::from(result))
+}
+
+#[napi]
+pub async fn check_goals_from_config(
+    directory: String,
+) -> napi::Result<Option<JsVerificationResult>> {
+    let config_path = std::path::Path::new(&directory).join("astrape.yml");
+    if !config_path.exists() {
+        return Ok(None);
+    }
+
+    let config = astrape_config::load_config(Some(&config_path))
+        .map_err(|e| napi::Error::from_reason(format!("Failed to load config: {}", e)))?;
+
+    let goals = &config.goals.goals;
+    if goals.is_empty() {
+        return Ok(None);
+    }
+
+    let runner = astrape_goals::GoalRunner::new(&directory);
+    let result = runner.check_all(goals).await;
+    Ok(Some(JsVerificationResult::from(result)))
+}
+
+#[napi]
+pub fn list_goals_from_config(directory: String) -> napi::Result<Vec<JsGoalConfig>> {
+    let config_path = std::path::Path::new(&directory).join("astrape.yml");
+    if !config_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let config = astrape_config::load_config(Some(&config_path))
+        .map_err(|e| napi::Error::from_reason(format!("Failed to load config: {}", e)))?;
+
+    Ok(config
+        .goals
+        .goals
+        .into_iter()
+        .map(|g| JsGoalConfig {
+            name: g.name,
+            workspace: g.workspace,
+            command: g.command,
+            target: g.target,
+            timeout_secs: g.timeout_secs as u32,
+            enabled: g.enabled,
+            description: g.description,
+        })
+        .collect())
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

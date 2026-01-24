@@ -84,6 +84,11 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
+    /// Score-based verification goals
+    Goals {
+        #[command(subcommand)]
+        action: GoalsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -123,6 +128,26 @@ enum SkillCommands {
 }
 
 #[derive(Subcommand)]
+enum GoalsCommands {
+    /// Check all goals or a specific goal
+    Check {
+        /// Optional goal name to check (checks all if not specified)
+        name: Option<String>,
+    },
+    /// Watch goals continuously until all pass
+    Watch {
+        /// Check interval in seconds
+        #[arg(short, long, default_value = "30")]
+        interval: u64,
+        /// Maximum iterations before giving up
+        #[arg(short, long, default_value = "100")]
+        max_iterations: u32,
+    },
+    /// List configured goals
+    List,
+}
+
+#[derive(Subcommand)]
 enum HookCommands {
     /// Install AI harness hooks for Claude Code
     Install,
@@ -150,6 +175,7 @@ fn main() {
         Commands::Agent { action } => agent_command(action),
         Commands::Session { action } => session_command(action),
         Commands::Skill { action } => skill_command(action),
+        Commands::Goals { action } => goals_command(action),
     };
 
     if let Err(e) = result {
@@ -824,6 +850,173 @@ fn skill_command(action: SkillCommands) -> anyhow::Result<()> {
                     name
                 );
             }
+        }
+    }
+}
+
+fn goals_command(action: GoalsCommands) -> anyhow::Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async { goals_command_async(action).await })
+}
+
+async fn goals_command_async(action: GoalsCommands) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let config_path = cwd.join("astrape.yml");
+
+    if !config_path.exists() {
+        anyhow::bail!(
+            "Config file not found: astrape.yml. Run 'astrape init' first or create a config with goals."
+        );
+    }
+
+    let config = astrape_config::load_config(Some(&config_path))?;
+    let goals = &config.goals.goals;
+
+    if goals.is_empty() {
+        println!("{}", "No goals configured in astrape.yml".yellow());
+        println!();
+        println!("Add goals to your config:");
+        println!(
+            r#"
+goals:
+  goals:
+    - name: pixel-match
+      workspace: .astrape/goals/pixel-match/
+      command: bun run check.ts
+      target: 99.9
+    - name: test-coverage
+      command: "bun run coverage --json | jq '.total'"
+      target: 80
+"#
+        );
+        return Ok(());
+    }
+
+    match action {
+        GoalsCommands::List => {
+            println!("{}", "⚡ Configured Goals".bold());
+            println!();
+
+            for goal in goals {
+                let status = if goal.enabled { "✓" } else { "○" };
+                println!(
+                    "  {} {} (target: {:.1})",
+                    status.green(),
+                    goal.name.bold(),
+                    goal.target
+                );
+                if let Some(desc) = &goal.description {
+                    println!("    {}", desc.dimmed());
+                }
+                println!("    Command: {}", goal.command.dimmed());
+                if let Some(ws) = &goal.workspace {
+                    println!("    Workspace: {}", ws.dimmed());
+                }
+                println!();
+            }
+
+            println!("{} {} goals configured", "Total:".bold(), goals.len());
+            Ok(())
+        }
+        GoalsCommands::Check { name } => {
+            let runner = astrape_goals::GoalRunner::new(&cwd);
+
+            let goals_to_check: Vec<_> = if let Some(ref n) = name {
+                goals.iter().filter(|g| g.name == *n).cloned().collect()
+            } else {
+                goals.clone()
+            };
+
+            if goals_to_check.is_empty() {
+                if let Some(n) = name {
+                    anyhow::bail!("Goal '{}' not found", n);
+                }
+            }
+
+            println!("{}", "⚡ Checking Goals".bold());
+            println!();
+
+            let result = runner.check_all(&goals_to_check).await;
+
+            for r in &result.results {
+                let status = if r.passed { "✓".green() } else { "✗".red() };
+                println!(
+                    "  {} {} {:.1}/{:.1} ({}ms)",
+                    status,
+                    r.name.bold(),
+                    r.score,
+                    r.target,
+                    r.duration_ms
+                );
+                if let Some(err) = &r.error {
+                    println!("    Error: {}", err.red());
+                }
+            }
+
+            println!();
+            if result.all_passed {
+                println!("{}", "✅ All goals passed!".green().bold());
+            } else {
+                let passed = result.results.iter().filter(|r| r.passed).count();
+                println!(
+                    "{}",
+                    format!("❌ {}/{} goals passed", passed, result.results.len())
+                        .red()
+                        .bold()
+                );
+                process::exit(1);
+            }
+            Ok(())
+        }
+        GoalsCommands::Watch {
+            interval,
+            max_iterations,
+        } => {
+            let runner = astrape_goals::GoalRunner::new(&cwd);
+
+            println!("{}", "⚡ Watching Goals".bold());
+            println!(
+                "Checking every {}s (max {} iterations)",
+                interval, max_iterations
+            );
+            println!();
+
+            let options = astrape_goals::VerifyOptions {
+                check_interval_secs: interval,
+                max_iterations,
+                max_duration: None,
+                on_progress: Some(Box::new(|result| {
+                    println!(
+                        "[Iteration {}] {}/{} goals passed",
+                        result.iteration,
+                        result.results.iter().filter(|r| r.passed).count(),
+                        result.results.len()
+                    );
+                    for r in &result.results {
+                        let status = if r.passed { "✓" } else { "✗" };
+                        println!("  {} {}: {:.1}/{:.1}", status, r.name, r.score, r.target);
+                    }
+                    println!();
+                })),
+            };
+
+            let result = runner.verify_until_complete(goals, options).await;
+
+            if result.all_passed {
+                println!("{}", "✅ All goals passed!".green().bold());
+            } else {
+                println!(
+                    "{}",
+                    format!(
+                        "❌ Goals did not pass after {} iterations",
+                        result.iteration
+                    )
+                    .red()
+                    .bold()
+                );
+                process::exit(1);
+            }
+            Ok(())
         }
     }
 }

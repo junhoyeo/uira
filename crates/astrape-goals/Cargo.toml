@@ -1,6 +1,6 @@
 [package]
-name = "astrape-hooks"
-description = "Hook system foundation for Astrape - async trait-based hook registry"
+name = "astrape-goals"
+description = "Score-based verification goals for Astrape agent loops"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,20 +9,15 @@ repository.workspace = true
 
 [dependencies]
 astrape-config = { path = "../astrape-config" }
-astrape-goals = { path = "../astrape-goals" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 
-async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
-regex = "1"
-dirs = "5"
+tokio = { version = "1", features = ["process", "time", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
-lazy_static = "1.4"
 
 [dev-dependencies]
-tokio-test = "0.4"
 tempfile = "3"
+tokio-test = "0.4"
