@@ -1,0 +1,47 @@
+[package]
+name = "astrape"
+version = "0.1.0"
+edition = "2021"
+authors = ["Junho Yeo <i@junho.io>"]
+description = "Lightning-fast Rust-native git hooks manager with opinionated Biome presets"
+license = "MIT"
+repository = "https://github.com/junhoyeo/astrape"
+keywords = ["git", "hooks", "biome", "linter", "formatter"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# CLI framework
+clap = { version = "4.5", features = ["derive", "cargo"] }
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+
+# Parallel execution
+rayon = "1.10"
+
+# File operations
+globset = "0.4"
+
+# Git operations
+git2 = "0.19"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Terminal output
+colored = "2.1"
+console = "0.15"
+
+# Process execution
+which = "7.0"
+
+[dev-dependencies]
+tempfile = "3.14"
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[[bin]]
+name = "astrape"
+path = "src/main.rs"
