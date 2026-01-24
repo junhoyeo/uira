@@ -1,7 +1,7 @@
 mod event;
-mod types;
 mod result;
+mod types;
 
 pub use event::*;
-pub use types::*;
 pub use result::*;
+pub use types::*;
