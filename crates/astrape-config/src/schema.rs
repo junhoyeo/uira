@@ -25,33 +25,14 @@ pub struct AstrapeConfig {
     pub ai_hooks: Option<AiHooksConfig>,
 }
 
-/// OMC (Oh-My-ClaudeCode) configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OmcConfig {
-    /// Default execution mode: "ultrawork" or "ecomode"
-    #[serde(default = "default_execution_mode", rename = "defaultExecutionMode")]
-    pub default_execution_mode: String,
-
-    /// HUD (Heads-Up Display) settings
-    #[serde(default)]
-    pub hud: HudConfig,
-
-    /// Agent tier preferences
-    #[serde(default)]
-    pub agent_tiers: AgentTierPreferences,
-
-    /// Plugin settings
-    #[serde(default)]
-    pub plugins: PluginSettings,
-}
-
-impl Default for OmcConfig {
+impl Default for AstrapeConfig {
     fn default() -> Self {
         Self {
-            default_execution_mode: default_execution_mode(),
-            hud: HudConfig::default(),
-            agent_tiers: AgentTierPreferences::default(),
-            plugins: PluginSettings::default(),
+            ai: AiSettings::default(),
+            mcp: McpSettings::default(),
+            agents: AgentSettings::default(),
+            hooks: HooksConfig::default(),
+            ai_hooks: None,
         }
     }
 }

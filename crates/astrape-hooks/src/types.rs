@@ -39,7 +39,7 @@ pub enum HookType {
     Notepad,
     Learner,
     Ultrapilot,
-    OmcOrchestrator,
+    AstrapeOrchestrator,
     PluginPatterns,
     TodoContinuation,
 }
@@ -71,7 +71,7 @@ impl HookType {
             Self::Notepad => "notepad",
             Self::Learner => "learner",
             Self::Ultrapilot => "ultrapilot",
-            Self::OmcOrchestrator => "omc-orchestrator",
+            Self::AstrapeOrchestrator => "astrape-orchestrator",
             Self::PluginPatterns => "plugin-patterns",
             Self::TodoContinuation => "todo-continuation",
         }

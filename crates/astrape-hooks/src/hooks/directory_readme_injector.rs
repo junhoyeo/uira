@@ -31,11 +31,11 @@ pub struct InjectedPathsData {
 
 fn readme_injector_storage_dir() -> Option<PathBuf> {
     // Test-only override to avoid mutating process-wide HOME in parallel test runs.
-    if let Ok(dir) = std::env::var("OMC_README_INJECTOR_STORAGE_DIR") {
+    if let Ok(dir) = std::env::var("ASTRAPE_README_INJECTOR_STORAGE_DIR") {
         return Some(PathBuf::from(dir));
     }
 
-    dirs::home_dir().map(|h| h.join(".omc").join("directory-readme"))
+    dirs::home_dir().map(|h| h.join(".astrape").join("directory-readme"))
 }
 
 fn get_storage_path(session_id: &str) -> Option<PathBuf> {
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_find_readme_md_up_order_and_bounds() {
         let storage = tempdir().unwrap();
-        std::env::set_var("OMC_README_INJECTOR_STORAGE_DIR", storage.path());
+        std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());
 
         let wd = tempdir().unwrap();
         let wd_path = wd.path();
@@ -424,13 +424,13 @@ mod tests {
         assert_eq!(readmes[0], root_readme);
         assert_eq!(readmes[1], sub_readme);
 
-        std::env::remove_var("OMC_README_INJECTOR_STORAGE_DIR");
+        std::env::remove_var("ASTRAPE_README_INJECTOR_STORAGE_DIR");
     }
 
     #[test]
     fn test_process_tool_execution_caches_per_session_and_persists() {
         let storage = tempdir().unwrap();
-        std::env::set_var("OMC_README_INJECTOR_STORAGE_DIR", storage.path());
+        std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());
 
         let wd = tempdir().unwrap();
         let wd_path = wd.path();
@@ -466,6 +466,6 @@ mod tests {
             hook3.process_tool_execution("read", file_path.to_str().unwrap(), session_id);
         assert!(!after_clear.is_empty());
 
-        std::env::remove_var("OMC_README_INJECTOR_STORAGE_DIR");
+        std::env::remove_var("ASTRAPE_README_INJECTOR_STORAGE_DIR");
     }
 }

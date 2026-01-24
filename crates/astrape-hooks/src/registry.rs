@@ -136,7 +136,7 @@ pub fn default_hooks() -> HookRegistry {
     registry.register(Arc::new(LearnerHook::new()));
     registry.register(Arc::new(NonInteractiveEnvHook));
     registry.register(Arc::new(NotepadHook::new()));
-    registry.register(Arc::new(OmcOrchestratorHook));
+    registry.register(Arc::new(AstrapeOrchestratorHook));
     registry.register(Arc::new(PersistentModeHook));
     registry.register(Arc::new(PreemptiveCompactionHook::new(None)));
     registry.register(Arc::new(RalphHook::new()));

@@ -131,7 +131,7 @@ impl TodoContinuationHook {
 
         // Project-specific todos
         let dir = Path::new(directory);
-        paths.push(dir.join(".omc").join("todos.json"));
+        paths.push(dir.join(".astrape").join("todos.json"));
         paths.push(dir.join(".claude").join("todos.json"));
 
         paths

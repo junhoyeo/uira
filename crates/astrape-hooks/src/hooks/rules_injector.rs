@@ -674,7 +674,7 @@ pub fn find_rule_files(
 // =============================================================================
 
 fn rules_injector_storage_dir_for_home(home: &Path) -> PathBuf {
-    home.join(".omc").join("rules-injector")
+    home.join(".astrape").join("rules-injector")
 }
 
 fn _rules_injector_storage_dir() -> Option<PathBuf> {

@@ -1,7 +1,7 @@
 //! Autopilot Hook - Autonomous Phase Orchestrator
 //!
 //! A persistent state machine that enforces autonomous execution across phases.
-//! State is persisted to `.omc/autopilot-state.json` for crash recovery.
+//! State is persisted to `.astrape/autopilot-state.json` for crash recovery.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -178,13 +178,13 @@ impl AutopilotHook {
     }
 
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".omc").join(AUTOPILOT_STATE_FILE)
+        Path::new(directory).join(".astrape").join(AUTOPILOT_STATE_FILE)
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let omc_dir = Path::new(directory).join(".omc");
-        if !omc_dir.exists() {
-            fs::create_dir_all(&omc_dir)?;
+        let astrape_dir = Path::new(directory).join(".astrape");
+        if !astrape_dir.exists() {
+            fs::create_dir_all(&astrape_dir)?;
         }
         Ok(())
     }
@@ -393,7 +393,7 @@ impl Hook for AutopilotHook {
         if detect_signal(&prompt_text, AutopilotSignal::AutopilotCancelled) {
             Self::cancel(&context.directory, Some("cancelled by signal"));
             return Ok(HookOutput::continue_with_message(
-                "[AUTOPILOT CANCELLED] Session cancelled; progress preserved in .omc/autopilot-state.json",
+                "[AUTOPILOT CANCELLED] Session cancelled; progress preserved in .astrape/autopilot-state.json",
             ));
         }
 
@@ -431,7 +431,7 @@ impl Hook for AutopilotHook {
                 format!("max iterations ({}) reached", state.max_iterations),
             );
             return Ok(HookOutput::continue_with_message(format!(
-                "[AUTOPILOT STOPPED] Max iterations ({}) reached. State preserved in .omc/autopilot-state.json",
+                "[AUTOPILOT STOPPED] Max iterations ({}) reached. State preserved in .astrape/autopilot-state.json",
                 state.max_iterations
             )));
         }

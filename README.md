@@ -1,6 +1,6 @@
 # Astrape ⚡
 
-![ASTRAPE](./.github/assets/cover.jpg)
+![Astrape](./.github/assets/cover.jpg)
 
 > Lightning-fast Rust-native multi-agent orchestration system with git hooks, native linting, and AI-assisted workflows
 
@@ -35,8 +35,8 @@ cargo install astrape
 Or from source:
 
 ```bash
-git clone https://github.com/junhoyeo/Astrape
-cd Astrape
+git clone https://github.com/junhoyeo/Astrape astrape
+cd astrape
 cargo install --path crates/astrape
 ```
 

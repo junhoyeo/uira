@@ -92,7 +92,7 @@ impl RalphHook {
 
     /// Get the state file path for Ralph
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".omc").join("ralph-state.json")
+        Path::new(directory).join(".astrape").join("ralph-state.json")
     }
 
     /// Get global state file path
@@ -100,11 +100,11 @@ impl RalphHook {
         dirs::home_dir().map(|h| h.join(".claude").join("ralph-state.json"))
     }
 
-    /// Ensure the .omc directory exists
+    /// Ensure the .astrape directory exists
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let omc_dir = Path::new(directory).join(".omc");
-        if !omc_dir.exists() {
-            fs::create_dir_all(&omc_dir)?;
+        let astrape_dir = Path::new(directory).join(".astrape");
+        if !astrape_dir.exists() {
+            fs::create_dir_all(&astrape_dir)?;
         }
         Ok(())
     }
@@ -141,7 +141,7 @@ impl RalphHook {
     pub fn write_state(state: &RalphState, directory: Option<&str>) -> bool {
         let mut success = false;
 
-        // Write to local .omc
+        // Write to local .astrape
         if let Some(dir) = directory {
             if Self::ensure_state_dir(dir).is_ok() {
                 let local_state_file = Self::get_state_file_path(dir);

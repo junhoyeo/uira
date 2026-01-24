@@ -39,7 +39,7 @@ pub struct PluginConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub omc: Option<AgentModelConfig>,
+    pub astrape: Option<AgentModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub architect: Option<AgentModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn state_round_trip_and_append_session() {
         let dir = TempDir::new().unwrap();
-        let plan_path = dir.path().join(".omc").join("plans").join("demo.md");
+        let plan_path = dir.path().join(".astrape").join("plans").join("demo.md");
         fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
         fs::write(&plan_path, "- [ ] task\n").unwrap();
 

@@ -8,7 +8,7 @@ pub mod keyword_detector;
 pub mod learner;
 pub mod non_interactive_env;
 pub mod notepad;
-pub mod omc_orchestrator;
+pub mod astrape_orchestrator;
 pub mod persistent_mode;
 pub mod plugin_patterns;
 pub mod preemptive_compaction;
@@ -75,7 +75,7 @@ pub use notepad::{
     DEFAULT_NOTEPAD_CONFIG, MANUAL_HEADER, NOTEPAD_FILENAME, PRIORITY_HEADER,
     WORKING_MEMORY_HEADER,
 };
-pub use omc_orchestrator::{OmcOrchestratorHook, HOOK_NAME as OMC_ORCHESTRATOR_HOOK_NAME};
+pub use astrape_orchestrator::{AstrapeOrchestratorHook, HOOK_NAME as ASTRAPE_ORCHESTRATOR_HOOK_NAME};
 pub use persistent_mode::{
     check_persistent_modes, reset_todo_continuation_attempts, PersistentMode, PersistentModeHook,
     PersistentModeMetadata, PersistentModeResult,

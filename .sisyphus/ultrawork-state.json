@@ -1,7 +1,0 @@
-{
-  "active": true,
-  "started_at": "2026-01-17T11:58:30.395Z",
-  "original_prompt": "/ralph-loop \"ulw. Read the @docs/pixel-perfect-clone.md and @docs/credentials.md and give me pixel-perfect clone of https://duge.space and its subpages including https://duge.space/junhoyeoE3ur. look for network request\n  etc, fetch network data and make them with mock/constants data. give me all interactions, all menus, all subpages. all with pixel-perfect, EXACT tailwind classes. download same images from duge urls. dont add\n  svg files yourself, always download them from source. use subagents\"",
-  "reinforcement_count": 1,
-  "last_checked_at": "2026-01-24T11:39:03.957Z"
-}

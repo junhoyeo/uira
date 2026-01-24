@@ -69,19 +69,19 @@ impl NotepadHook {
     }
 
     pub fn get_notepad_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".omc").join(NOTEPAD_FILENAME)
+        Path::new(directory).join(".astrape").join(NOTEPAD_FILENAME)
     }
 
-    fn ensure_omc_dir(directory: &str) -> std::io::Result<()> {
-        let omc_dir = Path::new(directory).join(".omc");
-        if !omc_dir.exists() {
-            fs::create_dir_all(&omc_dir)?;
+    fn ensure_astrape_dir(directory: &str) -> std::io::Result<()> {
+        let astrape_dir = Path::new(directory).join(".astrape");
+        if !astrape_dir.exists() {
+            fs::create_dir_all(&astrape_dir)?;
         }
         Ok(())
     }
 
     pub fn init_notepad(directory: &str) -> bool {
-        if Self::ensure_omc_dir(directory).is_err() {
+        if Self::ensure_astrape_dir(directory).is_err() {
             return false;
         }
 
@@ -92,7 +92,7 @@ impl NotepadHook {
 
         let content = format!(
             r#"# Notepad
-<!-- Auto-managed by OMC. Manual edits preserved in MANUAL section. -->
+<!-- Auto-managed by Astrape. Manual edits preserved in MANUAL section. -->
 
 {PRIORITY_HEADER}
 <!-- ALWAYS loaded. Keep under 500 chars. Critical discoveries only. -->

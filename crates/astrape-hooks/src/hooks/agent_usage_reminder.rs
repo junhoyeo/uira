@@ -74,18 +74,18 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn omc_storage_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("ASTRAPE_OMC_DIR") {
+fn astrape_storage_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ASTRAPE_ASTRAPE_DIR") {
         if !dir.is_empty() {
             return Some(PathBuf::from(dir));
         }
     }
 
-    dirs::home_dir().map(|h| h.join(".omc"))
+    dirs::home_dir().map(|h| h.join(".astrape"))
 }
 
 fn agent_usage_reminder_storage_dir() -> Option<PathBuf> {
-    omc_storage_dir().map(|d| d.join("agent-usage-reminder"))
+    astrape_storage_dir().map(|d| d.join("agent-usage-reminder"))
 }
 
 fn get_storage_path(session_id: &str) -> Option<PathBuf> {
@@ -143,7 +143,7 @@ lazy_static! {
 
     /// Agent tools that indicate agent usage
     pub static ref AGENT_TOOLS: HashSet<&'static str> =
-        HashSet::from(["task", "call_omo_agent", "omc_task"]);
+        HashSet::from(["task", "call_omo_agent", "astrape_task"]);
 
     static ref TOOL_NAME_PATTERN: Regex =
         Regex::new(r"(?i)^(?:functions\.)?([a-z0-9][a-z0-9_-]*)$").unwrap();
@@ -317,7 +317,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("ASTRAPE_OMC_DIR", dir.path());
+        std::env::set_var("ASTRAPE_ASTRAPE_DIR", dir.path());
 
         let state = AgentUsageState {
             session_id: "ses_1".to_string(),
@@ -337,7 +337,7 @@ mod tests {
         clear_agent_usage_state("ses_1");
         assert!(load_agent_usage_state("ses_1").is_none());
 
-        std::env::remove_var("ASTRAPE_OMC_DIR");
+        std::env::remove_var("ASTRAPE_ASTRAPE_DIR");
     }
 
     #[tokio::test]
@@ -346,7 +346,7 @@ mod tests {
 
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("ASTRAPE_OMC_DIR", dir.path());
+        std::env::set_var("ASTRAPE_ASTRAPE_DIR", dir.path());
 
         let hook = AgentUsageReminderHook::new();
         let context = HookContext::new(Some("ses_x".to_string()), "/tmp".to_string());
@@ -398,6 +398,6 @@ mod tests {
         assert!(out.message.is_none());
         assert!(load_agent_usage_state("ses_x").is_none());
 
-        std::env::remove_var("ASTRAPE_OMC_DIR");
+        std::env::remove_var("ASTRAPE_ASTRAPE_DIR");
     }
 }

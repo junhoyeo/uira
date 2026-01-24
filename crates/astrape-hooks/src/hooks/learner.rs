@@ -7,9 +7,9 @@
 //! Key requirements:
 //! - Skill file parsing/writing with YAML frontmatter (custom parser; no YAML libs)
 //! - Storage:
-//!   - Config: ~/.claude/omc/learner.json
-//!   - User skills: ~/.claude/skills/omc-learned/
-//!   - Project skills: .omc/skills/
+//!   - Config: ~/.claude/astrape/learner.json
+//!   - User skills: ~/.claude/skills/astrape-learned/
+//!   - Project skills: .astrape/skills/
 //!
 //! Notes:
 //! - This module intentionally implements a *minimal* YAML frontmatter parser supporting:
@@ -36,7 +36,7 @@ use crate::types::{HookEvent, HookInput, HookOutput};
 // =============================================================================
 
 /// Project-level skills subdirectory.
-pub const PROJECT_SKILLS_SUBDIR: &str = ".omc/skills";
+pub const PROJECT_SKILLS_SUBDIR: &str = ".astrape/skills";
 
 /// Valid skill file extension.
 pub const SKILL_EXTENSION: &str = ".md";
@@ -60,25 +60,25 @@ pub const REQUIRED_METADATA_FIELDS: &[&str] = &["id", "name", "description", "tr
 pub const MAX_SKILLS_PER_SESSION: usize = 10;
 
 fn debug_enabled() -> bool {
-    std::env::var("OMC_DEBUG").ok().as_deref() == Some("1")
+    std::env::var("ASTRAPE_DEBUG").ok().as_deref() == Some("1")
 }
 
-/// Default config path: `~/.claude/omc/learner.json`.
-/// Test override: `OMC_LEARNER_CONFIG_PATH=/tmp/.../learner.json`.
+/// Default config path: `~/.claude/astrape/learner.json`.
+/// Test override: `ASTRAPE_LEARNER_CONFIG_PATH=/tmp/.../learner.json`.
 fn config_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("OMC_LEARNER_CONFIG_PATH") {
+    if let Ok(p) = std::env::var("ASTRAPE_LEARNER_CONFIG_PATH") {
         return Some(PathBuf::from(p));
     }
-    home_dir().map(|h| h.join(".claude").join("omc").join("learner.json"))
+    home_dir().map(|h| h.join(".claude").join("astrape").join("learner.json"))
 }
 
-/// Default user skills dir: `~/.claude/skills/omc-learned`.
-/// Test override: `OMC_LEARNER_USER_SKILLS_DIR=/tmp/.../omc-learned`.
+/// Default user skills dir: `~/.claude/skills/astrape-learned`.
+/// Test override: `ASTRAPE_LEARNER_USER_SKILLS_DIR=/tmp/.../astrape-learned`.
 fn user_skills_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("OMC_LEARNER_USER_SKILLS_DIR") {
+    if let Ok(p) = std::env::var("ASTRAPE_LEARNER_USER_SKILLS_DIR") {
         return Some(PathBuf::from(p));
     }
-    home_dir().map(|h| h.join(".claude").join("skills").join("omc-learned"))
+    home_dir().map(|h| h.join(".claude").join("skills").join("astrape-learned"))
 }
 
 // =============================================================================
@@ -789,7 +789,11 @@ pub fn load_all_skills(project_root: Option<&str>) -> Vec<LearnedSkill> {
 }
 
 pub fn load_all_skills_cached(project_root: Option<&str>, force_reload: bool) -> Vec<LearnedSkill> {
-    let key = project_root.unwrap_or("").to_string();
+    // Cache key must include both project root AND user skills dir to handle test isolation
+    let user_dir_str = user_skills_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let key = format!("{}:::{}", project_root.unwrap_or(""), user_dir_str);
 
     if !force_reload {
         if let Ok(cache) = LOADER_CACHE.read() {
@@ -1598,17 +1602,17 @@ fn get_progress_paths(directory: &str) -> (PathBuf, PathBuf) {
     let dir = Path::new(directory);
     (
         dir.join(PROGRESS_FILENAME),
-        dir.join(".omc").join(PROGRESS_FILENAME),
+        dir.join(".astrape").join(PROGRESS_FILENAME),
     )
 }
 
 fn read_progress_raw(directory: &str) -> Option<String> {
-    let (root, omc) = get_progress_paths(directory);
+    let (root, astrape) = get_progress_paths(directory);
     if root.exists() {
         return fs::read_to_string(root).ok();
     }
-    if omc.exists() {
-        return fs::read_to_string(omc).ok();
+    if astrape.exists() {
+        return fs::read_to_string(astrape).ok();
     }
     None
 }
@@ -2152,7 +2156,13 @@ impl Hook for LearnerHook {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    // Mutex to serialize tests that modify environment variables
+    lazy_static! {
+        static ref ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+    }
 
     #[test]
     fn test_parse_skill_file_requires_frontmatter() {
@@ -2222,10 +2232,12 @@ Body"#;
 
     #[test]
     fn test_find_and_load_skills_project_overrides_user() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
 
-        std::env::set_var("OMC_LEARNER_USER_SKILLS_DIR", user.path());
+        std::env::set_var("ASTRAPE_LEARNER_USER_SKILLS_DIR", user.path());
 
         let project_skills_dir = project.path().join(PROJECT_SKILLS_SUBDIR);
         fs::create_dir_all(&project_skills_dir).unwrap();
@@ -2265,14 +2277,16 @@ Project content"#;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].metadata.name, "Project");
 
-        std::env::remove_var("OMC_LEARNER_USER_SKILLS_DIR");
+        std::env::remove_var("ASTRAPE_LEARNER_USER_SKILLS_DIR");
     }
 
     #[test]
     fn test_find_matching_skills_scoring() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
-        std::env::set_var("OMC_LEARNER_USER_SKILLS_DIR", user.path());
+        std::env::set_var("ASTRAPE_LEARNER_USER_SKILLS_DIR", user.path());
 
         let s1 = user.path().join("s1.md");
         let raw = r#"---
@@ -2300,14 +2314,16 @@ X"#;
         );
         assert_eq!(matches.len(), 1);
 
-        std::env::remove_var("OMC_LEARNER_USER_SKILLS_DIR");
+        std::env::remove_var("ASTRAPE_LEARNER_USER_SKILLS_DIR");
     }
 
     #[test]
     fn test_write_skill_and_reload() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+
         let project = tempdir().unwrap();
         let user = tempdir().unwrap();
-        std::env::set_var("OMC_LEARNER_USER_SKILLS_DIR", user.path());
+        std::env::set_var("ASTRAPE_LEARNER_USER_SKILLS_DIR", user.path());
 
         let req = SkillExtractionRequest {
             problem: "This is a real problem description".to_string(),
@@ -2325,14 +2341,14 @@ X"#;
         let skills = load_all_skills(Some(project.path().to_str().unwrap()));
         assert_eq!(skills.len(), 1);
 
-        std::env::remove_var("OMC_LEARNER_USER_SKILLS_DIR");
+        std::env::remove_var("ASTRAPE_LEARNER_USER_SKILLS_DIR");
     }
 
     #[test]
     fn test_detection_hook_cooldown() {
         let cfg_dir = tempfile::tempdir().unwrap();
         std::env::set_var(
-            "OMC_LEARNER_CONFIG_PATH",
+            "ASTRAPE_LEARNER_CONFIG_PATH",
             cfg_dir.path().join("learner.json"),
         );
 
@@ -2352,13 +2368,13 @@ X"#;
         let r2 = process_response_for_detection("fixed this by using X", None, "s", Some(&cfg));
         assert!(r2.is_some());
 
-        std::env::remove_var("OMC_LEARNER_CONFIG_PATH");
+        std::env::remove_var("ASTRAPE_LEARNER_CONFIG_PATH");
     }
 
     #[test]
     fn test_promotion_candidates_from_progress() {
         let dir = tempdir().unwrap();
-        let progress = dir.path().join(".omc").join(PROGRESS_FILENAME);
+        let progress = dir.path().join(".astrape").join(PROGRESS_FILENAME);
         fs::create_dir_all(progress.parent().unwrap()).unwrap();
         fs::write(
             &progress,

@@ -84,13 +84,13 @@ impl UltraQAHook {
     }
 
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".omc").join("ultraqa-state.json")
+        Path::new(directory).join(".astrape").join("ultraqa-state.json")
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let omc_dir = Path::new(directory).join(".omc");
-        if !omc_dir.exists() {
-            fs::create_dir_all(&omc_dir)?;
+        let astrape_dir = Path::new(directory).join(".astrape");
+        if !astrape_dir.exists() {
+            fs::create_dir_all(&astrape_dir)?;
         }
         Ok(())
     }

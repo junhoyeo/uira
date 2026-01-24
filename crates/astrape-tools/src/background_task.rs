@@ -327,11 +327,43 @@ pub fn tool_definition() -> ToolDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use astrape_features::background_agent::reset_background_manager;
+    use astrape_features::background_agent::BackgroundManager;
+    use tempfile::TempDir;
+
+    /// Helper to create an isolated BackgroundManager for testing
+    fn create_test_manager() -> (Arc<BackgroundManager>, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let config = BackgroundTaskConfig {
+            storage_dir: Some(temp_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        let manager = Arc::new(BackgroundManager::new(config));
+        (manager, temp_dir)
+    }
+
+    /// Test version of handle_background_task that uses a provided manager
+    async fn handle_background_task_with_manager(
+        input: ToolInput,
+        manager: &Arc<BackgroundManager>,
+    ) -> Result<ToolOutput, ToolError> {
+        let action = get_required_string(&input, "action")?;
+
+        match action.as_str() {
+            "launch" => handle_launch(&input, manager).await,
+            "output" => handle_output(&input, manager).await,
+            "cancel" => handle_cancel(&input, manager).await,
+            "list" => handle_list(manager).await,
+            _ => Err(ToolError::InvalidInput {
+                message: format!(
+                    "invalid action: {action}. Valid actions are: launch, output, cancel, list"
+                ),
+            }),
+        }
+    }
 
     #[tokio::test]
     async fn test_launch_action() {
-        reset_background_manager();
+        let (manager, _temp_dir) = create_test_manager();
 
         let input = json!({
             "action": "launch",
@@ -341,7 +373,7 @@ mod tests {
             "parent_session_id": "test-session"
         });
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -352,19 +384,17 @@ mod tests {
         assert_eq!(response["success"], true);
         assert_eq!(response["action"], "launch");
         assert!(response["task"]["task_id"].is_string());
-
-        reset_background_manager();
     }
 
     #[tokio::test]
     async fn test_list_action() {
-        reset_background_manager();
+        let (manager, _temp_dir) = create_test_manager();
 
         let input = json!({
             "action": "list"
         });
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -375,17 +405,17 @@ mod tests {
         assert_eq!(response["success"], true);
         assert_eq!(response["action"], "list");
         assert!(response["tasks"].is_array());
-
-        reset_background_manager();
     }
 
     #[tokio::test]
     async fn test_invalid_action() {
+        let (manager, _temp_dir) = create_test_manager();
+
         let input = json!({
             "action": "invalid"
         });
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -398,9 +428,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_action() {
+        let (manager, _temp_dir) = create_test_manager();
+
         let input = json!({});
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -413,14 +445,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_output_task_not_found() {
-        reset_background_manager();
+        let (manager, _temp_dir) = create_test_manager();
 
         let input = json!({
             "action": "output",
             "taskId": "nonexistent-task"
         });
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -430,20 +462,18 @@ mod tests {
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], false);
         assert!(response["error"].as_str().unwrap().contains("not found"));
-
-        reset_background_manager();
     }
 
     #[tokio::test]
     async fn test_cancel_task_not_found() {
-        reset_background_manager();
+        let (manager, _temp_dir) = create_test_manager();
 
         let input = json!({
             "action": "cancel",
             "taskId": "nonexistent-task"
         });
 
-        let result = handle_background_task(input).await;
+        let result = handle_background_task_with_manager(input, &manager).await;
         assert!(result.is_ok());
 
         let output = result.unwrap();
@@ -453,13 +483,11 @@ mod tests {
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], false);
         assert!(response["error"].as_str().unwrap().contains("not found"));
-
-        reset_background_manager();
     }
 
     #[tokio::test]
     async fn test_launch_and_cancel() {
-        reset_background_manager();
+        let (manager, _temp_dir) = create_test_manager();
 
         // Launch a task
         let launch_input = json!({
@@ -468,7 +496,7 @@ mod tests {
             "prompt": "Do something"
         });
 
-        let launch_result = handle_background_task(launch_input).await.unwrap();
+        let launch_result = handle_background_task_with_manager(launch_input, &manager).await.unwrap();
         let launch_text = match &launch_result.content[0] {
             crate::types::ToolContent::Text { text } => text,
         };
@@ -484,7 +512,7 @@ mod tests {
                 "taskId": task_id
             });
 
-            let cancel_result = handle_background_task(cancel_input).await.unwrap();
+            let cancel_result = handle_background_task_with_manager(cancel_input, &manager).await.unwrap();
             let cancel_text = match &cancel_result.content[0] {
                 crate::types::ToolContent::Text { text } => text,
             };
@@ -496,7 +524,5 @@ mod tests {
             // Just verify we got a proper error response
             assert!(launch_response["error"].is_string());
         }
-
-        reset_background_manager();
     }
 }

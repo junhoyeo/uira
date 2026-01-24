@@ -244,7 +244,7 @@ fn default_storage_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home)
         .join(".claude")
-        .join(".omc")
+        .join(".astrape")
         .join("background-tasks")
 }
 
@@ -426,10 +426,23 @@ impl BackgroundManager {
         Ok(updated)
     }
 
+    fn clear_storage(&self) {
+        let Ok(entries) = fs::read_dir(&self.storage_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
     pub fn cleanup(&self) {
         self.concurrency.clear();
         self.tasks.lock().expect("lock").clear();
         self.notifications.lock().expect("lock").clear();
+        self.clear_storage();
     }
 
     pub fn get_task(&self, task_id: &str) -> Option<BackgroundTask> {
@@ -610,5 +623,40 @@ mod tests {
         let manager2 = BackgroundManager::new(config);
         assert_eq!(manager2.get_all_tasks().len(), 1);
         assert!(manager2.get_task(&task.id).is_some());
+    }
+
+    #[test]
+    fn cleanup_clears_storage() {
+        let dir = TempDir::new().unwrap();
+        let config = BackgroundTaskConfig {
+            default_concurrency: Some(0),
+            storage_dir: Some(dir.path().to_path_buf()),
+            ..BackgroundTaskConfig::default()
+        };
+        let manager = BackgroundManager::new(config.clone());
+
+        let task = manager
+            .launch(LaunchInput {
+                description: "test".to_string(),
+                prompt: "prompt".to_string(),
+                agent: "agent".to_string(),
+                parent_session_id: "parent".to_string(),
+                model: None,
+            })
+            .unwrap();
+
+        // Verify task was persisted
+        let task_file = dir.path().join(format!("{}.json", task.id));
+        assert!(task_file.exists());
+        assert_eq!(manager.get_all_tasks().len(), 1);
+
+        // Cleanup should remove storage files
+        manager.cleanup();
+        assert!(!task_file.exists());
+        assert_eq!(manager.get_all_tasks().len(), 0);
+
+        // New manager should not load any tasks
+        let manager2 = BackgroundManager::new(config);
+        assert_eq!(manager2.get_all_tasks().len(), 0);
     }
 }

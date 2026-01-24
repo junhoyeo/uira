@@ -283,7 +283,7 @@ fn background_tasks_dir() -> Option<PathBuf> {
         }
     }
 
-    dirs::home_dir().map(|h| h.join(".claude").join(".omc").join("background-tasks"))
+    dirs::home_dir().map(|h| h.join(".claude").join(".astrape").join("background-tasks"))
 }
 
 fn handle_background_event(event: &serde_json::Value) {

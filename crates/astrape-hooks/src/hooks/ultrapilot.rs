@@ -193,14 +193,14 @@ impl UltrapilotHook {
     /// Get the state file path
     fn get_state_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".omc")
+            .join(".astrape")
             .join("state")
             .join("ultrapilot-state.json")
     }
 
     /// Ensure the state directory exists
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let state_dir = Path::new(directory).join(".omc").join("state");
+        let state_dir = Path::new(directory).join(".astrape").join("state");
         if !state_dir.exists() {
             fs::create_dir_all(&state_dir)?;
         }

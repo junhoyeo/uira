@@ -717,16 +717,16 @@ fn session_command(action: SessionCommands) -> anyhow::Result<()> {
             println!();
 
             // Check for state files
-            let state_dir = Path::new(".omc/state");
+            let state_dir = Path::new(".astrape/state");
             let astrape_state = Path::new(".astrape/state");
 
-            let has_omc = state_dir.exists();
+            let has_astrape = state_dir.exists();
             let has_astrape = astrape_state.exists();
 
-            if has_omc || has_astrape {
+            if has_astrape || has_astrape {
                 println!("{} Active state found:", "✓".green());
-                if has_omc {
-                    println!("  {} .omc/state/", "•".dimmed());
+                if has_astrape {
+                    println!("  {} .astrape/state/", "•".dimmed());
                 }
                 if has_astrape {
                     println!("  {} .astrape/state/", "•".dimmed());
