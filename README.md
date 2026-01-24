@@ -18,6 +18,7 @@ Astrape (Greek: "lightning") provides high-performance multi-agent orchestration
 - **Background Task Notifications** - Track and notify on background agent completions
 - **Skill System** - Extensible skill templates (ultrawork, analyze, plan, search)
 - **Git Hooks** - Configurable pre/post commit hooks via `astrape.yml`
+- **Goal Verification** - Score-based verification for persistent work loops (ralph mode)
 
 ## Git Hooks
 
@@ -50,6 +51,33 @@ post-commit:
 Install hooks with:
 ```bash
 astrape install
+```
+
+## Goals
+
+Define verification goals that must pass before a persistent work loop (ralph mode) can complete:
+
+```yaml
+goals:
+  auto_verify: true
+  goals:
+    - name: test-coverage
+      command: ./scripts/coverage.sh
+      target: 80.0
+    - name: build-check
+      command: cargo build --release && echo 100
+      target: 100.0
+    - name: lint-score
+      command: ./scripts/lint-score.sh
+      target: 95.0
+      enabled: false  # temporarily disabled
+```
+
+Each goal command should output a score (0-100) to stdout. Goals act as a hard gate — ralph mode will not complete until all enabled goals pass their targets.
+
+```bash
+astrape goals list   # List configured goals
+astrape goals check  # Run all goals and show results
 ```
 
 ## Quick Start
@@ -110,6 +138,7 @@ Just talk naturally - Astrape activates automatically:
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
+| `/astrape:ralph` | `ralph`, `don't stop` | Persistent work loop with goal verification |
 | `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
 | `/astrape:search` | `search`, `find` | Comprehensive codebase search |
 | `/astrape:plan` | `plan` | Strategic planning |
@@ -223,6 +252,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-hooks** | Hook implementations (22 hooks) |
 | **astrape-agents** | Agent definitions and prompt loading |
 | **astrape-features** | Model routing, skills, state management |
+| **astrape-goals** | Score-based goal verification for ralph mode |
 | **astrape-napi** | Node.js bindings exposing Rust to the plugin |
 | **astrape-comment-checker** | Tree-sitter based comment detection |
 | **astrape-core** | Shared types and utilities |
