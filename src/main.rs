@@ -2,7 +2,7 @@ mod biome;
 mod config;
 mod executor;
 
-use biome::BiomeRunner;
+use biome::{init_biome_config, BiomeRunner};
 use clap::{Parser, Subcommand};
 use config::Config;
 use executor::HookExecutor;
@@ -55,21 +55,33 @@ fn main() {
 }
 
 fn init_command(config_path: &str) -> anyhow::Result<()> {
-    println!("⚡ Initializing astrape...");
+    println!("⚡ Initializing astrape...\n");
 
-    if std::path::Path::new(config_path).exists() {
-        anyhow::bail!("Config file already exists: {}", config_path);
+    let mut created_files = Vec::new();
+
+    if !std::path::Path::new(config_path).exists() {
+        let config = Config::default_config();
+        let yaml = config.to_yaml()?;
+        fs::write(config_path, yaml)?;
+        created_files.push(config_path.to_string());
     }
 
-    let config = Config::default_config();
-    let yaml = config.to_yaml()?;
+    if init_biome_config()? {
+        created_files.push("biome.json".to_string());
+    }
 
-    fs::write(config_path, yaml)?;
+    if created_files.is_empty() {
+        println!("ℹ️  All config files already exist");
+    } else {
+        println!("✅ Created:");
+        for file in &created_files {
+            println!("   • {}", file);
+        }
+    }
 
-    println!("✅ Created {}", config_path);
-    println!("\nNext steps:");
-    println!("  1. Review and customize {}", config_path);
-    println!("  2. Run: astrape install");
+    println!("\n📦 Next steps:");
+    println!("   1. Run: astrape install");
+    println!("   2. Commit normally - hooks will run automatically");
 
     Ok(())
 }

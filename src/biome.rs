@@ -1,7 +1,61 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
+use std::fs;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use which::which;
+
+const BIOME_CONFIG: &str = r#"{
+  "$schema": "https://biomejs.dev/schemas/1.9.0/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noUselessFragments": "warn"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useConst": "error",
+        "useImportType": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "es5",
+      "semicolons": "always"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  }
+}
+"#;
 
 pub struct BiomeRunner {
     biome_path: Option<String>,
@@ -86,6 +140,19 @@ impl Default for BiomeRunner {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub fn init_biome_config() -> Result<bool> {
+    let biome_json = Path::new("biome.json");
+    let biome_jsonc = Path::new("biome.jsonc");
+
+    if biome_json.exists() || biome_jsonc.exists() {
+        return Ok(false);
+    }
+
+    fs::write(biome_json, BIOME_CONFIG).context("Failed to create biome.json")?;
+
+    Ok(true)
 }
 
 #[cfg(test)]

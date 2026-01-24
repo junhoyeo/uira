@@ -119,7 +119,6 @@ impl HookExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Command;
 
     #[test]
     fn test_variable_expansion() {
