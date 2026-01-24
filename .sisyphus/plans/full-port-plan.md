@@ -467,7 +467,7 @@ astrape/
   - Resolution: Wait for updated grammar crates or downgrade tree-sitter
 - **Tests passing:** 37/37 (26 unit + 11 integration)
 
-- [x] **1.1** Complete all 30+ language grammars
+- [ ] **1.1** Complete all 30+ language grammars
   - Effort: 16 hours
   - Status: PARTIAL - 15 languages implemented, 8 blocked by tree-sitter version
 

@@ -332,7 +332,14 @@ fn format_command(check: bool, files: &[String]) -> anyhow::Result<()> {
         }
     }
 
-    if files.is_empty() || !non_rust.is_empty() {
+    // Filter non_rust to only include JS/TS files for oxfmt
+    let js_ts_extensions = [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"];
+    let js_ts_files: Vec<&String> = non_rust
+        .into_iter()
+        .filter(|p| js_ts_extensions.iter().any(|ext| p.ends_with(ext)))
+        .collect();
+
+    if files.is_empty() || !js_ts_files.is_empty() {
         let mut cmd = std::process::Command::new("oxfmt");
         if check {
             cmd.arg("--check");
@@ -341,7 +348,7 @@ fn format_command(check: bool, files: &[String]) -> anyhow::Result<()> {
         if files.is_empty() {
             cmd.arg(".");
         } else {
-            cmd.args(non_rust);
+            cmd.args(js_ts_files);
         }
 
         let status = cmd.status().map_err(|_| {

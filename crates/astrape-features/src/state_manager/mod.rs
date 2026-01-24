@@ -192,12 +192,17 @@ impl StateManager {
         self.get_state(id).map(|s| s.is_running()).unwrap_or(false)
     }
 
-    /// Get or create a session
+    /// Get or create a session (thread-safe, uses single write lock)
     pub fn get_or_create_session(&self, id: &str) -> Session {
-        if let Some(session) = self.get_session(id) {
-            session
+        // Use a single write lock to prevent race conditions between check and create
+        let mut sessions = self.sessions.write();
+        if let Some(session) = sessions.get(id) {
+            session.clone()
         } else {
-            self.create_session(id.to_string())
+            let session = Session::new(id.to_string());
+            let result = session.clone();
+            sessions.insert(id.to_string(), session);
+            result
         }
     }
 
