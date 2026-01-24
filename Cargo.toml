@@ -8,7 +8,7 @@ members = [
   "crates/astrape-napi",
   "crates/astrape-sdk",
   "crates/astrape-comment-checker",
-  "crates/astrape-hooks", "crates/astrape-prompts",
+  "crates/astrape-hooks", "crates/astrape-prompts", "crates/astrape-features",
 ]
 
 [workspace.package]

@@ -52,6 +52,13 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
+    /// Format code (Rust via rustfmt/cargo fmt, JS/TS via oxfmt)
+    Format {
+        #[arg(long, help = "Check formatting without applying changes")]
+        check: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
+    },
     /// Manage AI harness hooks (Claude Code)
     Hook {
         #[command(subcommand)]
@@ -82,6 +89,7 @@ fn main() {
         Commands::Run { hook } => run_command(&hook),
         Commands::Lint { files } => lint_command(&files),
         Commands::Typos { ai, stage, files } => typos_command(ai, stage, &files),
+        Commands::Format { check, files } => format_command(check, &files),
         Commands::Hook { action } => hook_command(action),
     };
 
@@ -277,6 +285,89 @@ fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> 
             process::exit(1);
         }
         println!("✓ No typos found");
+    }
+
+    Ok(())
+}
+
+fn format_command(check: bool, files: &[String]) -> anyhow::Result<()> {
+    if check {
+        println!("🔍 Checking formatting...\n");
+    } else {
+        println!("🎨 Formatting code...\n");
+    }
+
+    let mut ran_any = false;
+
+    let (rust_files, non_rust): (Vec<&String>, Vec<&String>) =
+        files.iter().partition(|p| p.ends_with(".rs"));
+
+    if files.is_empty() || !rust_files.is_empty() {
+        let mut cmd = if rust_files.is_empty() {
+            let mut cmd = std::process::Command::new("cargo");
+            cmd.arg("fmt");
+            cmd
+        } else {
+            let mut cmd = std::process::Command::new("rustfmt");
+            cmd.args(rust_files);
+            cmd
+        };
+
+        if check {
+            cmd.arg("--check");
+        }
+
+        let status = cmd.status().map_err(|_| {
+            anyhow::anyhow!("Failed to run rustfmt. Install: rustup component add rustfmt")
+        })?;
+
+        ran_any = true;
+
+        if !status.success() {
+            if check {
+                eprintln!("\n❌ Rust files are not formatted correctly");
+                eprintln!("   Run 'astrape format' to fix formatting");
+            }
+            process::exit(1);
+        }
+    }
+
+    if files.is_empty() || !non_rust.is_empty() {
+        let mut cmd = std::process::Command::new("oxfmt");
+        if check {
+            cmd.arg("--check");
+        }
+
+        if files.is_empty() {
+            cmd.arg(".");
+        } else {
+            cmd.args(non_rust);
+        }
+
+        let status = cmd.status().map_err(|_| {
+            anyhow::anyhow!("Failed to run oxfmt. Install: npm add -D oxfmt (or pnpm/yarn/bun)")
+        })?;
+
+        ran_any = true;
+
+        if !status.success() {
+            if check {
+                eprintln!("\n❌ JS/TS files are not formatted correctly");
+                eprintln!("   Run 'astrape format' to fix formatting");
+            }
+            process::exit(1);
+        }
+    }
+
+    if !ran_any {
+        println!("ℹ️  No files to format");
+        return Ok(());
+    }
+
+    if check {
+        println!("✓ All files are properly formatted");
+    } else {
+        println!("✓ Formatting complete");
     }
 
     Ok(())
