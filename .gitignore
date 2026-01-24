@@ -46,3 +46,7 @@ npm-debug.log*
 
 # Reference materials (external repos)
 references/
+
+# OMC and Sisyphus state
+.omc/
+.sisyphus/
