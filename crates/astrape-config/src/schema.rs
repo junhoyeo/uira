@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Main Astrape configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AstrapeConfig {
     /// AI model settings
     #[serde(default)]
@@ -23,18 +23,6 @@ pub struct AstrapeConfig {
     /// AI hooks for typos checking and other workflows
     #[serde(default)]
     pub ai_hooks: Option<AiHooksConfig>,
-}
-
-impl Default for AstrapeConfig {
-    fn default() -> Self {
-        Self {
-            ai: AiSettings::default(),
-            mcp: McpSettings::default(),
-            agents: AgentSettings::default(),
-            hooks: HooksConfig::default(),
-            ai_hooks: None,
-        }
-    }
 }
 
 /// HUD configuration
@@ -305,10 +293,6 @@ pub struct AiHookCommand {
 }
 
 // Default value functions
-
-fn default_execution_mode() -> String {
-    "ultrawork".to_string()
-}
 
 fn default_hud_preset() -> String {
     "standard".to_string()

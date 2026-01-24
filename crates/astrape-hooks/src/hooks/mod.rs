@@ -1,4 +1,5 @@
 pub mod agent_usage_reminder;
+pub mod astrape_orchestrator;
 pub mod auto_slash_command;
 pub mod autopilot;
 pub mod background_notification;
@@ -8,7 +9,6 @@ pub mod keyword_detector;
 pub mod learner;
 pub mod non_interactive_env;
 pub mod notepad;
-pub mod astrape_orchestrator;
 pub mod persistent_mode;
 pub mod plugin_patterns;
 pub mod preemptive_compaction;
@@ -25,6 +25,9 @@ pub mod ultrawork;
 pub use agent_usage_reminder::{
     clear_agent_usage_state, load_agent_usage_state, save_agent_usage_state,
     AgentUsageReminderHook, AgentUsageState, AGENT_TOOLS, REMINDER_MESSAGE, TARGET_TOOLS,
+};
+pub use astrape_orchestrator::{
+    AstrapeOrchestratorHook, HOOK_NAME as ASTRAPE_ORCHESTRATOR_HOOK_NAME,
 };
 pub use auto_slash_command::{
     AutoSlashCommandHook, AutoSlashCommandHookInput, AutoSlashCommandHookOutput,
@@ -75,7 +78,6 @@ pub use notepad::{
     DEFAULT_NOTEPAD_CONFIG, MANUAL_HEADER, NOTEPAD_FILENAME, PRIORITY_HEADER,
     WORKING_MEMORY_HEADER,
 };
-pub use astrape_orchestrator::{AstrapeOrchestratorHook, HOOK_NAME as ASTRAPE_ORCHESTRATOR_HOOK_NAME};
 pub use persistent_mode::{
     check_persistent_modes, reset_todo_continuation_attempts, PersistentMode, PersistentModeHook,
     PersistentModeMetadata, PersistentModeResult,

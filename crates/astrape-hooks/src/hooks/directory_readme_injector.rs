@@ -385,7 +385,14 @@ fn _tracked_tool_regex() -> Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lazy_static::lazy_static;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    // Mutex to serialize tests that modify environment variables
+    lazy_static! {
+        static ref ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+    }
 
     #[test]
     fn test_truncate_content() {
@@ -400,6 +407,8 @@ mod tests {
 
     #[test]
     fn test_find_readme_md_up_order_and_bounds() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+
         let storage = tempdir().unwrap();
         std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());
 
@@ -429,6 +438,8 @@ mod tests {
 
     #[test]
     fn test_process_tool_execution_caches_per_session_and_persists() {
+        let _lock = ENV_TEST_LOCK.lock().unwrap();
+
         let storage = tempdir().unwrap();
         std::env::set_var("ASTRAPE_README_INJECTOR_STORAGE_DIR", storage.path());
 

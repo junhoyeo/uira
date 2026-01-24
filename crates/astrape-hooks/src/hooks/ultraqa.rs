@@ -84,7 +84,9 @@ impl UltraQAHook {
     }
 
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".astrape").join("ultraqa-state.json")
+        Path::new(directory)
+            .join(".astrape")
+            .join("ultraqa-state.json")
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {

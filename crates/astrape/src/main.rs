@@ -9,6 +9,7 @@ use astrape_claude::{
     write_output,
 };
 use astrape_core::HookEvent;
+use astrape_features::astrape_state::has_astrape_state;
 use astrape_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
 use astrape_hook::KeywordDetector;
 use astrape_sdk::{create_astrape_session, SessionOptions};
@@ -716,20 +717,20 @@ fn session_command(action: SessionCommands) -> anyhow::Result<()> {
             println!("{}", "⚡ Session Status".bold());
             println!();
 
-            // Check for state files
+            // Check for state directory (session state)
             let state_dir = Path::new(".astrape/state");
-            let astrape_state = Path::new(".astrape/state");
+            let has_session_state = state_dir.exists();
 
-            let has_astrape = state_dir.exists();
-            let has_astrape = astrape_state.exists();
+            // Check for plan state file
+            let has_plan_state = has_astrape_state(".");
 
-            if has_astrape || has_astrape {
+            if has_session_state || has_plan_state {
                 println!("{} Active state found:", "✓".green());
-                if has_astrape {
+                if has_session_state {
                     println!("  {} .astrape/state/", "•".dimmed());
                 }
-                if has_astrape {
-                    println!("  {} .astrape/state/", "•".dimmed());
+                if has_plan_state {
+                    println!("  {} .astrape/boulder.json", "•".dimmed());
                 }
             } else {
                 println!("{} No active session state found", "•".dimmed());

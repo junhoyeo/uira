@@ -496,7 +496,9 @@ mod tests {
             "prompt": "Do something"
         });
 
-        let launch_result = handle_background_task_with_manager(launch_input, &manager).await.unwrap();
+        let launch_result = handle_background_task_with_manager(launch_input, &manager)
+            .await
+            .unwrap();
         let launch_text = match &launch_result.content[0] {
             crate::types::ToolContent::Text { text } => text,
         };
@@ -512,7 +514,9 @@ mod tests {
                 "taskId": task_id
             });
 
-            let cancel_result = handle_background_task_with_manager(cancel_input, &manager).await.unwrap();
+            let cancel_result = handle_background_task_with_manager(cancel_input, &manager)
+                .await
+                .unwrap();
             let cancel_text = match &cancel_result.content[0] {
                 crate::types::ToolContent::Text { text } => text,
             };

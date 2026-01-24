@@ -178,7 +178,9 @@ impl AutopilotHook {
     }
 
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".astrape").join(AUTOPILOT_STATE_FILE)
+        Path::new(directory)
+            .join(".astrape")
+            .join(AUTOPILOT_STATE_FILE)
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
