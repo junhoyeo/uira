@@ -41,10 +41,11 @@ pub use autopilot::{
     AutopilotState, AUTOPILOT_STATE_FILE,
 };
 pub use background_notification::{
-    check_background_notifications, process_background_notification, BackgroundNotificationHook,
-    BackgroundNotificationHookConfig, BackgroundNotificationHookInput,
-    BackgroundNotificationHookOutput, BackgroundNotificationManager, BackgroundTask,
-    BackgroundTaskStatus, NotificationCheckResult, TaskProgress,
+    background_tasks_dir, check_background_notifications, handle_background_event_public,
+    process_background_notification, BackgroundNotificationHook, BackgroundNotificationHookConfig,
+    BackgroundNotificationHookInput, BackgroundNotificationHookOutput,
+    BackgroundNotificationManager, BackgroundTask, BackgroundTaskStatus, NotificationCheckResult,
+    TaskProgress, MANAGER,
 };
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
 pub use directory_readme_injector::{

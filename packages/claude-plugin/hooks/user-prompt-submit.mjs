@@ -50,6 +50,25 @@ if (!prompt) {
 // Detect keywords using native Rust module
 const result = astrape.detectKeywords(prompt, null);
 
+// Check for background task notifications
+const sessionId = data.session_id || data.sessionId || 'default';
+try {
+  const notifications = astrape.checkNotifications(sessionId);
+  if (notifications && notifications.hasNotifications && notifications.message) {
+    // If we also have keyword result, combine messages
+    if (result) {
+      result.message = (notifications.message + '\n\n' + (result.message || '')).trim();
+      console.log(JSON.stringify(result));
+    } else {
+      console.log(JSON.stringify({
+        continue: true,
+        message: notifications.message
+      }));
+    }
+    process.exit(0);
+  }
+} catch {}
+
 if (result) {
   console.log(JSON.stringify(result));
 } else {

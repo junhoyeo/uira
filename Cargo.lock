@@ -284,6 +284,7 @@ dependencies = [
  "astrape-hook",
  "astrape-hooks",
  "astrape-sdk",
+ "chrono",
  "napi",
  "napi-build",
  "napi-derive",

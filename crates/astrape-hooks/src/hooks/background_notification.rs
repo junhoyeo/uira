@@ -271,12 +271,14 @@ impl BackgroundNotificationManager {
 }
 
 lazy_static! {
-    static ref MANAGER: RwLock<BackgroundNotificationManager> =
+    /// Global manager for background task notifications.
+    pub static ref MANAGER: RwLock<BackgroundNotificationManager> =
         RwLock::new(BackgroundNotificationManager::default());
     static ref TASK_EVENT_PATTERN: Regex = Regex::new(r"^task\.(completed|failed)$").unwrap();
 }
 
-fn background_tasks_dir() -> Option<PathBuf> {
+/// Get the directory where background task state files are stored.
+pub fn background_tasks_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("ASTRAPE_BACKGROUND_TASKS_DIR") {
         if !dir.is_empty() {
             return Some(PathBuf::from(dir));
@@ -322,6 +324,11 @@ fn handle_background_event(event: &serde_json::Value) {
             mgr.mark_for_notification(task);
         }
     }
+}
+
+/// Public entry point for triggering background event processing from NAPI.
+pub fn handle_background_event_public(event: &serde_json::Value) {
+    handle_background_event(event);
 }
 
 pub fn check_background_notifications(
