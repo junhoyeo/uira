@@ -20,12 +20,8 @@
     "CLAUDE.md"
   ],
   "scripts": {
-    "dev:link": "node scripts/dev-link.cjs",
-    "dev:unlink": "node scripts/dev-unlink.cjs",
-    "build": "bun run build:native && bun run copy:native",
-    "build:native": "cd ../crates/astrape-napi && bun run build",
+    "build": "cd ../crates/astrape-napi && bun run build",
     "copy:native": "cp ../crates/astrape-napi/index.js ../crates/astrape-napi/index.d.ts ../crates/astrape-napi/*.node native/",
-    "verify": "node ../crates/astrape-napi/scripts/verify-build.js",
     "test:hooks": "echo '{\"prompt\": \"ultrawork test\"}' | bun hooks/user-prompt-submit.mjs"
   },
   "repository": {
