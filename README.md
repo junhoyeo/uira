@@ -2,10 +2,10 @@
 
 <div align="center">
   <h1>Astrape</h1>
-  <p>Native Rust-powered multi-agent orchestration for Claude Code</p>
+  <p>Lightning-fast multi-agent orchestration with native Rust performance</p>
 </div>
 
-Astrape (Greek: "lightning") provides high-performance multi-agent orchestration, smart model routing, and AI-assisted development tools as a Claude Code plugin.
+> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection, HTTP proxy with agent-based routing, and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
 
 ## Features
 
