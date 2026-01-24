@@ -1,13 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/astrape-core",
-    "crates/astrape-hook",
-    "crates/astrape-claude",
-    "crates/astrape-napi",
-    "crates/astrape-sdk",
-    "crates/astrape-comment-checker",
-    "crates/astrape",
+  "crates/astrape",
+  "crates/astrape-core",
+  "crates/astrape-hook",
+  "crates/astrape-claude",
+  "crates/astrape-napi",
+  "crates/astrape-sdk",
+  "crates/astrape-comment-checker",
+  "crates/astrape-hooks", "crates/astrape-prompts",
 ]
 
 [workspace.package]
