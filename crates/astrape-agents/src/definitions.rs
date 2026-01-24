@@ -9,7 +9,7 @@ use crate::tool_restrictions::ToolRestrictionsRegistry;
 /// Equivalent to oh-my-claudecode's `getAgentDefinitions()`.
 ///
 /// This builds the full agent config map. Prompts are loaded from
-/// `repo-root/agents/{name}.md` by default.
+/// `packages/claude-plugin/agents/{name}.md` by default.
 pub fn get_agent_definitions(overrides: Option<&AgentOverrides>) -> HashMap<String, AgentConfig> {
     let loader = PromptLoader::from_fs(default_agents_dir());
     get_agent_definitions_with_loader(&loader, overrides)
