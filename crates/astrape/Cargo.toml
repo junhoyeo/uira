@@ -13,6 +13,9 @@ categories = ["command-line-utilities", "development-tools"]
 astrape-core = { workspace = true }
 astrape-hook = { workspace = true }
 astrape-claude = { workspace = true }
+astrape-sdk = { workspace = true }
+astrape-agents = { workspace = true }
+astrape-features = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

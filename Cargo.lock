@@ -109,9 +109,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "astrape-agents",
  "astrape-claude",
  "astrape-core",
+ "astrape-features",
  "astrape-hook",
+ "astrape-sdk",
  "clap",
  "colored",
  "console",
@@ -270,13 +273,18 @@ dependencies = [
 name = "astrape-napi"
 version = "0.1.0"
 dependencies = [
+ "astrape-agents",
  "astrape-core",
+ "astrape-features",
  "astrape-hook",
+ "astrape-hooks",
+ "astrape-sdk",
  "napi",
  "napi-build",
  "napi-derive",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1528,6 +1536,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

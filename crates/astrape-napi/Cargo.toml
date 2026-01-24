@@ -13,10 +13,15 @@ crate-type = ["cdylib"]
 [dependencies]
 astrape-core = { workspace = true }
 astrape-hook = { workspace = true }
-napi = { version = "3", features = ["serde-json"] }
+astrape-hooks = { workspace = true }
+astrape-agents = { workspace = true }
+astrape-features = { workspace = true }
+astrape-sdk = { workspace = true }
+napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }
 napi-derive = "3"
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { version = "1", features = ["full"] }
 
 [build-dependencies]
 napi-build = "2"
