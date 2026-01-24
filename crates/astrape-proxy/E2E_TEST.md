@@ -26,7 +26,7 @@
 ## Test 1: Start the Proxy
 
 ```bash
-cd /Users/junhoyeo/astrape
+cd /path/to/astrape  # Replace with your actual project path
 cargo run --release -p astrape-proxy
 ```
 

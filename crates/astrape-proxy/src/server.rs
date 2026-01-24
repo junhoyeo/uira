@@ -121,13 +121,16 @@ async fn handle_messages(
     }
 
     if req.stream.unwrap_or(false) {
-        // Streaming: convert upstream SSE -> Anthropic SSE.
         let stream = streaming::handle_streaming(upstream, req).map(|r| r.map(Bytes::from));
 
         let mut resp = Response::new(Body::from_stream(stream));
         resp.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("text/event-stream"),
+        );
+        resp.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache"),
         );
         return resp.into_response();
     }
@@ -216,7 +219,13 @@ async fn handle_count_tokens(
         .or_else(|| v.get("tokens"))
         .or_else(|| v.get("count"))
         .and_then(|x| x.as_u64())
-        .unwrap_or(0) as u32;
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                response = ?v,
+                "token count fields missing from upstream response, defaulting to 0"
+            );
+            0
+        }) as u32;
 
     Json(TokenCountResponse {
         input_tokens: tokens,

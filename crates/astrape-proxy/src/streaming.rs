@@ -39,11 +39,15 @@ pub fn handle_streaming(
         let mut finish_reason: Option<String> = None;
         let mut usage: Usage = Usage { input_tokens: 0, output_tokens: 0 };
 
-        // Tool call streaming state.
         let mut tool_call_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut stream_complete = false;
 
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
+            if stream_complete {
+                break;
+            }
+
             let chunk = chunk.context("failed to read upstream stream chunk")?;
             let s = String::from_utf8_lossy(&chunk);
             buffer.push_str(&s);
@@ -56,6 +60,7 @@ pub fn handle_streaming(
                 };
 
                 if data_str.trim() == "[DONE]" {
+                    stream_complete = true;
                     break;
                 }
 
@@ -136,10 +141,12 @@ pub fn handle_streaming(
                     }
                 }
 
-                // Tool call deltas.
                 if let Some(tool_calls) = delta.and_then(|d| d.get("tool_calls")).and_then(|tc| tc.as_array()) {
                     for call in tool_calls {
-                        let id = call.get("id").and_then(|x| x.as_str()).unwrap_or("toolcall_unknown");
+                        let fallback_id = format!("toolcall_unknown_{}", tool_call_index.len());
+                        let id = call.get("id")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or(&fallback_id);
                         let func = call.get("function");
                         let name = func.and_then(|f| f.get("name")).and_then(|x| x.as_str());
                         let args = func.and_then(|f| f.get("arguments")).and_then(|x| x.as_str()).unwrap_or("");

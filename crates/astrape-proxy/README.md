@@ -20,7 +20,8 @@ HTTP proxy for using non-Anthropic models with Claude Code.
 
 ```bash
 # Provider preference (default: openai)
-PREFERRED_PROVIDER=openai|google|anthropic
+# Supported: openai, google (anthropic not yet implemented)
+PREFERRED_PROVIDER=openai|google
 
 # Model mapping
 BIG_MODEL=gpt-4.1              # Maps Claude Sonnet
