@@ -657,7 +657,7 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
 
 fn session_command(action: SessionCommands) -> anyhow::Result<()> {
     match action {
-        SessionCommands::Start { config } => {
+        SessionCommands::Start { config: _ } => {
             println!("{}", "⚡ Starting Astrape Session".bold());
             println!();
 
@@ -703,13 +703,6 @@ fn session_command(action: SessionCommands) -> anyhow::Result<()> {
                 "{} Session ready. Use with Claude Agent SDK or astrape agent delegate.",
                 "✓".green()
             );
-
-            if config.is_some() {
-                println!(
-                    "{} Custom config path specified but not yet implemented",
-                    "⚠".yellow()
-                );
-            }
 
             Ok(())
         }

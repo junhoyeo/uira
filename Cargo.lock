@@ -254,6 +254,7 @@ dependencies = [
  "chrono",
  "dirs",
  "lazy_static",
+ "once_cell",
  "regex",
  "serde",
  "serde_json",
