@@ -1091,10 +1091,14 @@ impl Hook for RalphHook {
                     goals_result.as_ref(),
                 );
 
+                let goals_gate_passed = goals_result.as_ref().map(|g| g.all_passed).unwrap_or(true);
+
                 let exit_allowed = if state.require_dual_condition {
-                    signals.is_exit_allowed() && signals.confidence >= state.min_confidence
+                    signals.is_exit_allowed()
+                        && signals.confidence >= state.min_confidence
+                        && goals_gate_passed
                 } else {
-                    signals.confidence >= state.min_confidence
+                    signals.confidence >= state.min_confidence && goals_gate_passed
                 };
 
                 if exit_allowed {

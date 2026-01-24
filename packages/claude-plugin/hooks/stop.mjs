@@ -28,12 +28,6 @@ try {
   process.exit(0);
 }
 
-// Debug: Log received data
-import { appendFileSync } from 'fs';
-try {
-  appendFileSync('/tmp/stop-hook-debug.log', `[${new Date().toISOString()}] Received: ${JSON.stringify(data, null, 2)}\n`);
-} catch {}
-
 if (data.user_requested || data.userRequested) {
   console.log(JSON.stringify({ continue: true }));
   process.exit(0);
@@ -60,3 +54,5 @@ try {
 } catch (e) {
   console.log(JSON.stringify({ continue: true }));
 }
+
+process.exit(0);

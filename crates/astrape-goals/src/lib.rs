@@ -165,13 +165,10 @@ impl GoalRunner {
             }
         }
 
+        let truncated: String = trimmed.chars().take(100).collect();
         Err(GoalError::ParseError(format!(
             "Could not parse score from: {}",
-            if trimmed.len() > 100 {
-                &trimmed[..100]
-            } else {
-                trimmed
-            }
+            truncated
         )))
     }
 

@@ -891,10 +891,19 @@ goals:
             println!();
 
             for goal in goals {
-                let status = if goal.enabled { "✓" } else { "○" };
+                let (status, status_color) = if goal.enabled {
+                    ("✓", "green")
+                } else {
+                    ("○", "dimmed")
+                };
+                let status_display = if status_color == "green" {
+                    status.green()
+                } else {
+                    status.dimmed()
+                };
                 println!(
                     "  {} {} (target: {:.1})",
-                    status.green(),
+                    status_display,
                     goal.name.bold(),
                     goal.target
                 );

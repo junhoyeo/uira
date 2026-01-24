@@ -70,7 +70,10 @@ if (result && result.message) {
   const isRalph = result.message.includes('ralph-mode');
   if (isRalph) {
     const sessionId = data.session_id || data.sessionId || 'default';
-    activateRalph(sessionId, prompt);
+    const activated = activateRalph(sessionId, prompt);
+    if (!activated) {
+      console.error('[astrape] Warning: Failed to activate ralph mode - state file write failed');
+    }
   }
 }
 
