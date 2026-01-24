@@ -1,0 +1,7 @@
+goals:
+  auto_verify: true
+  goals:
+    - name: progress-check
+      command: ./check-progress.sh
+      target: 90.0
+      description: "Check if progress.txt contains a score >= 90"

@@ -650,12 +650,15 @@ mod ralph_goals_integration {
         let temp_dir = create_test_directory();
         let dir = temp_dir.path();
 
+        // Use a unique session ID that won't match any leftover global state
+        let unique_session = format!("unique-inactive-{}", std::process::id());
+
         let mut registry = HookRegistry::new();
         registry.register(Arc::new(RalphHook::new()));
 
-        let input = create_stop_input("test-session", dir, None);
+        let input = create_stop_input(&unique_session, dir, None);
         let context = HookContext::new(
-            Some("test-session".to_string()),
+            Some(unique_session.clone()),
             dir.to_string_lossy().to_string(),
         );
 
@@ -666,7 +669,7 @@ mod ralph_goals_integration {
 
         assert!(
             result.should_continue,
-            "Should pass when no ralph state exists"
+            "Should pass when no ralph state exists (mismatched session_id)"
         );
     }
 
