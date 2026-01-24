@@ -1,3 +1,9 @@
+---
+name: search
+description: Comprehensive codebase search mode with parallel exploration
+version: 0.1.0
+---
+
 # search
 
 Comprehensive codebase search mode.

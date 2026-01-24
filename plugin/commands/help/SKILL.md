@@ -1,3 +1,9 @@
+---
+name: help
+description: Show Astrape plugin usage guide and available commands
+version: 0.1.0
+---
+
 # help
 
 Show Astrape plugin usage guide.

@@ -1,8 +1,5 @@
 {
   "name": "astrape",
   "version": "0.1.0",
-  "description": "Native Rust-powered multi-agent orchestration for Claude Code",
-  "skills": "./skills/",
-  "agents": "./agents/",
-  "hooks": "./hooks/"
+  "description": "Native Rust-powered multi-agent orchestration for Claude Code"
 }

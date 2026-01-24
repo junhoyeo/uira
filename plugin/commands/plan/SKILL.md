@@ -1,3 +1,9 @@
+---
+name: plan
+description: Strategic planning mode with interview workflow for complex tasks
+version: 0.1.0
+---
+
 # plan
 
 Strategic planning mode with interview workflow.

@@ -1,3 +1,9 @@
+---
+name: ultrawork
+description: Activate maximum parallel execution mode with intelligent agent orchestration
+version: 0.1.0
+---
+
 # ultrawork
 
 Maximum parallel execution mode with intelligent agent orchestration.

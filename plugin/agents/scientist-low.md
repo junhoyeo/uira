@@ -1,17 +1,11 @@
-# scientist-low
+---
+name: scientist-low
+description: Quick data inspection and simple statistics (Haiku). Use for fast, simple queries.
+model: haiku
+color: blue
+tools: ["Read", "Glob", "Grep", "Bash", "python_repl"]
+---
 
-Quick data inspection and simple statistics (Haiku). Use for fast, simple queries.
-
-## Model
-haiku
-
-## Tier
-LOW
-
-## Tools
-Read, Glob, Grep, Bash, python_repl
-
-## Prompt
 Agent: scientist-low
 
 Prompt file not found. Please ensure agents/scientist-low.md exists.

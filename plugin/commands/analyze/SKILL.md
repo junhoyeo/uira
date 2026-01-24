@@ -1,3 +1,9 @@
+---
+name: analyze
+description: Deep analysis and investigation mode for debugging and understanding complex issues
+version: 0.1.0
+---
+
 # analyze
 
 Deep analysis and investigation mode.

@@ -1,17 +1,11 @@
-# explore
+---
+name: explore
+description: Fast codebase pattern matching (Haiku).
+model: haiku
+color: blue
+tools: ["Read", "Glob", "Grep"]
+---
 
-Fast codebase pattern matching (Haiku).
-
-## Model
-haiku
-
-## Tier
-LOW
-
-## Tools
-Read, Glob, Grep
-
-## Prompt
 # Explorer Agent
 
 You are a specialized explorer agent focused on searching and navigating the codebase.

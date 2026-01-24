@@ -1,17 +1,11 @@
-# code-reviewer
+---
+name: code-reviewer
+description: Expert code review specialist (Opus). Use for comprehensive code quality review.
+model: opus
+color: purple
+tools: ["Read", "Glob", "Grep", "Bash"]
+---
 
-Expert code review specialist (Opus). Use for comprehensive code quality review.
-
-## Model
-opus
-
-## Tier
-HIGH
-
-## Tools
-Read, Glob, Grep, Bash
-
-## Prompt
 Agent: code-reviewer
 
 Prompt file not found. Please ensure agents/code-reviewer.md exists.
