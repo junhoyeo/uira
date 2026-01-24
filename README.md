@@ -1,6 +1,8 @@
-# Astrape ⚡
-
 ![Astrape](./.github/assets/cover.jpg)
+
+<div align="center">
+  <h1>Astrape ⚡</h1>
+</div>
 
 > Lightning-fast Rust-native multi-agent orchestration system with git hooks, native linting, and AI-assisted workflows
 
