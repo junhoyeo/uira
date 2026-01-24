@@ -1069,7 +1069,7 @@ impl Hook for RalphHook {
             )));
         }
 
-        // Check for completion intent and verify with dual-condition gate
+        // Check for completion intent via transcript
         if let Some(last_response) = input.get_last_assistant_response() {
             let has_promise =
                 Self::detect_completion_promise(&last_response, &state.completion_promise);
@@ -1100,11 +1100,16 @@ impl Hook for RalphHook {
                 if exit_allowed {
                     Self::clear_state(Some(&context.directory));
                     UltraworkHook::deactivate(Some(&context.directory));
-                    return Ok(HookOutput::continue_with_message(format!(
-                        "[RALPH COMPLETE] All verification passed after {} iterations (confidence: {}%). Task finished successfully!",
-                        state.iteration,
-                        signals.confidence
-                    )));
+                    return Ok(HookOutput {
+                        should_continue: false,
+                        message: Some(format!(
+                            "[RALPH COMPLETE] All verification passed after {} iterations (confidence: {}%). Task finished successfully!",
+                            state.iteration,
+                            signals.confidence
+                        )),
+                        reason: None,
+                        modified_input: None,
+                    });
                 } else {
                     let feedback =
                         Self::build_verification_feedback(&signals, &state, &goals_result);
@@ -1140,7 +1145,7 @@ impl Hook for RalphHook {
     }
 
     fn priority(&self) -> i32 {
-        100 // Highest priority - ralph takes precedence
+        250
     }
 }
 

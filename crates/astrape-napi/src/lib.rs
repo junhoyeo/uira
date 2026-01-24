@@ -173,7 +173,6 @@ pub async fn execute_hook(event: String, input: JsHookInput) -> napi::Result<JsH
             )))
         }
     };
-
     let hook_input = HookInput {
         session_id: input.session_id.clone(),
         prompt: input.prompt,
