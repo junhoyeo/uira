@@ -8,8 +8,12 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-const OPENCODE_PORT: u16 = 4096;
-const OPENCODE_HOST: &str = "127.0.0.1";
+use crate::config::AiConfig;
+
+const DEFAULT_OPENCODE_PORT: u16 = 4096;
+const DEFAULT_OPENCODE_HOST: &str = "127.0.0.1";
+const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const DEFAULT_PROVIDER: &str = "anthropic";
 
 #[derive(Debug, Deserialize)]
 pub struct TypoEntry {
@@ -23,39 +27,52 @@ pub struct TypoEntry {
     pub corrections: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct SessionCreateBody {
-    title: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 struct Session {
     id: String,
 }
 
 #[derive(Debug, Serialize)]
-struct PromptBody {
-    parts: Vec<PromptPart>,
+struct ChatBody {
+    #[serde(rename = "modelID")]
+    model_id: String,
+
+    #[serde(rename = "providerID")]
+    provider_id: String,
+
+    parts: Vec<ChatPart>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<HashMap<String, bool>>,
 }
 
 #[derive(Debug, Serialize)]
-struct PromptPart {
+struct ChatPart {
     #[serde(rename = "type")]
     part_type: String,
     text: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct PromptResponse {
-    parts: Vec<ResponsePart>,
+struct ChatResponse {
+    id: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct ResponsePart {
-    #[serde(rename = "type")]
+struct MessageInfo {
+    info: MessageMeta,
+    parts: Vec<MessagePart>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageMeta {
     #[allow(dead_code)]
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessagePart {
+    #[serde(rename = "type")]
     part_type: String,
     text: Option<String>,
 }
@@ -64,11 +81,20 @@ pub struct TyposChecker {
     client: reqwest::blocking::Client,
     session_id: Option<String>,
     server_was_started: bool,
-    model: Option<String>,
+    config: AiConfig,
+    host: String,
+    port: u16,
 }
 
 impl TyposChecker {
-    pub fn new(model: Option<String>) -> Self {
+    pub fn new(config: Option<AiConfig>) -> Self {
+        let config = config.unwrap_or_default();
+        let host = config
+            .host
+            .clone()
+            .unwrap_or_else(|| DEFAULT_OPENCODE_HOST.to_string());
+        let port = config.port.unwrap_or(DEFAULT_OPENCODE_PORT);
+
         Self {
             client: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(120))
@@ -76,8 +102,35 @@ impl TyposChecker {
                 .unwrap(),
             session_id: None,
             server_was_started: false,
-            model,
+            config,
+            host,
+            port,
         }
+    }
+
+    fn build_tools_config(&self) -> Option<HashMap<String, bool>> {
+        if !self.config.disable_tools && !self.config.disable_mcp {
+            return None;
+        }
+
+        let mut tools = HashMap::new();
+
+        if self.config.disable_tools {
+            tools.insert("bash".to_string(), false);
+            tools.insert("edit".to_string(), false);
+            tools.insert("write".to_string(), false);
+            tools.insert("read".to_string(), false);
+            tools.insert("patch".to_string(), false);
+            tools.insert("glob".to_string(), false);
+            tools.insert("grep".to_string(), false);
+            tools.insert("webfetch".to_string(), false);
+        }
+
+        if self.config.disable_mcp {
+            tools.insert("mcp_*".to_string(), false);
+        }
+
+        Some(tools)
     }
 
     pub fn run(&mut self, files: &[String]) -> Result<bool> {
@@ -184,7 +237,7 @@ impl TyposChecker {
 
     fn is_server_running(&self) -> bool {
         self.client
-            .get(format!("http://{}:{}/health", OPENCODE_HOST, OPENCODE_PORT))
+            .get(format!("http://{}:{}/health", self.host, self.port))
             .send()
             .map(|r| r.status().is_success())
             .unwrap_or(false)
@@ -207,7 +260,7 @@ impl TyposChecker {
                 .client
                 .delete(format!(
                     "http://{}:{}/session/{}",
-                    OPENCODE_HOST, OPENCODE_PORT, session_id
+                    self.host, self.port, session_id
                 ))
                 .send();
         }
@@ -227,18 +280,9 @@ impl TyposChecker {
             return Ok(id.clone());
         }
 
-        let body = SessionCreateBody {
-            title: "astrape-typos".to_string(),
-            model: self.model.clone(),
-        };
-
         let resp: Session = self
             .client
-            .post(format!(
-                "http://{}:{}/session",
-                OPENCODE_HOST, OPENCODE_PORT
-            ))
-            .json(&body)
+            .post(format!("http://{}:{}/session", self.host, self.port))
             .send()
             .context("Failed to create session")?
             .json()
@@ -291,31 +335,40 @@ Just respond with the single word, nothing else."#,
             context
         );
 
-        let body = PromptBody {
-            parts: vec![PromptPart {
+        let model_id = self
+            .config
+            .model
+            .clone()
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let provider_id = self
+            .config
+            .provider
+            .clone()
+            .unwrap_or_else(|| DEFAULT_PROVIDER.to_string());
+
+        let body = ChatBody {
+            model_id,
+            provider_id,
+            parts: vec![ChatPart {
                 part_type: "text".to_string(),
                 text: prompt,
             }],
+            tools: self.build_tools_config(),
         };
 
         let resp = self
             .client
             .post(format!(
-                "http://{}:{}/session/{}/prompt",
-                OPENCODE_HOST, OPENCODE_PORT, session_id
+                "http://{}:{}/session/{}/message",
+                self.host, self.port, session_id
             ))
             .json(&body)
             .send()
-            .context("Failed to send prompt")?;
+            .context("Failed to send message")?;
 
-        let response: PromptResponse = resp.json().context("Failed to parse AI response")?;
+        let chat_resp: ChatResponse = resp.json().context("Failed to parse chat response")?;
 
-        let ai_text = response
-            .parts
-            .iter()
-            .find_map(|p| p.text.as_ref())
-            .map(|s| s.trim().to_uppercase())
-            .unwrap_or_default();
+        let ai_text = self.wait_for_response(&session_id, &chat_resp.id)?;
 
         let decision = if ai_text.contains("APPLY") {
             println!("    {} AI: Apply fix", "→".green());
@@ -329,6 +382,38 @@ Just respond with the single word, nothing else."#,
         };
 
         Ok(decision)
+    }
+
+    fn wait_for_response(&self, session_id: &str, _message_id: &str) -> Result<String> {
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_millis(500));
+
+            let resp = self
+                .client
+                .get(format!(
+                    "http://{}:{}/session/{}/message",
+                    self.host, self.port, session_id
+                ))
+                .send()
+                .context("Failed to get messages")?;
+
+            let messages: Vec<MessageInfo> = resp.json().context("Failed to parse messages")?;
+
+            if let Some(last) = messages.last() {
+                if last.info.id != _message_id {
+                    continue;
+                }
+                for part in &last.parts {
+                    if part.part_type == "text" {
+                        if let Some(text) = &part.text {
+                            return Ok(text.trim().to_uppercase());
+                        }
+                    }
+                }
+            }
+        }
+
+        anyhow::bail!("Timeout waiting for AI response")
     }
 
     fn get_file_context(&self, path: &str, line_num: u32) -> Result<String> {
@@ -408,6 +493,12 @@ impl Default for TyposChecker {
     }
 }
 
+impl From<AiConfig> for TyposChecker {
+    fn from(config: AiConfig) -> Self {
+        Self::new(Some(config))
+    }
+}
+
 #[derive(Debug)]
 enum Decision {
     Apply,
@@ -436,12 +527,38 @@ mod tests {
         let checker = TyposChecker::new(None);
         assert!(checker.session_id.is_none());
         assert!(!checker.server_was_started);
-        assert!(checker.model.is_none());
+        assert!(checker.config.disable_tools);
+        assert!(checker.config.disable_mcp);
 
-        let checker_with_model = TyposChecker::new(Some("claude-sonnet-4-20250514".to_string()));
+        let config = AiConfig {
+            model: Some("claude-sonnet-4-20250514".to_string()),
+            provider: Some("anthropic".to_string()),
+            disable_tools: false,
+            disable_mcp: true,
+            ..Default::default()
+        };
+        let checker_with_config = TyposChecker::new(Some(config));
         assert_eq!(
-            checker_with_model.model,
+            checker_with_config.config.model,
             Some("claude-sonnet-4-20250514".to_string())
         );
+        assert!(!checker_with_config.config.disable_tools);
+        assert!(checker_with_config.config.disable_mcp);
+    }
+
+    #[test]
+    fn test_tools_config() {
+        let checker = TyposChecker::default();
+        let tools = checker.build_tools_config().unwrap();
+        assert_eq!(tools.get("bash"), Some(&false));
+        assert_eq!(tools.get("mcp_*"), Some(&false));
+
+        let config = AiConfig {
+            disable_tools: false,
+            disable_mcp: false,
+            ..Default::default()
+        };
+        let checker_no_disable = TyposChecker::new(Some(config));
+        assert!(checker_no_disable.build_tools_config().is_none());
     }
 }

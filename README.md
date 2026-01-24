@@ -53,6 +53,9 @@ git commit        # Hooks run automatically
 ```yaml
 ai:
   model: claude-sonnet-4-20250514
+  provider: anthropic
+  disable_tools: true   # Disable file/shell tools (default: true)
+  disable_mcp: true     # Disable MCP servers (default: true)
 
 pre-commit:
   parallel: true
@@ -74,9 +77,16 @@ post-commit:
 
 ### AI Config
 
-| Key | Description |
-|-----|-------------|
-| `ai.model` | Default model for AI features (used by `typos --ai`) |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ai.model` | `claude-sonnet-4-20250514` | Model ID for opencode |
+| `ai.provider` | `anthropic` | Provider ID (anthropic, openai, etc.) |
+| `ai.host` | `127.0.0.1` | Opencode server host |
+| `ai.port` | `4096` | Opencode server port |
+| `ai.disable_tools` | `true` | Disable built-in tools (bash, edit, read, etc.) |
+| `ai.disable_mcp` | `true` | Disable all MCP servers |
+
+By default, `disable_tools` and `disable_mcp` are `true` for typos checking since only text analysis is needed.
 
 ### Variable Expansion
 

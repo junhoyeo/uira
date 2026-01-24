@@ -16,6 +16,44 @@ pub struct Config {
 pub struct AiConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+
+    #[serde(default = "AiConfig::default_disable_tools")]
+    pub disable_tools: bool,
+
+    #[serde(default = "AiConfig::default_disable_mcp")]
+    pub disable_mcp: bool,
+}
+
+impl AiConfig {
+    fn default_disable_tools() -> bool {
+        true
+    }
+
+    fn default_disable_mcp() -> bool {
+        true
+    }
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            model: None,
+            provider: None,
+            host: None,
+            port: None,
+            disable_tools: true,
+            disable_mcp: true,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

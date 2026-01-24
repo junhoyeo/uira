@@ -222,12 +222,9 @@ fn typos_command(ai: bool, files: &[String]) -> anyhow::Result<()> {
     if ai {
         println!("🔍 Checking for typos with AI assistance...\n");
 
-        let model = Config::from_file("astrape.yml")
-            .ok()
-            .and_then(|c| c.ai)
-            .and_then(|ai| ai.model);
+        let ai_config = Config::from_file("astrape.yml").ok().and_then(|c| c.ai);
 
-        let mut checker = TyposChecker::new(model);
+        let mut checker = TyposChecker::new(ai_config);
         let success = checker.run(files)?;
         if !success {
             process::exit(1);
