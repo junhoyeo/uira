@@ -225,33 +225,3 @@ cargo run -- init
 cargo run -- install
 cargo run -- run pre-commit
 ```
-
-## 📝 Roadmap
-
-- [x] CLI structure (clap)
-- [x] Basic commands (init, install, run, check, fix)
-- [ ] YAML config parsing
-- [ ] Hook execution engine (parallel with rayon)
-- [ ] File filtering (`{staged_files}`, etc.)
-- [ ] Biome preset system
-- [ ] Hook installation (`.git/hooks/` generation)
-- [ ] Integration tests
-- [ ] Binary releases (GitHub Actions)
-- [ ] Homebrew formula
-- [ ] npm wrapper package
-
-## 🤝 Contributing
-
-Contributions welcome! This project follows the Rust community's code of conduct.
-
-## 📄 License
-
-MIT © [Junho Yeo](https://github.com/junhoyeo)
-
----
-
-**Inspired by**:
-- [Lefthook](https://github.com/evilmartians/lefthook) - Fast git hooks manager (Go)
-- [Ultracite](https://github.com/haydenbleasel/ultracite) - Zero-config linter/formatter (TypeScript)
-- [Monk](https://github.com/daynin/monk) - Simple git hooks manager (Rust)
-- [Samoyed](https://github.com/nutthead/samoyed) - Minimalist hooks manager (Rust)
