@@ -102,9 +102,12 @@ async function runCommentChecker() {
     proc.stdin.write(JSON.stringify(checkerInput));
     proc.stdin.end();
 
-    // Wait for completion
-    const exitCode = await proc.exited;
-    const stderr = await new Response(proc.stderr).text();
+    // Read stderr concurrently with waiting for exit to avoid deadlock
+    // (child blocks if pipe buffer fills before parent reads)
+    const [exitCode, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stderr).text(),
+    ]);
 
     // Exit code 2 = comments detected
     if (exitCode === 2 && stderr.trim()) {

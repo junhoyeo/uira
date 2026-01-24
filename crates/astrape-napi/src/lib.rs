@@ -551,11 +551,10 @@ pub fn register_background_task(
     // Persist to disk
     if let Some(tasks_dir) = background_tasks_dir() {
         let _ = std::fs::create_dir_all(&tasks_dir);
-        let path = tasks_dir.join(format!("{}.json", &task_id));
-        let _ = std::fs::write(
-            path,
-            serde_json::to_string_pretty(&task).unwrap_or_default(),
-        );
+        if let Ok(json) = serde_json::to_string_pretty(&task) {
+            let path = tasks_dir.join(format!("{}.json", &task_id));
+            let _ = std::fs::write(path, json);
+        }
     }
 }
 
