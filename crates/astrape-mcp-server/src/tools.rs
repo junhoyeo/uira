@@ -305,7 +305,7 @@ impl ToolExecutor {
             .arg("-e")
             .arg(format!(
                 r"(function|class|const|let|var|def|fn|struct|enum|trait|impl)\s+\w*{}\w*",
-                query
+                regex::escape(query)
             ))
             .current_dir(&self.root_path)
             .stdout(Stdio::piped())
