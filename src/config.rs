@@ -20,13 +20,15 @@ pub struct HookConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Command {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     pub run: String,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub glob: Option<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stage_fixed: bool,
 }
 
@@ -50,7 +52,18 @@ impl Config {
             }],
         };
 
+        let post_commit = HookConfig {
+            parallel: false,
+            commands: vec![Command {
+                name: Some("auto-push".to_string()),
+                run: "git push origin HEAD".to_string(),
+                glob: None,
+                stage_fixed: false,
+            }],
+        };
+
         hooks.insert("pre-commit".to_string(), pre_commit);
+        hooks.insert("post-commit".to_string(), post_commit);
 
         Config { hooks }
     }
@@ -68,10 +81,15 @@ mod tests {
     fn test_default_config() {
         let config = Config::default_config();
         assert!(config.hooks.contains_key("pre-commit"));
+        assert!(config.hooks.contains_key("post-commit"));
 
         let pre_commit = &config.hooks["pre-commit"];
         assert!(pre_commit.parallel);
         assert_eq!(pre_commit.commands.len(), 1);
+
+        let post_commit = &config.hooks["post-commit"];
+        assert!(!post_commit.parallel);
+        assert_eq!(post_commit.commands.len(), 1);
     }
 
     #[test]
