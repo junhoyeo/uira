@@ -739,7 +739,7 @@ fn generate_recovery_message(
     }
 
     if parsed
-        .and_then(|p| Some(p.error_type.as_str()))
+        .map(|p| p.error_type.as_str())
         .map(|t| t.contains("non-empty content"))
         .unwrap_or(false)
     {
@@ -996,10 +996,8 @@ impl RecoveryStorage {
                 StoredPart::Text(p) => !p.text.trim().is_empty(),
                 _ => false,
             }
-        } else if t == "tool" || t == "tool_use" || t == "tool_result" {
-            true
         } else {
-            false
+            t == "tool" || t == "tool_use" || t == "tool_result"
         }
     }
 
@@ -1370,7 +1368,7 @@ fn get_error_message_value(error: &serde_json::Value) -> String {
         return s.to_lowercase();
     }
 
-    for candidate in [
+    for obj in [
         error.get("data"),
         error.get("error"),
         Some(error),
@@ -1378,12 +1376,13 @@ fn get_error_message_value(error: &serde_json::Value) -> String {
             .get("data")
             .and_then(|d| d.as_object())
             .and_then(|d| d.get("error")),
-    ] {
-        if let Some(obj) = candidate {
-            if let Some(msg) = obj.get("message").and_then(|m| m.as_str()) {
-                if !msg.is_empty() {
-                    return msg.to_lowercase();
-                }
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(msg) = obj.get("message").and_then(|m| m.as_str()) {
+            if !msg.is_empty() {
+                return msg.to_lowercase();
             }
         }
     }

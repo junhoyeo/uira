@@ -127,7 +127,7 @@ pub enum WorkerStatus {
 }
 
 /// File ownership mapping to prevent conflicts
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileOwnership {
     /// Files owned by the coordinator (shared files)
     pub coordinator: Vec<String>,
@@ -135,16 +135,6 @@ pub struct FileOwnership {
     pub workers: HashMap<String, Vec<String>>,
     /// Files that have conflicts (multiple workers attempted to modify)
     pub conflicts: Vec<String>,
-}
-
-impl Default for FileOwnership {
-    fn default() -> Self {
-        Self {
-            coordinator: Vec::new(),
-            workers: HashMap::new(),
-            conflicts: Vec::new(),
-        }
-    }
 }
 
 /// Complete ultrapilot state
@@ -505,7 +495,7 @@ impl UltrapilotHook {
             for file in &worker.files_modified {
                 file_to_workers
                     .entry(file.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(worker.id.clone());
             }
         }
@@ -683,7 +673,7 @@ impl UltrapilotHook {
             .ownership
             .workers
             .entry(worker_id.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(file_path.to_string());
 
         Self::write_state(directory, &state)

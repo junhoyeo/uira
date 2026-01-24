@@ -81,11 +81,11 @@ pub struct ValidationStats {
 }
 
 fn is_content_part_type(t: &str) -> bool {
-    CONTENT_PART_TYPES.iter().any(|x| *x == t)
+    CONTENT_PART_TYPES.contains(&t)
 }
 
 fn is_thinking_part_type(t: &str) -> bool {
-    THINKING_PART_TYPES.iter().any(|x| *x == t)
+    THINKING_PART_TYPES.contains(&t)
 }
 
 pub fn is_extended_thinking_model(model_id: &str) -> bool {
@@ -125,7 +125,7 @@ pub fn find_previous_thinking_content(messages: &[MessageWithParts], current_ind
             let thinking = part
                 .thinking
                 .as_deref()
-                .or_else(|| part.text.as_deref())
+                .or(part.text.as_deref())
                 .unwrap_or("");
             if !thinking.trim().is_empty() {
                 return thinking.to_string();
@@ -140,7 +140,7 @@ pub fn prepend_thinking_block(message: &mut MessageWithParts, thinking_content: 
     let thinking_part = MessagePart {
         part_type: "thinking".to_string(),
         id: Some(SYNTHETIC_THINKING_ID_PREFIX.to_string()),
-        session_id: message.info.session_id.clone().or_else(|| Some(String::new())),
+        session_id: message.info.session_id.clone().or(Some(String::new())),
         message_id: Some(message.info.id.clone()),
         thinking: Some(thinking_content.to_string()),
         text: None,
@@ -206,8 +206,8 @@ pub fn validate_message(
 pub fn validate_messages(messages: &mut [MessageWithParts], model_id: &str) -> Vec<ValidationResult> {
     let snapshot = messages.to_vec();
     let mut results = Vec::with_capacity(messages.len());
-    for i in 0..messages.len() {
-        let res = validate_message(&mut messages[i], &snapshot, i, model_id);
+    for (i, msg) in messages.iter_mut().enumerate() {
+        let res = validate_message(msg, &snapshot, i, model_id);
         results.push(res);
     }
     results
@@ -251,12 +251,12 @@ fn parse_messages_from_input(input: &HookInput) -> Option<Vec<MessageWithParts>>
 
 fn build_modified_input(original: &serde_json::Value, messages: &[MessageWithParts]) -> serde_json::Value {
     if original.is_array() {
-        serde_json::to_value(messages).unwrap_or_else(|_| serde_json::Value::Null)
+        serde_json::to_value(messages).unwrap_or(serde_json::Value::Null)
     } else if original.is_object() {
         let mut obj = original.as_object().cloned().unwrap_or_default();
         obj.insert(
             "messages".to_string(),
-            serde_json::to_value(messages).unwrap_or_else(|_| serde_json::Value::Null),
+            serde_json::to_value(messages).unwrap_or(serde_json::Value::Null),
         );
         serde_json::Value::Object(obj)
     } else {

@@ -116,7 +116,7 @@ pub struct PreemptiveCompactionConfig {
 ///
 /// Matches oh-my-claudecode/src/hooks/preemptive-compaction/index.ts
 pub fn estimate_tokens(text: &str) -> u64 {
-    ((text.len() + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN) as u64
+    text.len().div_ceil(CHARS_PER_TOKEN) as u64
 }
 
 pub fn analyze_context_usage(content: &str, config: Option<&PreemptiveCompactionConfig>) -> ContextUsageResult {
@@ -151,21 +151,11 @@ pub fn analyze_context_usage(content: &str, config: Option<&PreemptiveCompaction
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SessionState {
     last_warning_time: u64,
     warning_count: u32,
     estimated_tokens: u64,
-}
-
-impl Default for SessionState {
-    fn default() -> Self {
-        Self {
-            last_warning_time: 0,
-            warning_count: 0,
-            estimated_tokens: 0,
-        }
-    }
 }
 
 lazy_static! {

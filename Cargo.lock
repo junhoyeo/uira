@@ -217,14 +217,18 @@ name = "astrape-features"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "astrape-hooks",
  "astrape-sdk",
  "chrono",
  "futures",
+ "parking_lot",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
 ]
 
 [[package]]

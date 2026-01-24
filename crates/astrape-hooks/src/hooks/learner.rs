@@ -1400,18 +1400,17 @@ pub fn detect_extractable_moment(
 
     for group in DETECTION_GROUPS.iter() {
         for pattern in &group.patterns {
-            if pattern.is_match(assistant_message) {
-                if best
+            if pattern.is_match(assistant_message)
+                && best
                     .as_ref()
                     .map(|(_, c, _)| group.confidence > *c)
                     .unwrap_or(true)
-                {
-                    best = Some((
-                        group.pattern_type.clone(),
-                        group.confidence,
-                        format!("Detected {:?} pattern", group.pattern_type),
-                    ));
-                }
+            {
+                best = Some((
+                    group.pattern_type.clone(),
+                    group.confidence,
+                    format!("Detected {:?} pattern", group.pattern_type),
+                ));
             }
         }
     }
@@ -1481,21 +1480,11 @@ pub struct DetectionStats {
     pub last_detection: Option<DetectionResult>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SessionDetectionState {
     messages_since_prompt: i32,
     last_detection: Option<DetectionResult>,
     prompted_count: i32,
-}
-
-impl Default for SessionDetectionState {
-    fn default() -> Self {
-        Self {
-            messages_since_prompt: 0,
-            last_detection: None,
-            prompted_count: 0,
-        }
-    }
 }
 
 lazy_static! {
@@ -1638,6 +1627,7 @@ fn parse_progress(content: &str) -> ProgressLog {
 
     let mut current: Option<ProgressEntry> = None;
     let mut current_section = String::new();
+    let entry_re = Regex::new(r"^##\s*\[(.+?)\]\s*-\s*(.+)$").unwrap();
 
     for line in lines {
         let trimmed = line.trim();
@@ -1652,10 +1642,7 @@ fn parse_progress(content: &str) -> ProgressLog {
         }
 
         // ## [Date] - [Story]
-        if let Some(caps) = Regex::new(r"^##\s*\[(.+?)\]\s*-\s*(.+)$")
-            .ok()
-            .and_then(|re| re.captures(trimmed))
-        {
+        if let Some(caps) = entry_re.captures(trimmed) {
             if let Some(e) = current.take() {
                 if !e.story_id.is_empty() {
                     entries.push(e);

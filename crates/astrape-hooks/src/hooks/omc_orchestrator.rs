@@ -347,7 +347,7 @@ pub fn is_source_file(file_path: &str) -> bool {
 }
 
 pub fn is_write_edit_tool(tool_name: &str) -> bool {
-    WRITE_EDIT_TOOLS.iter().any(|t| *t == tool_name)
+    WRITE_EDIT_TOOLS.contains(&tool_name)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,116 +1,367 @@
-use std::path::{Path, PathBuf};
+//! Session state management and lifecycle tracking
+//!
+//! Provides thread-safe state management for Astrape sessions, including:
+//! - Session lifecycle tracking (idle, active, background, complete)
+//! - State persistence and retrieval
+//! - Concurrent access via RwLock
 
-use chrono::Utc;
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use thiserror::Error;
 
-use crate::astrape_state::{
-    append_session_id, create_astrape_state, get_active_plan_path, get_plan_progress,
-    get_plan_summaries, read_astrape_state, write_astrape_state, AstrapeState, PlanProgress,
-    PlanSummary,
-};
-use crate::notepad_wisdom::init_plan_notepad;
-use crate::state_manager::types::{SessionLifecycleEvent, SessionStateSnapshot};
+/// Session state lifecycle stages
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SessionState {
+    /// Session is idle, no active work
+    #[default]
+    Idle,
+    /// Session is actively executing
+    Active,
+    /// Session is running in background
+    Background,
+    /// Session is paused
+    Paused,
+    /// Session completed successfully
+    Complete,
+    /// Session failed
+    Failed,
+    /// Session was cancelled
+    Cancelled,
+}
 
-pub mod types;
+impl SessionState {
+    /// Check if the session is in a terminal state (cannot transition further)
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            SessionState::Complete | SessionState::Failed | SessionState::Cancelled
+        )
+    }
 
-/// Manages session lifecycle and plan state persistence.
-///
-/// This is the glue layer that combines:
-/// - `astrape_state` (plan progress + state persistence)
-/// - `notepad_wisdom` (plan-scoped learning persistence)
+    /// Check if the session is currently running (active or background)
+    pub fn is_running(&self) -> bool {
+        matches!(self, SessionState::Active | SessionState::Background)
+    }
+}
+
+/// Errors that can occur during state management
+#[derive(Error, Debug)]
+pub enum StateManagerError {
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
+
+    #[error("Invalid state transition from {from:?} to {to:?}")]
+    InvalidTransition {
+        from: SessionState,
+        to: SessionState,
+    },
+
+    #[error("Session is in terminal state {0:?}")]
+    TerminalState(SessionState),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}
+
+/// Session metadata and state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    /// Unique session identifier
+    pub id: String,
+    /// Current state
+    pub state: SessionState,
+    /// Session-specific metadata
+    pub metadata: HashMap<String, serde_json::Value>,
+    /// Timestamp when session was created (Unix timestamp)
+    pub created_at: u64,
+    /// Timestamp when session was last updated (Unix timestamp)
+    pub updated_at: u64,
+}
+
+impl Session {
+    /// Create a new session
+    pub fn new(id: String) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        Self {
+            id,
+            state: SessionState::default(),
+            metadata: HashMap::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Update the session state
+    pub fn set_state(&mut self, state: SessionState) {
+        self.state = state;
+        self.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+    }
+
+    /// Get metadata value by key
+    pub fn get_metadata(&self, key: &str) -> Option<&serde_json::Value> {
+        self.metadata.get(key)
+    }
+
+    /// Set metadata value
+    pub fn set_metadata(&mut self, key: String, value: serde_json::Value) {
+        self.metadata.insert(key, value);
+        self.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+    }
+}
+
+/// Thread-safe state manager for session lifecycle management
 #[derive(Debug, Clone)]
 pub struct StateManager {
-    directory: PathBuf,
+    sessions: Arc<RwLock<HashMap<String, Session>>>,
+}
+
+impl Default for StateManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StateManager {
-    pub fn new(directory: impl Into<PathBuf>) -> Self {
+    /// Create a new state manager
+    pub fn new() -> Self {
         Self {
-            directory: directory.into(),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn directory(&self) -> &Path {
-        &self.directory
+    /// Create a new session
+    pub fn create_session(&self, id: String) -> Session {
+        let session = Session::new(id.clone());
+        let mut sessions = self.sessions.write();
+        sessions.insert(id, session.clone());
+        session
     }
 
-    pub fn get_active_plan_path(&self) -> Option<String> {
-        get_active_plan_path(&self.directory)
+    /// Get a session by ID
+    pub fn get_session(&self, id: &str) -> Option<Session> {
+        let sessions = self.sessions.read();
+        sessions.get(id).cloned()
     }
 
-    pub fn read_state(&self) -> Option<AstrapeState> {
-        read_astrape_state(&self.directory)
+    /// Get current state for a session
+    pub fn get_state(&self, id: &str) -> Result<SessionState, StateManagerError> {
+        let sessions = self.sessions.read();
+        sessions
+            .get(id)
+            .map(|s| s.state)
+            .ok_or_else(|| StateManagerError::SessionNotFound(id.to_string()))
     }
 
-    /// Start a new plan session.
-    ///
-    /// Creates `.astrape/state.json` (via astrape_state) and initializes the plan notepad.
-    pub fn start_plan(&self, plan_path: impl AsRef<Path>, session_id: &str) -> Option<AstrapeState> {
-        let plan_path = plan_path.as_ref();
-        let state = create_astrape_state(plan_path, session_id);
-        if !write_astrape_state(&self.directory, &state) {
-            return None;
+    /// Set state for a session
+    pub fn set_state(&self, id: &str, state: SessionState) -> Result<(), StateManagerError> {
+        let mut sessions = self.sessions.write();
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| StateManagerError::SessionNotFound(id.to_string()))?;
+
+        // Prevent transitions from terminal states
+        if session.state.is_terminal() {
+            return Err(StateManagerError::TerminalState(session.state));
         }
 
-        // Best-effort notepad initialization.
-        let _ = init_plan_notepad(&state.plan_name, &self.directory);
-
-        Some(state)
+        session.set_state(state);
+        Ok(())
     }
 
-    /// Resume an existing plan session by appending the session id.
-    pub fn resume_plan(&self, session_id: &str) -> Option<AstrapeState> {
-        append_session_id(&self.directory, session_id)
+    /// Check if a session is active
+    pub fn is_active(&self, id: &str) -> bool {
+        self.get_state(id)
+            .map(|s| s == SessionState::Active)
+            .unwrap_or(false)
     }
 
-    pub fn get_plan_summaries(&self) -> Vec<PlanSummary> {
-        get_plan_summaries(&self.directory)
+    /// Check if a session is running (active or background)
+    pub fn is_running(&self, id: &str) -> bool {
+        self.get_state(id).map(|s| s.is_running()).unwrap_or(false)
     }
 
-    pub fn get_plan_progress(&self, plan_path: impl AsRef<Path>) -> PlanProgress {
-        get_plan_progress(plan_path)
-    }
-
-    pub fn snapshot(&self, event: SessionLifecycleEvent) -> SessionStateSnapshot {
-        SessionStateSnapshot {
-            event,
-            timestamp: Utc::now(),
-            directory: self.directory.clone(),
-            active_plan: self.get_active_plan_path(),
-            state: self.read_state(),
+    /// Get or create a session (thread-safe, uses single write lock)
+    pub fn get_or_create_session(&self, id: &str) -> Session {
+        // Use a single write lock to prevent race conditions between check and create
+        let mut sessions = self.sessions.write();
+        if let Some(session) = sessions.get(id) {
+            session.clone()
+        } else {
+            let session = Session::new(id.to_string());
+            let result = session.clone();
+            sessions.insert(id.to_string(), session);
+            result
         }
+    }
+
+    /// Update session metadata
+    pub fn set_metadata(
+        &self,
+        id: &str,
+        key: String,
+        value: serde_json::Value,
+    ) -> Result<(), StateManagerError> {
+        let mut sessions = self.sessions.write();
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| StateManagerError::SessionNotFound(id.to_string()))?;
+
+        session.set_metadata(key, value);
+        Ok(())
+    }
+
+    /// Get session metadata
+    pub fn get_metadata(
+        &self,
+        id: &str,
+        key: &str,
+    ) -> Result<Option<serde_json::Value>, StateManagerError> {
+        let sessions = self.sessions.read();
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| StateManagerError::SessionNotFound(id.to_string()))?;
+
+        Ok(session.get_metadata(key).cloned())
+    }
+
+    /// Delete a session
+    pub fn delete_session(&self, id: &str) -> Option<Session> {
+        let mut sessions = self.sessions.write();
+        sessions.remove(id)
+    }
+
+    /// List all session IDs
+    pub fn list_sessions(&self) -> Vec<String> {
+        let sessions = self.sessions.read();
+        sessions.keys().cloned().collect()
+    }
+
+    /// Get count of active sessions
+    pub fn active_count(&self) -> usize {
+        let sessions = self.sessions.read();
+        sessions
+            .values()
+            .filter(|s| s.state == SessionState::Active)
+            .count()
+    }
+
+    /// Clear all sessions
+    pub fn clear(&self) {
+        let mut sessions = self.sessions.write();
+        sessions.clear();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
-    fn start_plan_creates_state_and_notepad() {
-        let dir = TempDir::new().unwrap();
-        let plans_dir = dir.path().join(".omc").join("plans");
-        std::fs::create_dir_all(&plans_dir).unwrap();
-        let plan_path = plans_dir.join("demo.md");
-        std::fs::write(&plan_path, "- [ ] task\n").unwrap();
-
-        let manager = StateManager::new(dir.path());
-        let state = manager.start_plan(&plan_path, "ses_demo").expect("state");
-
-        assert_eq!(state.plan_name, "demo");
-        assert_eq!(manager.get_active_plan_path(), Some(state.active_plan.clone()));
-
-        // Notepad is best-effort, but should exist for new plan.
-        let notepad_dir = dir.path().join(crate::astrape_state::NOTEPAD_BASE_PATH).join("demo");
-        assert!(notepad_dir.exists());
+    fn test_session_state_transitions() {
+        assert!(!SessionState::Active.is_terminal());
+        assert!(SessionState::Complete.is_terminal());
+        assert!(SessionState::Active.is_running());
+        assert!(!SessionState::Idle.is_running());
     }
 
     #[test]
-    fn snapshot_captures_state() {
-        let dir = TempDir::new().unwrap();
-        let manager = StateManager::new(dir.path());
-        let snap = manager.snapshot(SessionLifecycleEvent::SessionStart);
-        assert_eq!(snap.event, SessionLifecycleEvent::SessionStart);
-        assert_eq!(snap.directory, dir.path().to_path_buf());
+    fn test_session_creation() {
+        let session = Session::new("test-1".to_string());
+        assert_eq!(session.id, "test-1");
+        assert_eq!(session.state, SessionState::Idle);
+        assert!(session.metadata.is_empty());
+    }
+
+    #[test]
+    fn test_state_manager_basic() {
+        let manager = StateManager::new();
+        let session = manager.create_session("test-1".to_string());
+
+        assert_eq!(session.state, SessionState::Idle);
+        assert!(manager.is_active("test-1") == false);
+    }
+
+    #[test]
+    fn test_state_transitions() {
+        let manager = StateManager::new();
+        manager.create_session("test-1".to_string());
+
+        manager.set_state("test-1", SessionState::Active).unwrap();
+        assert!(manager.is_active("test-1"));
+
+        manager
+            .set_state("test-1", SessionState::Background)
+            .unwrap();
+        assert!(manager.is_running("test-1"));
+    }
+
+    #[test]
+    fn test_terminal_state_prevention() {
+        let manager = StateManager::new();
+        manager.create_session("test-1".to_string());
+
+        manager.set_state("test-1", SessionState::Complete).unwrap();
+
+        let result = manager.set_state("test-1", SessionState::Active);
+        assert!(matches!(
+            result,
+            Err(StateManagerError::TerminalState(SessionState::Complete))
+        ));
+    }
+
+    #[test]
+    fn test_metadata() {
+        let manager = StateManager::new();
+        manager.create_session("test-1".to_string());
+
+        manager
+            .set_metadata("test-1", "key1".to_string(), serde_json::json!("value1"))
+            .unwrap();
+
+        let value = manager.get_metadata("test-1", "key1").unwrap();
+        assert_eq!(value, Some(serde_json::json!("value1")));
+    }
+
+    #[test]
+    fn test_session_not_found() {
+        let manager = StateManager::new();
+        let result = manager.get_state("nonexistent");
+        assert!(matches!(result, Err(StateManagerError::SessionNotFound(_))));
+    }
+
+    #[test]
+    fn test_list_and_count() {
+        let manager = StateManager::new();
+        manager.create_session("test-1".to_string());
+        manager.create_session("test-2".to_string());
+        manager.create_session("test-3".to_string());
+
+        manager.set_state("test-1", SessionState::Active).unwrap();
+        manager.set_state("test-2", SessionState::Active).unwrap();
+
+        assert_eq!(manager.list_sessions().len(), 3);
+        assert_eq!(manager.active_count(), 2);
+    }
+
+    #[test]
+    fn test_clear() {
+        let manager = StateManager::new();
+        manager.create_session("test-1".to_string());
+        manager.create_session("test-2".to_string());
+
+        manager.clear();
+        assert_eq!(manager.list_sessions().len(), 0);
     }
 }

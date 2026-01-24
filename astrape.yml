@@ -1,3 +1,6 @@
+ai:
+  model: anthropic/claude-sonnet-4-20250514
+
 pre-commit:
   parallel: true
   commands:
@@ -6,7 +9,7 @@ pre-commit:
     - name: clippy
       run: cargo clippy -- -D warnings
     - name: typos
-      run: astrape typos --ai
+      run: ./target/debug/astrape typos --ai --stage
 
 post-commit:
   parallel: false

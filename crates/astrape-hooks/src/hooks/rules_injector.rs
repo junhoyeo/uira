@@ -223,8 +223,8 @@ fn parse_array_or_string_value(
         let mut items: Vec<String> = Vec::new();
         let mut consumed = 1usize;
 
-        for j in (current_index + 1)..lines.len() {
-            let next_line = lines[j];
+        for next_line in lines.iter().skip(current_index + 1) {
+            let next_line = *next_line;
 
             // ^\s+-\s*(.*)$
             if let Some(stripped) = next_line.trim_start().strip_prefix('-') {
@@ -519,12 +519,12 @@ pub fn calculate_distance(rule_path: &str, current_file: &str, project_root: Opt
     let current_rel_str = current_rel.to_string_lossy().to_string();
 
     let rule_parts: Vec<String> = rule_rel_str
-        .split(|c| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
     let current_parts: Vec<String> = current_rel_str
-        .split(|c| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
@@ -556,7 +556,7 @@ pub fn find_rule_files(
     // Search from current file's directory up to project root
     let mut current_dir = current_file_path
         .parent()
-        .unwrap_or_else(|| current_file_path.as_path())
+        .unwrap_or(current_file_path.as_path())
         .to_path_buf();
     let mut distance: u32 = 0;
 

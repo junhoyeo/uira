@@ -59,7 +59,9 @@ impl UltraworkHook {
 
     /// Get the state file path for Ultrawork (local)
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".omc").join("ultrawork-state.json")
+        Path::new(directory)
+            .join(".omc")
+            .join("ultrawork-state.json")
     }
 
     /// Get global state file path (for cross-session persistence)

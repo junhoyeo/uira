@@ -229,7 +229,7 @@ pub fn validate_commit_message(
 
     let trimmed = message.trim();
     let lines: Vec<&str> = trimmed.split('\n').collect();
-    let subject = lines.get(0).copied().unwrap_or("");
+    let subject = lines.first().copied().unwrap_or("");
 
     if subject.is_empty() {
         errors.push("Commit message cannot be empty".to_string());
@@ -254,10 +254,8 @@ pub fn validate_commit_message(
         errors.push(format!("Subject line exceeds {} characters", max_len));
     }
 
-    if cfg.require_scope.unwrap_or(false) {
-        if !SCOPE_RE.is_match(subject) {
-            errors.push("Scope is required in commit message".to_string());
-        }
+    if cfg.require_scope.unwrap_or(false) && !SCOPE_RE.is_match(subject) {
+        errors.push("Scope is required in commit message".to_string());
     }
 
     if cfg.require_body.unwrap_or(false) {
