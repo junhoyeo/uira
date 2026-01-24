@@ -1,48 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "enabledPlugins": {
-    "oh-my-claudecode@omc": false
-  },
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ASTRAPE_NAPI_PATH=$PWD/crates/astrape-napi node $PWD/.claude/hooks/astrape-user-prompt.mjs"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node $PWD/.claude/hooks/astrape-stop.mjs"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ASTRAPE_NAPI_PATH=$PWD/crates/astrape-napi node $PWD/.claude/hooks/astrape-pre-tool.mjs"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node $PWD/.claude/hooks/astrape-session-start.mjs"
-          }
-        ]
-      }
-    ]
+    "oh-my-claudecode@omc": false,
+    "astrape@astrape": true
   }
 }
