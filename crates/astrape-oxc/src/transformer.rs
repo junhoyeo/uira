@@ -24,44 +24,12 @@ pub struct TransformResult {
     pub error: Option<String>,
 }
 
-/// Transform options
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransformConfig {
-    /// Strip TypeScript types
-    #[serde(default = "default_true")]
-    pub typescript: bool,
-    /// Transform JSX
-    #[serde(default = "default_true")]
-    pub jsx: bool,
-    /// Target ES version (e.g., "es2015", "es2020", "esnext")
-    #[serde(default = "default_target")]
-    pub target: String,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_target() -> String {
-    "es2020".to_string()
-}
-
-impl Default for TransformConfig {
-    fn default() -> Self {
-        Self {
-            typescript: true,
-            jsx: true,
-            target: "es2020".to_string(),
-        }
-    }
-}
-
 /// Code transformer
 pub struct Transformer;
 
 impl Transformer {
     /// Transform a file
-    pub fn transform_file(path: &str, config: Option<TransformConfig>) -> TransformResult {
+    pub fn transform_file(path: &str) -> TransformResult {
         let source = match fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
@@ -72,18 +40,14 @@ impl Transformer {
                 }
             }
         };
-        Self::transform_source(path, &source, config)
+        Self::transform_source(path, &source)
     }
 
     /// Transform source code
     ///
-    /// Note: The `config` parameter is reserved for future use. Currently, transformation
-    /// behavior is determined by the file extension (e.g., `.ts` for TypeScript, `.tsx` for JSX).
-    pub fn transform_source(
-        filename: &str,
-        source: &str,
-        _config: Option<TransformConfig>,
-    ) -> TransformResult {
+    /// Transformation behavior is determined by the file extension
+    /// (e.g., `.ts` for TypeScript, `.tsx` for JSX).
+    pub fn transform_source(filename: &str, source: &str) -> TransformResult {
         let allocator = Allocator::default();
         let source_type = SourceType::from_path(filename).unwrap_or_default();
 
@@ -158,11 +122,9 @@ mod tests {
         let result = Transformer::transform_source(
             "test.ts",
             "const x: number = 1; function foo(a: string): void {}",
-            None,
         );
         assert!(result.success);
         let code = result.code.unwrap();
-        // TypeScript types should be stripped
         assert!(!code.contains(": number"));
         assert!(!code.contains(": string"));
         assert!(!code.contains(": void"));
@@ -173,15 +135,13 @@ mod tests {
         let result = Transformer::transform_source(
             "test.tsx",
             "const el = <div className=\"foo\">Hello</div>;",
-            None,
         );
-        // JSX transformation depends on the react runtime setting
         assert!(result.success || result.error.is_some());
     }
 
     #[test]
     fn test_transform_error() {
-        let result = Transformer::transform_source("test.ts", "const x: = 1;", None);
+        let result = Transformer::transform_source("test.ts", "const x: = 1;");
         assert!(!result.success);
         assert!(result.error.is_some());
     }
