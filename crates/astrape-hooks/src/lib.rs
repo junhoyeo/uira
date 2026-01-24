@@ -42,5 +42,5 @@ pub use hooks::{
     ultraqa::{UltraQAExitReason, UltraQAGoalType, UltraQAHook, UltraQAResult, UltraQAState},
     ultrawork::{UltraworkHook, UltraworkState},
 };
-pub use registry::HookRegistry;
+pub use registry::{default_hooks, HookRegistry};
 pub use types::{HookEvent, HookInput, HookOutput, HookType};

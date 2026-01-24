@@ -262,7 +262,7 @@ impl Hook for EmptyMessageSanitizerHook {
         input: &HookInput,
         _context: &HookContext,
     ) -> HookResult {
-        let Some((original, mut messages)) = parse_messages_from_input(input) else {
+        let Some((original, messages)) = parse_messages_from_input(input) else {
             return Ok(HookOutput::pass());
         };
 

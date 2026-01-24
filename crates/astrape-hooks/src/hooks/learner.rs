@@ -18,6 +18,7 @@
 //!   - string arrays (inline: ["a", "b"], or multi-line with `- item`)
 //! - No external YAML libraries are used.
 
+use async_trait::async_trait;
 use dirs::home_dir;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -26,6 +27,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 // =============================================================================
 // Constants (ported from constants.ts)
@@ -169,15 +173,6 @@ pub struct InjectedSkillsData {
     pub injected_hashes: Vec<String>,
     #[serde(rename = "updatedAt")]
     pub updated_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HookContext {
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    pub directory: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
 }
 
 // =============================================================================
@@ -2123,6 +2118,52 @@ fn to_hex(bytes: &[u8]) -> String {
         out.push(HEX[(b & 0x0f) as usize] as char);
     }
     out
+}
+
+// =============================================================================
+// Hook trait implementation
+// =============================================================================
+
+#[async_trait]
+impl Hook for LearnerHook {
+    fn name(&self) -> &str {
+        "learner"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::UserPromptSubmit]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Only process if learner is enabled
+        if !is_learner_enabled() {
+            return Ok(HookOutput::pass());
+        }
+
+        // Get prompt
+        let prompt = match &input.prompt {
+            Some(p) => p,
+            None => return Ok(HookOutput::pass()),
+        };
+
+        // Check for learner-related keywords
+        let keywords = ["extract skill", "/learner", "learn skill"];
+        let is_learner_request = keywords.iter().any(|k| prompt.to_lowercase().contains(k));
+
+        if is_learner_request {
+            // Return message indicating learner is active
+            return Ok(HookOutput::continue_with_message(
+                "Learner hook detected a skill extraction request."
+            ));
+        }
+
+        Ok(HookOutput::pass())
+    }
 }
 
 // =============================================================================

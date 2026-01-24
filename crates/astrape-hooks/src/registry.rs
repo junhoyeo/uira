@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::hook::{Hook, HookContext, HookResult};
+use crate::hooks::*;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
 /// Registry for managing and executing hooks
@@ -116,6 +117,41 @@ impl Default for HookRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Create a HookRegistry with all default hooks pre-registered
+pub fn default_hooks() -> HookRegistry {
+    let mut registry = HookRegistry::new();
+
+    // Register all 22 hooks
+    registry.register(Arc::new(AgentUsageReminderHook));
+    registry.register(Arc::new(AutoSlashCommandHook));
+    registry.register(Arc::new(AutopilotHook::new()));
+    registry.register(Arc::new(BackgroundNotificationHook::new()));
+    registry.register(Arc::new(DirectoryReadmeInjectorHook::new(
+        std::env::current_dir().unwrap_or_default(),
+    )));
+    registry.register(Arc::new(EmptyMessageSanitizerHook::new()));
+    registry.register(Arc::new(KeywordDetectorHook::new()));
+    registry.register(Arc::new(LearnerHook::new()));
+    registry.register(Arc::new(NonInteractiveEnvHook));
+    registry.register(Arc::new(NotepadHook::new()));
+    registry.register(Arc::new(OmcOrchestratorHook));
+    registry.register(Arc::new(PersistentModeHook));
+    registry.register(Arc::new(PreemptiveCompactionHook::new(None)));
+    registry.register(Arc::new(RalphHook::new()));
+    registry.register(Arc::new(RecoveryHook::new()));
+    registry.register(Arc::new(RulesInjectorHook::new(
+        std::env::current_dir().unwrap_or_default(),
+    )));
+    registry.register(Arc::new(ThinkModeHook::new()));
+    registry.register(Arc::new(ThinkingBlockValidatorHook));
+    registry.register(Arc::new(TodoContinuationHook::new()));
+    registry.register(Arc::new(UltrapilotHook::new()));
+    registry.register(Arc::new(UltraQAHook::new()));
+    registry.register(Arc::new(UltraworkHook::new()));
+
+    registry
 }
 
 #[cfg(test)]

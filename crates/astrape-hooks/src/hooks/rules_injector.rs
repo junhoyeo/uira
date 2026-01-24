@@ -7,6 +7,7 @@
 //! This is a single-file Rust port of the TypeScript module:
 //! `oh-my-claudecode/src/hooks/rules-injector/*`.
 
+use async_trait::async_trait;
 use dirs::home_dir;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -15,6 +16,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 // =============================================================================
 // Constants
@@ -941,6 +945,27 @@ impl RulesInjectorHook {
 
     pub fn is_tracked_tool(tool_name: &str) -> bool {
         TRACKED_TOOLS.iter().any(|t| *t == tool_name.to_lowercase())
+    }
+}
+
+#[async_trait]
+impl Hook for RulesInjectorHook {
+    fn name(&self) -> &str {
+        "rules-injector"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::SessionStart]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        _input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Rules injection happens at session start
+        Ok(HookOutput::pass())
     }
 }
 

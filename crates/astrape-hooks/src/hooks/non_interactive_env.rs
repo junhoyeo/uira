@@ -1,7 +1,11 @@
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const HOOK_NAME: &str = "non-interactive-env";
 
@@ -256,6 +260,35 @@ impl NonInteractiveEnvHook {
 impl Default for NonInteractiveEnvHook {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl Hook for NonInteractiveEnvHook {
+    fn name(&self) -> &str {
+        HOOK_NAME
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::SessionStart]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        _input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Check if running in non-interactive environment
+        if is_non_interactive() {
+            let message = format!(
+                "Non-interactive environment detected. Git commands will be automatically prefixed with: {}",
+                build_env_prefix(&NON_INTERACTIVE_ENV)
+            );
+            Ok(HookOutput::continue_with_message(message))
+        } else {
+            Ok(HookOutput::pass())
+        }
     }
 }
 

@@ -55,7 +55,8 @@ fn test_cli_with_comment_exit_two() {
 
 #[test]
 fn test_cli_non_code_file_exit_zero_skip() {
-    let input = r##"{"tool_name":"Write","tool_input":{"file_path":"test.json","content":"{}"}}"##;
+    // Use .txt which is truly unsupported (not .json which now has tree-sitter support)
+    let input = r##"{"tool_name":"Write","tool_input":{"file_path":"test.txt","content":"hello"}}"##;
     let (output, exit_code) = run_cli(input);
 
     assert_eq!(exit_code, 0, "Expected exit 0 for non-code file");

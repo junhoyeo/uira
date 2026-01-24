@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 use crate::astrape_state::{
     append_session_id, create_astrape_state, get_active_plan_path, get_plan_progress,

@@ -1,9 +1,13 @@
+use async_trait::async_trait;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const README_FILENAME: &str = "README.md";
 
@@ -308,6 +312,62 @@ impl DirectoryReadmeInjectorHook {
     pub fn is_tracked_tool(tool_name: &str) -> bool {
         let lower = tool_name.to_lowercase();
         TRACKED_TOOLS.iter().any(|t| *t == lower)
+    }
+}
+
+#[async_trait]
+impl Hook for DirectoryReadmeInjectorHook {
+    fn name(&self) -> &str {
+        "directory-readme-injector"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::PreToolUse]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        input: &HookInput,
+        context: &HookContext,
+    ) -> HookResult {
+        // Extract tool name and file_path from tool_input
+        let tool_name = input.tool_name.as_deref().unwrap_or("");
+
+        if !Self::is_tracked_tool(tool_name) {
+            return Ok(HookOutput::pass());
+        }
+
+        // Try to extract file_path from tool_input
+        let file_path = input
+            .tool_input
+            .as_ref()
+            .and_then(|v| v.get("file_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if file_path.is_empty() {
+            return Ok(HookOutput::pass());
+        }
+
+        // Get session ID from context
+        let session_id = context
+            .session_id
+            .as_deref()
+            .unwrap_or("default-session");
+
+        // Process and get README injection content
+        let readme_content = self.process_tool_execution(tool_name, file_path, session_id);
+
+        if readme_content.is_empty() {
+            Ok(HookOutput::pass())
+        } else {
+            Ok(HookOutput::continue_with_message(readme_content))
+        }
+    }
+
+    fn priority(&self) -> i32 {
+        10 // Higher priority to inject README before other hooks
     }
 }
 

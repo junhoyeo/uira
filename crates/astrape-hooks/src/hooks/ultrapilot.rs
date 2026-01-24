@@ -4,12 +4,16 @@
 //! Decomposes tasks, spawns workers (max 5), tracks progress, and integrates results
 //! while managing file ownership to avoid conflicts.
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 /// Configuration options for ultrapilot behavior
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -706,6 +710,27 @@ impl UltrapilotHook {
 impl Default for UltrapilotHook {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl Hook for UltrapilotHook {
+    fn name(&self) -> &str {
+        "ultrapilot"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::UserPromptSubmit, HookEvent::Stop]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        _input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Process ultrapilot commands
+        Ok(HookOutput::pass())
     }
 }
 

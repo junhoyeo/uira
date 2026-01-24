@@ -3,13 +3,16 @@
 //! QA cycling workflow that runs test → architect verify → fix → repeat
 //! until the QA goal is met or max cycles reached.
 
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::ralph::RalphHook;
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -276,6 +279,27 @@ impl UltraQAHook {
 impl Default for UltraQAHook {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl Hook for UltraQAHook {
+    fn name(&self) -> &str {
+        "ultraqa"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::UserPromptSubmit, HookEvent::Stop]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        _input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // UltraQA loop processing
+        Ok(HookOutput::pass())
     }
 }
 
