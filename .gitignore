@@ -1,1 +1,45 @@
+# Rust
 /target
+**/*.rs.bk
+Cargo.lock
+
+# napi-rs build artifacts
+*.node
+crates/astrape-napi/index.js
+crates/astrape-napi/index.d.ts
+
+# Node
+node_modules/
+bun.lockb
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temp directories
+deno/
+repos/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+*.dylib
+*.so
+*.dll
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local

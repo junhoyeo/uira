@@ -113,6 +113,43 @@ For each typo found, AI analyzes the context and decides:
 
 Requires [opencode](https://opencode.ai) to be installed.
 
+### AI Hooks
+
+Extend the AI typos workflow with custom hooks at each stage:
+
+```yaml
+ai_hooks:
+  pre-check:
+    - run: echo "Starting typos check"
+  
+  post-check:
+    - run: echo "Found $TYPO_COUNT typos"
+  
+  pre-ai:
+    - matcher: "*.rs"
+      run: echo "Checking $TYPO in $FILE"
+  
+  post-ai:
+    - run: echo "Decision: $DECISION for $TYPO"
+  
+  pre-fix:
+    - run: echo "Applying: $TYPO → $CORRECTION"
+  
+  post-fix:
+    - run: git add $FILE
+```
+
+| Hook | Event | Available Variables |
+|------|-------|---------------------|
+| `pre-check` | Before typos scan | - |
+| `post-check` | After typos found | `TYPO_COUNT` |
+| `pre-ai` | Before each AI decision | `FILE`, `LINE`, `TYPO`, `CORRECTIONS` |
+| `post-ai` | After each AI decision | `FILE`, `TYPO`, `DECISION` |
+| `pre-fix` | Before applying fix | `FILE`, `LINE`, `TYPO`, `CORRECTION` |
+| `post-fix` | After applying fix | `FILE`, `TYPO`, `CORRECTION` |
+
+Hooks support glob-style matchers and can stop execution with `on_fail: stop`.
+
 ## Source Structure
 
 ```
@@ -120,7 +157,8 @@ src/
 ├── main.rs           # CLI entry point (clap)
 ├── config.rs         # YAML config parsing
 ├── hooks/
-│   └── executor.rs   # Parallel hook execution (rayon)
+│   ├── mod.rs        # AI hooks (pre-check, pre-ai, etc.)
+│   └── executor.rs   # Git hooks (pre-commit, etc.)
 ├── linter/
 │   └── mod.rs        # oxc-based JS/TS linting
 └── typos/

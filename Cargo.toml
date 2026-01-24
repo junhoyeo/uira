@@ -1,21 +1,36 @@
-[package]
-name = "astrape"
+[workspace]
+resolver = "2"
+members = [
+    "crates/astrape-core",
+    "crates/astrape-hook",
+    "crates/astrape-claude",
+    "crates/astrape-napi",
+    "crates/astrape",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Junho Yeo <i@junho.io>"]
-description = "Lightning-fast Rust-native git hooks manager with native oxc integration"
 license = "MIT"
 repository = "https://github.com/junhoyeo/astrape"
-keywords = ["git", "hooks", "oxc", "linter", "formatter"]
-categories = ["command-line-utilities", "development-tools"]
 
-[dependencies]
+[workspace.dependencies]
+# Internal crates
+astrape-core = { path = "crates/astrape-core" }
+astrape-hook = { path = "crates/astrape-hook" }
+astrape-claude = { path = "crates/astrape-claude" }
+
 # CLI framework
 clap = { version = "4.5", features = ["derive", "cargo"] }
 
-# Configuration
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.9"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 # Parallel execution
 rayon = "1.10"
@@ -37,21 +52,17 @@ console = "0.15"
 # OXC - Native JS/TS toolchain
 oxc = { version = "0.110", features = ["full"] }
 
-# HTTP client for opencode API
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-
-# JSON parsing
-serde_json = "1.0"
-
-# TOML for typos config
+# TOML for config
 toml = "0.8"
 toml_edit = "0.22"
 
-[dev-dependencies]
+# Regex for keyword detection
+regex = "1.12"
+
+# Directories
+dirs = "5.0"
+
+# Testing
 tempfile = "3.14"
 assert_cmd = "2.0"
 predicates = "3.1"
-
-[[bin]]
-name = "astrape"
-path = "src/main.rs"

@@ -1,0 +1,22 @@
+[package]
+name = "astrape-napi"
+description = "Native Node.js bindings for Astrape AI harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+astrape-core = { workspace = true }
+astrape-hook = { workspace = true }
+napi = { version = "3", features = ["serde-json"] }
+napi-derive = "3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"
