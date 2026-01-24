@@ -5,10 +5,13 @@
       "args": [],
       "env": {}
     },
+    "websearch": {
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa"
+    },
     "context7": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/context7-mcp"],
-      "env": {}
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
     },
     "grep_app": {
       "type": "http",
