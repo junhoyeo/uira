@@ -687,8 +687,9 @@ impl RalphHook {
         state.last_checked_at = Utc::now();
 
         // Update circuit breaker (simple metrics - no detailed tracking yet)
+        // Pass 1 for files_changed to indicate "unknown but not stalled" until proper tracking
         state.circuit_breaker.record_iteration(
-            0,     // files_changed - not tracked yet
+            1,     // files_changed - assume progress until proper tracking implemented
             false, // tests_changed - not tracked yet
             0,     // output_size - not tracked yet
             None,  // error - not tracked yet

@@ -113,7 +113,8 @@ impl CircuitBreakerState {
             let avg_earlier: usize =
                 self.output_sizes.iter().take(earlier_count).sum::<usize>() / earlier_count;
 
-            if avg_earlier > 0 {
+            if avg_earlier > 0 && avg_recent < avg_earlier {
+                // Only calculate decline if output is actually decreasing
                 let decline = 100 - (avg_recent * 100 / avg_earlier);
                 if decline >= config.output_decline_threshold as usize {
                     self.state = CircuitState::HalfOpen;
