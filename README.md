@@ -23,11 +23,21 @@
 
 ## HTTP Proxy
 
-The `astrape-proxy` crate provides an HTTP proxy that enables Claude Code to work with non-Anthropic models (OpenAI, Google Gemini, etc.) through intelligent agent-based routing.
+The `astrape-proxy` crate is a Rust-based HTTP proxy that enables Claude Code to work with OpenAI, Google Gemini, and other LLM providers by translating between Anthropic's API format and provider-specific formats.
+
+### Key Features
+
+- **Agent-based routing** - Maps by agent type from request metadata, not model names
+- **OpenCode authentication** - Reuses OpenCode's auth system (`~/.local/share/opencode/auth.json`)
+- **Multi-provider support** - OpenAI, Google Gemini, OpenCode
+- **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format conversion
+- **Streaming support** - Full SSE (Server-Sent Events) streaming
+- **Token counting** - `/v1/messages/count_tokens` endpoint
+- **Type-safe** - Built with Rust for reliability and performance
 
 ### Agent-Based Model Routing
 
-Routes requests based on **agent type** (not model names), allowing different agents to use different models:
+Route different agents to different models based on purpose, not provider:
 
 ```yaml
 # astrape.yml
@@ -36,42 +46,134 @@ agents:
     model: "opencode/gpt-5-nano"  # Fast, cheap model for exploration
   architect:
     model: "openai/gpt-4.1"       # Powerful model for architecture
+  executor:
+    model: "openai/gpt-4.1-mini"  # Balanced model for execution
 ```
 
-### Features
+### Configuration
 
-- **Agent-based routing** - Maps by agent type from request metadata
-- **OpenCode authentication** - Reuses OpenCode's auth system (`~/.local/share/opencode/auth.json`)
-- **Multi-provider support** - OpenAI, Google Gemini, Anthropic, OpenCode
-- **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format
-- **Streaming support** - Full SSE (Server-Sent Events) streaming
-- **Token counting** - `/v1/messages/count_tokens` endpoint
-
-### Quick Start
+**Environment Variables:**
 
 ```bash
-# Start the proxy
-cargo run --release -p astrape-proxy
-# Listening on http://0.0.0.0:8787
+# Provider preference (default: openai)
+# Supported: openai, google (anthropic not yet implemented)
+PREFERRED_PROVIDER=openai|google
 
-# Use with Claude Code
+# Model mapping for legacy mode
+BIG_MODEL=gpt-4.1              # Maps Claude Sonnet
+SMALL_MODEL=gpt-4.1-mini       # Maps Claude Haiku
+
+# Server configuration
+PORT=8787                      # Server port (default: 8787)
+LITELLM_BASE_URL=http://localhost:4000  # LiteLLM proxy URL
+REQUEST_TIMEOUT_SECS=120       # Upstream timeout (default: 120)
+```
+
+**OpenCode Authentication:**
+
+The proxy uses OpenCode's authentication system. Ensure you've logged in:
+
+```bash
+opencode auth login openai
+opencode auth login google
+opencode auth login opencode
+```
+
+Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform equivalent).
+
+### Usage
+
+**Start the proxy:**
+
+```bash
+cargo run --release -p astrape-proxy
+# Output: astrape-proxy listening addr=0.0.0.0:8787
+```
+
+**Use with Claude Code:**
+
+```bash
 ANTHROPIC_BASE_URL=http://localhost:8787 claude
 ```
 
-### How It Works
+**Test the proxy:**
+
+```bash
+# Health check
+curl http://localhost:8787/health
+# Output: OK
+
+# Test agent-based routing
+curl -X POST http://localhost:8787/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-sonnet",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello"}],
+    "metadata": {"agent": "explore"}
+  }'
+```
+
+### Model Mapping
+
+The proxy automatically maps Claude model names to configured targets:
+
+| Claude Model | Default (OpenAI) | Google Mapping |
+|--------------|------------------|----------------|
+| `claude-3-haiku` | `openai/gpt-4.1-mini` | `gemini/gemini-2.5-flash` |
+| `claude-3-sonnet` | `openai/gpt-4.1` | `gemini/gemini-2.5-pro` |
+
+Configure via `PREFERRED_PROVIDER`, `BIG_MODEL`, and `SMALL_MODEL` environment variables.
+
+### Architecture
 
 ```
-Claude Code Request (metadata: {agent: "explore"})
-  ↓
-Astrape Proxy
-  ↓ Read astrape.yml → agents.explore.model = "opencode/gpt-5-nano"
-  ↓ Translate to LiteLLM format + Get OpenCode auth
-LiteLLM → Actual Model Provider
-  ↓
-Response ↔ Translated back to Anthropic format
+┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
+│ Claude Code │ ──────> │ astrape-proxy    │ ──────> │  OpenAI /   │
+│             │ Anthropic│                  │ Provider│  Gemini     │
+│             │  Format  │  Axum Server     │ Format  │             │
+└─────────────┘         └──────────────────┘         └─────────────┘
+                              │
+                              │ OpenCode Auth
+                              v
+                        ~/.local/share/opencode/auth.json
 ```
 
-See [crates/astrape-proxy/README.md](crates/astrape-proxy/README.md) for full documentation.
+**Request Flow:**
+
+1. Claude Code sends request with `metadata: {agent: "explore"}`
+2. Proxy extracts agent name from metadata
+3. Looks up `agents.explore.model` in `astrape.yml` → `"opencode/gpt-5-nano"`
+4. Translates Anthropic format to LiteLLM/OpenAI format
+5. Gets OpenCode auth token for the provider
+6. Forwards to LiteLLM proxy → actual model provider
+7. Translates response back to Anthropic format
+8. Returns to Claude Code
+
+### Endpoints
+
+- `GET /health` - Health check (returns "OK")
+- `POST /v1/messages` - Chat completions (streaming & non-streaming)
+- `POST /v1/messages/count_tokens` - Token counting
+
+### Development
+
+**Run tests:**
+
+```bash
+cargo test -p astrape-proxy
+```
+
+**Build release binary:**
+
+```bash
+cargo build --release -p astrape-proxy
+# Binary: target/release/astrape-proxy
+```
+
+**End-to-end testing:**
+
+See [crates/astrape-proxy/E2E_TEST.md](crates/astrape-proxy/E2E_TEST.md) for comprehensive testing guide.
 
 ## Git Hooks
 
