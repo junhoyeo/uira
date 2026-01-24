@@ -22,7 +22,10 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub fn register_many(&mut self, tools: impl IntoIterator<Item = ToolDefinition>) -> Result<(), ToolError> {
+    pub fn register_many(
+        &mut self,
+        tools: impl IntoIterator<Item = ToolDefinition>,
+    ) -> Result<(), ToolError> {
         for tool in tools {
             self.register(tool)?;
         }
@@ -34,9 +37,9 @@ impl ToolRegistry {
     }
 
     pub fn get_required(&self, name: &str) -> Result<&ToolDefinition, ToolError> {
-        self.tools
-            .get(name)
-            .ok_or_else(|| ToolError::NotFound { name: name.to_string() })
+        self.tools.get(name).ok_or_else(|| ToolError::NotFound {
+            name: name.to_string(),
+        })
     }
 
     pub fn names(&self) -> Vec<&str> {
@@ -83,7 +86,12 @@ mod tests {
         let mut r = ToolRegistry::new();
         r.register(tool("a")).unwrap();
         let err = r.register(tool("a")).unwrap_err();
-        assert_eq!(err, ToolError::AlreadyRegistered { name: "a".to_string() });
+        assert_eq!(
+            err,
+            ToolError::AlreadyRegistered {
+                name: "a".to_string()
+            }
+        );
     }
 
     #[test]
@@ -98,6 +106,11 @@ mod tests {
     fn get_required_missing_returns_not_found() {
         let r = ToolRegistry::new();
         let err = r.get_required("missing").unwrap_err();
-        assert_eq!(err, ToolError::NotFound { name: "missing".to_string() });
+        assert_eq!(
+            err,
+            ToolError::NotFound {
+                name: "missing".to_string()
+            }
+        );
     }
 }

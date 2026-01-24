@@ -1,7 +1,6 @@
 use crate::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use astrape_features::background_agent::{
-    get_background_manager, BackgroundTask, BackgroundTaskConfig, BackgroundTaskStatus,
-    LaunchInput,
+    get_background_manager, BackgroundTask, BackgroundTaskConfig, BackgroundTaskStatus, LaunchInput,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -21,7 +20,10 @@ fn get_required_string(input: &Value, field: &str) -> Result<String, ToolError> 
 
 /// Extract an optional string field from input.
 fn get_optional_string(input: &Value, field: &str) -> Option<String> {
-    input.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+    input
+        .get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Extract an optional u64 field from input.
@@ -86,7 +88,9 @@ async fn handle_launch(
                 "action": "launch",
                 "task": task_to_json(&task),
             });
-            Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()))
+            Ok(ToolOutput::text(
+                serde_json::to_string_pretty(&response).unwrap(),
+            ))
         }
         Err(e) => {
             let response = json!({
@@ -94,7 +98,9 @@ async fn handle_launch(
                 "action": "launch",
                 "error": e,
             });
-            Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()))
+            Ok(ToolOutput::text(
+                serde_json::to_string_pretty(&response).unwrap(),
+            ))
         }
     }
 }
@@ -130,7 +136,9 @@ async fn handle_output(
                         "task": task_to_json(&t),
                         "is_complete": is_terminal,
                     });
-                    return Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()));
+                    return Ok(ToolOutput::text(
+                        serde_json::to_string_pretty(&response).unwrap(),
+                    ));
                 }
 
                 // Still running and blocking requested - wait and retry
@@ -142,7 +150,9 @@ async fn handle_output(
                         "is_complete": false,
                         "timeout": true,
                     });
-                    return Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()));
+                    return Ok(ToolOutput::text(
+                        serde_json::to_string_pretty(&response).unwrap(),
+                    ));
                 }
 
                 sleep(Duration::from_millis(100)).await;
@@ -153,7 +163,9 @@ async fn handle_output(
                     "action": "output",
                     "error": format!("Task not found: {task_id}"),
                 });
-                return Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()));
+                return Ok(ToolOutput::text(
+                    serde_json::to_string_pretty(&response).unwrap(),
+                ));
             }
         }
     }
@@ -178,7 +190,9 @@ async fn handle_cancel(
                         | BackgroundTaskStatus::Error
                 ),
             });
-            Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()))
+            Ok(ToolOutput::text(
+                serde_json::to_string_pretty(&response).unwrap(),
+            ))
         }
         None => {
             let response = json!({
@@ -186,7 +200,9 @@ async fn handle_cancel(
                 "action": "cancel",
                 "error": format!("Task not found: {task_id}"),
             });
-            Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()))
+            Ok(ToolOutput::text(
+                serde_json::to_string_pretty(&response).unwrap(),
+            ))
         }
     }
 }
@@ -230,7 +246,9 @@ async fn handle_list(
             "completed": completed_count,
         },
     });
-    Ok(ToolOutput::text(serde_json::to_string_pretty(&response).unwrap()))
+    Ok(ToolOutput::text(
+        serde_json::to_string_pretty(&response).unwrap(),
+    ))
 }
 
 /// Create the background_task tool handler.

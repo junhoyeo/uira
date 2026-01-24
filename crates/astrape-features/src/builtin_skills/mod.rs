@@ -145,7 +145,14 @@ pub fn list_builtin_skill_names() -> Vec<String> {
         .collect()
 }
 
-pub fn clear_skills_cache() {}
+/// Clear the skills cache.
+///
+/// NOTE: This is a no-op because the cache uses `OnceLock` which cannot be cleared
+/// in stable Rust. The cache is initialized once and persists for the process lifetime.
+/// If cache clearing is required, consider using `RwLock<Option<...>>` instead.
+pub fn clear_skills_cache() {
+    // OnceLock does not support clearing - this is intentionally a no-op
+}
 
 #[cfg(test)]
 mod tests {
@@ -176,9 +183,12 @@ This is the template content"#;
     }
 
     #[test]
-    fn test_list_builtin_skill_names() {
+    fn test_list_builtin_skill_names_does_not_panic() {
+        // Verify the function returns without panicking
         let names = list_builtin_skill_names();
-        // Should return a list (may be empty if no skills directory exists)
-        assert!(names.is_empty() || !names.is_empty());
+        // All returned names should be non-empty strings
+        for name in &names {
+            assert!(!name.is_empty(), "Skill names should not be empty");
+        }
     }
 }

@@ -129,7 +129,6 @@ lazy_static! {
                 .to_string(),
         },
     };
-
     static ref SPECIAL_CHARS: Regex = Regex::new(r"[^a-zA-Z0-9_\-.:/]").unwrap();
     static ref IS_GIT_COMMAND: Regex = Regex::new(r"\bgit\b").unwrap();
 }

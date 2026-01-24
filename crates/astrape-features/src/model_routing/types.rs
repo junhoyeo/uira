@@ -149,6 +149,7 @@ pub struct RoutingConfig {
     pub default_tier: ModelTier,
     pub escalation_enabled: bool,
     pub max_escalations: u32,
+    pub escalation_threshold: f64,
     pub tier_models: TierModels,
     pub agent_overrides: HashMap<String, AgentOverride>,
     pub escalation_keywords: Vec<String>,
@@ -171,6 +172,7 @@ impl Default for RoutingConfig {
             default_tier: ModelTier::Medium,
             escalation_enabled: false,
             max_escalations: 0,
+            escalation_threshold: 0.5,
             tier_models: TierModels {
                 low: "claude-haiku-4-5-20251001".to_string(),
                 medium: "claude-sonnet-4-5-20250929".to_string(),
@@ -207,6 +209,7 @@ pub struct RoutingConfigOverrides {
     pub default_tier: Option<ModelTier>,
     pub escalation_enabled: Option<bool>,
     pub max_escalations: Option<u32>,
+    pub escalation_threshold: Option<f64>,
     pub tier_models: Option<TierModels>,
     pub agent_overrides: Option<HashMap<String, AgentOverride>>,
     pub escalation_keywords: Option<Vec<String>>,
@@ -228,6 +231,9 @@ impl RoutingConfigOverrides {
         }
         if let Some(v) = self.max_escalations {
             cfg.max_escalations = v;
+        }
+        if let Some(v) = self.escalation_threshold {
+            cfg.escalation_threshold = v;
         }
         if let Some(v) = self.tier_models {
             cfg.tier_models = v;

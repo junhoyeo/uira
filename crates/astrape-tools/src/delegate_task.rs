@@ -5,7 +5,9 @@
 
 use crate::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use astrape_agents::get_agent_definitions;
-use astrape_features::model_routing::{route_task, ModelTier, RoutingConfigOverrides, RoutingContext};
+use astrape_features::model_routing::{
+    route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
+};
 use astrape_sdk::ModelType;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -78,20 +80,16 @@ fn tier_to_model_type(tier: ModelTier) -> ModelType {
 /// Extract base agent name from prefixed agent type
 /// e.g., "oh-my-claudecode:executor" -> "executor"
 fn extract_agent_name(agent_type: &str) -> &str {
-    agent_type
-        .split(':')
-        .last()
-        .unwrap_or(agent_type)
+    agent_type.split(':').next_back().unwrap_or(agent_type)
 }
 
 /// Handle delegate_task tool invocation
 async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError> {
     // Parse input parameters
-    let params: DelegateTaskParams = serde_json::from_value(input).map_err(|e| {
-        ToolError::InvalidInput {
+    let params: DelegateTaskParams =
+        serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
             message: format!("Failed to parse delegate_task parameters: {}", e),
-        }
-    })?;
+        })?;
 
     // Extract base agent name (remove prefix if present)
     let agent_name = extract_agent_name(&params.agent);
@@ -101,10 +99,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     let agent_config = agent_definitions.get(agent_name);
 
     let (agent_description, agent_default_model) = match agent_config {
-        Some(config) => (
-            Some(config.description.clone()),
-            config.default_model,
-        ),
+        Some(config) => (Some(config.description.clone()), config.default_model),
         None => (None, None),
     };
 
@@ -181,11 +176,10 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         agent_description,
     };
 
-    let json_response = serde_json::to_string_pretty(&response).map_err(|e| {
-        ToolError::ExecutionFailed {
+    let json_response =
+        serde_json::to_string_pretty(&response).map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to serialize response: {}", e),
-        }
-    })?;
+        })?;
 
     Ok(ToolOutput::text(json_response))
 }
@@ -283,7 +277,10 @@ mod tests {
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
         assert_eq!(response.model_type, "haiku");
-        assert!(response.routing_reasons.iter().any(|r| r.contains("Explicit")));
+        assert!(response
+            .routing_reasons
+            .iter()
+            .any(|r| r.contains("Explicit")));
     }
 
     #[tokio::test]

@@ -105,6 +105,7 @@ fn planner_simple_breakdown(ctx: &RoutingContext, signals: &ComplexitySignal) ->
     agent_is(ctx, "planner")
         && signals.structural.estimated_subtasks <= 3
         && !signals.lexical.has_risk_keywords
+        && !signals.lexical.has_architecture_keywords
         && matches!(
             signals.structural.impact_scope,
             crate::model_routing::types::ImpactScope::Local

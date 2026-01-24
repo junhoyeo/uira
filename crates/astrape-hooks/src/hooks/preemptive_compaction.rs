@@ -73,7 +73,8 @@ WARNING: Further messages may fail if context is not reduced.
 Action required: Run /compact now.
 "#;
 
-pub const COMPACTION_SUCCESS_MESSAGE: &str = "Context compacted successfully. Session can continue normally.";
+pub const COMPACTION_SUCCESS_MESSAGE: &str =
+    "Context compacted successfully. Session can continue normally.";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -119,7 +120,10 @@ pub fn estimate_tokens(text: &str) -> u64 {
     text.len().div_ceil(CHARS_PER_TOKEN) as u64
 }
 
-pub fn analyze_context_usage(content: &str, config: Option<&PreemptiveCompactionConfig>) -> ContextUsageResult {
+pub fn analyze_context_usage(
+    content: &str,
+    config: Option<&PreemptiveCompactionConfig>,
+) -> ContextUsageResult {
     let warning_threshold = config
         .and_then(|c| c.warning_threshold)
         .unwrap_or(DEFAULT_THRESHOLD);
@@ -164,7 +168,6 @@ lazy_static! {
         Some("1")
     );
     static ref DEBUG_FILE: PathBuf = std::env::temp_dir().join("preemptive-compaction-debug.log");
-
     static ref SESSION_STATES: RwLock<HashMap<String, SessionState>> = RwLock::new(HashMap::new());
     static ref LAST_CLEANUP_TIME: RwLock<u64> = RwLock::new(0);
 }
@@ -251,9 +254,7 @@ fn should_show_warning(session_id: &str, config: Option<&PreemptiveCompactionCon
     let cooldown_ms = config
         .and_then(|c| c.cooldown_ms)
         .unwrap_or(COMPACTION_COOLDOWN_MS);
-    let max_warnings = config
-        .and_then(|c| c.max_warnings)
-        .unwrap_or(MAX_WARNINGS);
+    let max_warnings = config.and_then(|c| c.max_warnings).unwrap_or(MAX_WARNINGS);
 
     let now = now_ms();
 
@@ -320,7 +321,12 @@ impl PreemptiveCompactionHook {
         self.config.enabled != Some(false)
     }
 
-    fn post_tool_use(&self, session_id: &str, tool_name: &str, tool_response: &str) -> Option<String> {
+    fn post_tool_use(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        tool_response: &str,
+    ) -> Option<String> {
         maybe_cleanup_session_states();
 
         let tool_lower = tool_name.to_lowercase();
@@ -336,14 +342,8 @@ impl PreemptiveCompactionHook {
 
         // Equivalent to analyzing: "x".repeat(estimated_tokens * CHARS_PER_TOKEN)
         let usage_ratio = state.estimated_tokens as f64 / claude_default_context_limit() as f64;
-        let warning_threshold = self
-            .config
-            .warning_threshold
-            .unwrap_or(DEFAULT_THRESHOLD);
-        let critical_threshold = self
-            .config
-            .critical_threshold
-            .unwrap_or(CRITICAL_THRESHOLD);
+        let warning_threshold = self.config.warning_threshold.unwrap_or(DEFAULT_THRESHOLD);
+        let critical_threshold = self.config.critical_threshold.unwrap_or(CRITICAL_THRESHOLD);
 
         let is_warning = usage_ratio >= warning_threshold;
         let is_critical = usage_ratio >= critical_threshold;

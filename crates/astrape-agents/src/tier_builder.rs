@@ -2,6 +2,10 @@ use astrape_sdk::{AgentConfig, ModelType};
 
 use crate::prompt_loader::PromptLoader;
 
+/// Error marker returned when a prompt file is not found.
+/// Used to detect fallback scenarios in tier building.
+const PROMPT_NOT_FOUND_MARKER: &str = "Prompt file not found";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelTier {
     Low,
@@ -51,7 +55,7 @@ impl TierBuilder {
 
         // If we don't have a dedicated prompt file, fall back to base prompt
         // with tier-specific guidance prepended.
-        let prompt = if prompt.contains("Prompt file not found") {
+        let prompt = if prompt.contains(PROMPT_NOT_FOUND_MARKER) {
             let mut out = String::new();
             out.push_str(&format!(
                 "[TIER: {} ({})]\n\n",

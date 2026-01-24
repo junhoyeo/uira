@@ -145,10 +145,9 @@ async fn run_single_check(
     options: &VerificationOptions,
 ) -> VerificationEvidence {
     // If check has a command, run it
+    // Note: timeout from options is not currently enforced (see run_command_without_timeout docs)
     if let Some(cmd) = &check.command {
-        let timeout = options.timeout.unwrap_or(Duration::from_secs(60));
-        
-        match run_command_with_timeout(cmd, options.cwd.as_deref(), timeout) {
+        match run_command_without_timeout(cmd, options.cwd.as_deref()) {
             Ok((stdout, stderr)) => VerificationEvidence {
                 evidence_type: check.evidence_type,
                 passed: true,
@@ -189,18 +188,18 @@ async fn run_single_check(
 }
 
 /// Run command with timeout
-fn run_command_with_timeout(
-    cmd: &str,
-    cwd: Option<&str>,
-    _timeout: Duration,
-) -> Result<(String, String), String> {
+///
+/// NOTE: The timeout parameter is currently not enforced. The function will block
+/// until the command completes. For actual timeout support, use an async runtime
+/// with `tokio::time::timeout` wrapping the command execution.
+fn run_command_without_timeout(cmd: &str, cwd: Option<&str>) -> Result<(String, String), String> {
     let mut command = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
-        c.args(&["/C", cmd]);
+        c.args(["/C", cmd]);
         c
     } else {
         let mut c = Command::new("sh");
-        c.args(&["-c", cmd]);
+        c.args(["-c", cmd]);
         c
     };
 
@@ -209,7 +208,7 @@ fn run_command_with_timeout(
     }
 
     // Note: Rust's std::process::Command doesn't have built-in timeout
-    // In production, you'd use tokio::time::timeout or similar
+    // For timeout support, wrap this in tokio::time::timeout when using async
     match command.output() {
         Ok(output) => {
             if output.status.success() {
@@ -236,7 +235,12 @@ pub async fn run_verification(
     checklist.status = VerificationStatus::InProgress;
 
     let check_ids_to_run: Vec<String> = if options.skip_optional {
-        checklist.checks.iter().filter(|c| c.required).map(|c| c.id.clone()).collect()
+        checklist
+            .checks
+            .iter()
+            .filter(|c| c.required)
+            .map(|c| c.id.clone())
+            .collect()
     } else {
         checklist.checks.iter().map(|c| c.id.clone()).collect()
     };
@@ -249,7 +253,10 @@ pub async fn run_verification(
                 let check_clone = check.clone();
                 let options_clone = options.clone();
                 handles.push(tokio::spawn(async move {
-                    (check_clone.id.clone(), run_single_check(&check_clone, &options_clone).await)
+                    (
+                        check_clone.id.clone(),
+                        run_single_check(&check_clone, &options_clone).await,
+                    )
                 }));
             }
         }
@@ -258,12 +265,10 @@ pub async fn run_verification(
         let results = futures::future::join_all(handles).await;
 
         // Update checklist with results
-        for result in results {
-            if let Ok((check_id, evidence)) = result {
-                if let Some(check) = checklist.checks.iter_mut().find(|c| c.id == check_id) {
-                    check.evidence = Some(evidence);
-                    check.completed = true;
-                }
+        for (check_id, evidence) in results.into_iter().flatten() {
+            if let Some(check) = checklist.checks.iter_mut().find(|c| c.id == check_id) {
+                check.evidence = Some(evidence);
+                check.completed = true;
             }
         }
     } else {
@@ -272,7 +277,7 @@ pub async fn run_verification(
             if let Some(check_idx) = checklist.checks.iter().position(|c| c.id == check_id) {
                 let check_clone = checklist.checks[check_idx].clone();
                 let evidence = run_single_check(&check_clone, &options).await;
-                
+
                 checklist.checks[check_idx].evidence = Some(evidence.clone());
                 checklist.checks[check_idx].completed = true;
 
@@ -401,7 +406,10 @@ pub fn format_report(checklist: &VerificationChecklist, options: &ReportOptions)
 
     // Header
     if options.format == ReportFormat::Markdown {
-        lines.push(format!("# Verification Report: {}", checklist.protocol.name));
+        lines.push(format!(
+            "# Verification Report: {}",
+            checklist.protocol.name
+        ));
         lines.push(String::new());
         lines.push(format!("**Status:** {:?}", checklist.status));
         lines.push(format!("**Started:** {:?}", checklist.started_at));
@@ -457,7 +465,11 @@ pub fn format_report(checklist: &VerificationChecklist, options: &ReportOptions)
         } else {
             "○"
         };
-        let required = if check.required { "(required)" } else { "(optional)" };
+        let required = if check.required {
+            "(required)"
+        } else {
+            "(optional)"
+        };
 
         if options.format == ReportFormat::Markdown {
             lines.push(format!("### {} {} {}", status, check.name, required));
@@ -546,7 +558,10 @@ pub async fn validate_checklist(checklist: &VerificationChecklist) -> Validation
                 recommendations.extend(validation.recommendations);
             }
         } else if check.required {
-            issues.push(format!("Missing evidence for required check: {}", check.name));
+            issues.push(format!(
+                "Missing evidence for required check: {}",
+                check.name
+            ));
             recommendations.push(format!("Run verification check: {}", check.name));
         }
     }

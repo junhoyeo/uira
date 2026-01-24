@@ -122,7 +122,7 @@ pub struct RuleFrontmatterResult {
 }
 
 #[derive(Debug, Clone, Default)]
-struct SessionCache {
+pub(crate) struct SessionCache {
     content_hashes: HashSet<String>,
     real_paths: HashSet<String>,
 }
@@ -677,7 +677,7 @@ fn rules_injector_storage_dir_for_home(home: &Path) -> PathBuf {
     home.join(".omc").join("rules-injector")
 }
 
-fn rules_injector_storage_dir() -> Option<PathBuf> {
+fn _rules_injector_storage_dir() -> Option<PathBuf> {
     home_dir().map(|h| rules_injector_storage_dir_for_home(&h))
 }
 
@@ -685,14 +685,14 @@ fn storage_path_for_session(home: &Path, session_id: &str) -> PathBuf {
     rules_injector_storage_dir_for_home(home).join(format!("{}.json", session_id))
 }
 
-pub fn load_injected_rules(session_id: &str) -> SessionCache {
+pub(crate) fn load_injected_rules(session_id: &str) -> SessionCache {
     let Some(home) = home_dir() else {
         return SessionCache::default();
     };
     load_injected_rules_with_home(session_id, &home)
 }
 
-pub fn load_injected_rules_with_home(session_id: &str, home: &Path) -> SessionCache {
+pub(crate) fn load_injected_rules_with_home(session_id: &str, home: &Path) -> SessionCache {
     let file_path = storage_path_for_session(home, session_id);
     if !file_path.exists() {
         return SessionCache::default();
@@ -715,14 +715,14 @@ pub fn load_injected_rules_with_home(session_id: &str, home: &Path) -> SessionCa
     }
 }
 
-pub fn save_injected_rules(session_id: &str, cache: &SessionCache) {
+pub(crate) fn save_injected_rules(session_id: &str, cache: &SessionCache) {
     let Some(home) = home_dir() else {
         return;
     };
     save_injected_rules_with_home(session_id, cache, &home);
 }
 
-pub fn save_injected_rules_with_home(session_id: &str, cache: &SessionCache, home: &Path) {
+pub(crate) fn save_injected_rules_with_home(session_id: &str, cache: &SessionCache, home: &Path) {
     let storage_dir = rules_injector_storage_dir_for_home(home);
     let _ = fs::create_dir_all(&storage_dir);
 

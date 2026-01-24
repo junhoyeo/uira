@@ -93,7 +93,11 @@ impl ToolDefinition {
         }
     }
 
-    pub fn stub(name: impl Into<String>, description: impl Into<String>, input_schema: Value) -> Self {
+    pub fn stub(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
         let name = name.into();
         let handler_name = name.clone();
         Self {
@@ -128,6 +132,11 @@ mod tests {
             json!({"type": "object", "properties": {}, "required": []}),
         );
         let err = def.handler.call(json!({})).await.unwrap_err();
-        assert_eq!(err, ToolError::NotImplemented { name: "stub".to_string() });
+        assert_eq!(
+            err,
+            ToolError::NotImplemented {
+                name: "stub".to_string()
+            }
+        );
     }
 }

@@ -238,10 +238,11 @@ fn parse_frontmatter(content: &str) -> (HashMap<String, String>, String) {
         let key = line[..colon_idx].trim();
         let mut value = line[colon_idx + 1..].trim().to_string();
 
-        if (value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\''))
+        if value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\'')))
         {
-            value = value[1..value.len().saturating_sub(1)].to_string();
+            value = value[1..value.len() - 1].to_string();
         }
 
         data.insert(key.to_string(), value);
@@ -313,10 +314,7 @@ pub fn discover_all_commands(working_directory: &Path) -> Vec<CommandInfo> {
     let mut skill_commands = Vec::new();
     let Ok(skill_entries) = fs::read_dir(skills_dir) else {
         // Priority: project > user > skills
-        return project_commands
-            .into_iter()
-            .chain(user_commands)
-            .collect();
+        return project_commands.into_iter().chain(user_commands).collect();
     };
 
     for entry in skill_entries.flatten() {
@@ -335,10 +333,13 @@ pub fn discover_all_commands(working_directory: &Path) -> Vec<CommandInfo> {
         };
         let (data, body) = parse_frontmatter(&content);
 
-        let raw_name = data
-            .get("name")
-            .cloned()
-            .unwrap_or_else(|| dir_path.file_name().unwrap_or_default().to_string_lossy().to_string());
+        let raw_name = data.get("name").cloned().unwrap_or_else(|| {
+            dir_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
+        });
 
         let metadata = CommandMetadata {
             name: raw_name.clone(),
@@ -425,7 +426,10 @@ fn format_command_template(cmd: &CommandInfo, args: &str) -> String {
 }
 
 /// Execute a slash command and return replacement text
-pub fn execute_slash_command(parsed: &ParsedSlashCommand, working_directory: &Path) -> ExecuteResult {
+pub fn execute_slash_command(
+    parsed: &ParsedSlashCommand,
+    working_directory: &Path,
+) -> ExecuteResult {
     let Some(command) = find_command(&parsed.command, working_directory) else {
         return ExecuteResult {
             success: false,
@@ -576,7 +580,8 @@ impl Hook for AutoSlashCommandHook {
 
 /// Process a prompt for slash command expansion (simple utility function)
 pub fn process_slash_command(prompt: &str, working_directory: &Path) -> AutoSlashCommandResult {
-    if prompt.contains(AUTO_SLASH_COMMAND_TAG_OPEN) || prompt.contains(AUTO_SLASH_COMMAND_TAG_CLOSE) {
+    if prompt.contains(AUTO_SLASH_COMMAND_TAG_OPEN) || prompt.contains(AUTO_SLASH_COMMAND_TAG_CLOSE)
+    {
         return AutoSlashCommandResult {
             detected: false,
             parsed_command: None,
@@ -612,9 +617,7 @@ pub fn process_slash_command(prompt: &str, working_directory: &Path) -> AutoSlas
         injected_message: Some(format!(
             "{}\n[AUTO-SLASH-COMMAND ERROR]\n{}\n\nOriginal input: {}\n{}",
             AUTO_SLASH_COMMAND_TAG_OPEN,
-            result
-                .error
-                .unwrap_or_else(|| "Unknown error".to_string()),
+            result.error.unwrap_or_else(|| "Unknown error".to_string()),
             parsed.raw,
             AUTO_SLASH_COMMAND_TAG_CLOSE
         )),

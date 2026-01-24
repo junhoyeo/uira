@@ -27,8 +27,14 @@ pub fn merge_agent_config(base: &AgentConfig, override_cfg: &AgentOverrideConfig
     let mut merged = base.clone();
 
     if let Some(model) = override_cfg.model.as_deref() {
-        if let Ok(mt) = parse_model_type(model) {
-            merged.model = Some(mt);
+        match parse_model_type(model) {
+            Ok(mt) => merged.model = Some(mt),
+            Err(e) => {
+                eprintln!(
+                    "[astrape-agents] Warning: invalid model '{}' for agent '{}': {}",
+                    model, base.name, e
+                );
+            }
         }
     }
 

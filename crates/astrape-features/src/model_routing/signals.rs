@@ -1,9 +1,44 @@
+use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::model_routing::types::{
     ComplexitySignal, ContextSignals, DomainSpecificity, ImpactScope, LexicalSignals,
     QuestionDepth, Reversibility, RoutingContext, StructuralSignals, COMPLEXITY_KEYWORDS,
 };
+
+lazy_static! {
+    // File path detection patterns
+    static ref FILE_PATH_PATTERN: Regex =
+        Regex::new("(?m)(?:^|\\s)[./~]?(?:[\\w-]+/)+[\\w.-]+\\.\\w+").unwrap();
+    static ref FILE_IN_BACKTICKS: Regex =
+        Regex::new("\\x60[^\\x60]+\\.\\w+\\x60").unwrap();
+    static ref FILE_IN_QUOTES: Regex =
+        Regex::new("(?:'|\\x22)[^'\\x22]+\\.\\w+(?:'|\\x22)").unwrap();
+
+    // Question depth patterns
+    static ref WHY_PATTERN: Regex =
+        Regex::new(r"(?i)(\bwhy\b.*\?|\bwhy\s+(is|are|does|do|did|would|should|can))").unwrap();
+    static ref HOW_PATTERN: Regex =
+        Regex::new(r"(?i)(\bhow\b.*\?|\bhow\s+(do|does|can|should|would|to))").unwrap();
+    static ref WHAT_PATTERN: Regex =
+        Regex::new(r"(?i)(\bwhat\b.*\?|\bwhat\s+(is|are|does|do))").unwrap();
+    static ref WHERE_PATTERN: Regex =
+        Regex::new(r"(?i)(\bwhere\b.*\?|\bwhere\s+(is|are|does|do|can))").unwrap();
+
+    // Code block pattern
+    static ref FENCED_CODE_BLOCK: Regex =
+        Regex::new(r"(?s)```.*?```").unwrap();
+
+    // Subtask estimation patterns
+    static ref BULLET_LIST: Regex =
+        Regex::new(r"(?m)^[\s]*[-*]\s").unwrap();
+    static ref NUMBERED_LIST: Regex =
+        Regex::new(r"(?m)^[\s]*\d+[.)]\s").unwrap();
+    static ref AND_WORD: Regex =
+        Regex::new(r"(?i)\band\b").unwrap();
+    static ref THEN_WORD: Regex =
+        Regex::new(r"(?i)\bthen\b").unwrap();
+}
 
 pub fn extract_lexical_signals(prompt: &str) -> LexicalSignals {
     let lower = prompt.to_lowercase();
@@ -55,23 +90,15 @@ pub fn extract_all_signals(prompt: &str, context: &RoutingContext) -> Complexity
 }
 
 fn count_file_paths(prompt: &str) -> usize {
-    let patterns = [
-        Regex::new("(?m)(?:^|\\s)[./~]?(?:[\\w-]+/)+[\\w.-]+\\.\\w+").unwrap(),
-        Regex::new("\\x60[^\\x60]+\\.\\w+\\x60").unwrap(),
-        Regex::new("(?:'|\\x22)[^'\\x22]+\\.\\w+(?:'|\\x22)").unwrap(),
-    ];
-
     let mut count = 0usize;
-    for re in patterns {
-        count = count.saturating_add(re.find_iter(prompt).count());
-    }
-
+    count = count.saturating_add(FILE_PATH_PATTERN.find_iter(prompt).count());
+    count = count.saturating_add(FILE_IN_BACKTICKS.find_iter(prompt).count());
+    count = count.saturating_add(FILE_IN_QUOTES.find_iter(prompt).count());
     count.min(20)
 }
 
 fn count_code_blocks(prompt: &str) -> usize {
-    let fenced_re = Regex::new(r"(?s)```.*?```").unwrap();
-    let fenced = fenced_re.find_iter(prompt).count();
+    let fenced = FENCED_CODE_BLOCK.find_iter(prompt).count();
 
     // Approximate the indented-block heuristic: count consecutive indented lines.
     let mut indented_groups = 0usize;
@@ -97,27 +124,18 @@ fn has_keywords(prompt: &str, keywords: &[&str]) -> bool {
 }
 
 fn detect_question_depth(prompt: &str) -> QuestionDepth {
-    let why_re =
-        Regex::new(r"(?i)(\bwhy\b.*\?|\bwhy\s+(is|are|does|do|did|would|should|can))").unwrap();
-    if why_re.is_match(prompt) {
+    if WHY_PATTERN.is_match(prompt) {
         return QuestionDepth::Why;
     }
-
-    let how_re = Regex::new(r"(?i)(\bhow\b.*\?|\bhow\s+(do|does|can|should|would|to))").unwrap();
-    if how_re.is_match(prompt) {
+    if HOW_PATTERN.is_match(prompt) {
         return QuestionDepth::How;
     }
-
-    let what_re = Regex::new(r"(?i)(\bwhat\b.*\?|\bwhat\s+(is|are|does|do))").unwrap();
-    if what_re.is_match(prompt) {
+    if WHAT_PATTERN.is_match(prompt) {
         return QuestionDepth::What;
     }
-
-    let where_re = Regex::new(r"(?i)(\bwhere\b.*\?|\bwhere\s+(is|are|does|do|can))").unwrap();
-    if where_re.is_match(prompt) {
+    if WHERE_PATTERN.is_match(prompt) {
         return QuestionDepth::Where;
     }
-
     QuestionDepth::None
 }
 
@@ -166,19 +184,15 @@ fn detect_implicit_requirements(prompt: &str) -> bool {
 }
 
 fn estimate_subtasks(prompt: &str) -> usize {
-    let bullet_re = Regex::new(r"(?m)^[\s]*[-*]\s").unwrap();
-    let number_re = Regex::new(r"(?m)^[\s]*\d+[.)]\s").unwrap();
     let mut count = 1usize;
 
-    count += bullet_re.find_iter(prompt).count();
-    count += number_re.find_iter(prompt).count();
+    count += BULLET_LIST.find_iter(prompt).count();
+    count += NUMBERED_LIST.find_iter(prompt).count();
 
-    let and_re = Regex::new(r"(?i)\band\b").unwrap();
-    let and_count = and_re.find_iter(prompt).count();
+    let and_count = AND_WORD.find_iter(prompt).count();
     count += and_count / 2;
 
-    let then_re = Regex::new(r"(?i)\bthen\b").unwrap();
-    count += then_re.find_iter(prompt).count();
+    count += THEN_WORD.find_iter(prompt).count();
 
     count.min(10)
 }

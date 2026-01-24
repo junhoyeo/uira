@@ -61,7 +61,7 @@ pub fn analyze_task(task: &str, context: &ProjectContext) -> TaskAnalysis {
     // Determine if parallelizable
     let is_parallelizable = complexity > 0.3 && areas.len() >= 2;
     let estimated_components = if is_parallelizable {
-        areas.len().max(2).min(6)
+        areas.len().clamp(2, 6)
     } else {
         1
     };
@@ -147,7 +147,7 @@ pub fn assign_file_ownership(
         for pattern in &patterns {
             assignments
                 .entry(pattern.clone())
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(subtask.id.clone());
         }
     }
@@ -446,13 +446,21 @@ impl DecompositionStrategy for FullstackStrategy {
         if analysis.areas.contains(&"frontend".to_string())
             || analysis.areas.contains(&"ui".to_string())
         {
+            // Only add backend dependency if backend is also being built
+            let frontend_deps = if analysis.areas.contains(&"backend".to_string())
+                || analysis.areas.contains(&"api".to_string())
+            {
+                vec!["backend".to_string()]
+            } else {
+                vec![]
+            };
             components.push(Component {
                 id: "frontend".to_string(),
                 name: "Frontend".to_string(),
                 role: ComponentRole::Frontend,
                 description: "Frontend UI and components".to_string(),
                 can_parallelize: true,
-                dependencies: vec!["backend".to_string()],
+                dependencies: frontend_deps,
                 effort: 0.4,
                 technologies: analysis
                     .technologies
@@ -570,7 +578,7 @@ impl DecompositionStrategy for FeatureStrategy {
             .map(|area| Component {
                 id: area.clone(),
                 name: format!("Implement {}", area),
-                role: ComponentRole::from_str(area),
+                role: ComponentRole::parse(area),
                 description: format!("Implement {} for the feature", area),
                 can_parallelize: true,
                 dependencies: vec![],
@@ -798,7 +806,7 @@ fn validate_decomposition(subtasks: &[Subtask], shared_files: &[SharedFile]) -> 
         for pattern in &subtask.ownership.patterns {
             pattern_owners
                 .entry(pattern.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(subtask.id.clone());
         }
     }

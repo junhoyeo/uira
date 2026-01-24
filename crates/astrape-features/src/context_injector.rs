@@ -3,8 +3,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+/// Separator used between context entries and between context and original content.
 const CONTEXT_SEPARATOR: &str = "\n\n---\n\n";
-const DEFAULT_SEPARATOR: &str = "\n\n---\n\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ContextSourceType {
@@ -230,12 +230,12 @@ pub fn inject_pending_context(
 
     let updated = match strategy {
         InjectionStrategy::Prepend => {
-            format!("{}{}{}", pending.merged, DEFAULT_SEPARATOR, original)
+            format!("{}{}{}", pending.merged, CONTEXT_SEPARATOR, original)
         }
-        InjectionStrategy::Append => format!("{}{}{}", original, DEFAULT_SEPARATOR, pending.merged),
+        InjectionStrategy::Append => format!("{}{}{}", original, CONTEXT_SEPARATOR, pending.merged),
         InjectionStrategy::Wrap => format!(
             "<injected-context>\n{}\n</injected-context>{}{}",
-            pending.merged, DEFAULT_SEPARATOR, original
+            pending.merged, CONTEXT_SEPARATOR, original
         ),
     };
     parts[text_part_index].text = Some(updated);
@@ -266,11 +266,11 @@ pub fn inject_context_into_text(
 
     let pending = collector.consume(session_id);
     let result = match strategy {
-        InjectionStrategy::Prepend => format!("{}{}{}", pending.merged, DEFAULT_SEPARATOR, text),
-        InjectionStrategy::Append => format!("{}{}{}", text, DEFAULT_SEPARATOR, pending.merged),
+        InjectionStrategy::Prepend => format!("{}{}{}", pending.merged, CONTEXT_SEPARATOR, text),
+        InjectionStrategy::Append => format!("{}{}{}", text, CONTEXT_SEPARATOR, pending.merged),
         InjectionStrategy::Wrap => format!(
             "<injected-context>\n{}\n</injected-context>{}{}",
-            pending.merged, DEFAULT_SEPARATOR, text
+            pending.merged, CONTEXT_SEPARATOR, text
         ),
     };
 

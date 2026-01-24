@@ -104,7 +104,7 @@ pub struct TruncationResult {
 
 fn truncate_content(content: &str, max_tokens: Option<usize>) -> TruncationResult {
     let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_README_TOKENS);
-    let estimated_tokens = (content.len() + CHARS_PER_TOKEN - 1) / CHARS_PER_TOKEN;
+    let estimated_tokens = content.len().div_ceil(CHARS_PER_TOKEN);
 
     if estimated_tokens <= max_tokens {
         return TruncationResult {
@@ -351,10 +351,7 @@ impl Hook for DirectoryReadmeInjectorHook {
         }
 
         // Get session ID from context
-        let session_id = context
-            .session_id
-            .as_deref()
-            .unwrap_or("default-session");
+        let session_id = context.session_id.as_deref().unwrap_or("default-session");
 
         // Process and get README injection content
         let readme_content = self.process_tool_execution(tool_name, file_path, session_id);

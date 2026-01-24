@@ -147,8 +147,11 @@ pub const TOKEN_LIMIT_KEYWORDS: &[&str] = &[
 // Session recovery part type sets
 lazy_static! {
     static ref THINKING_TYPES: HashSet<&'static str> =
-        ["thinking", "redacted_thinking", "reasoning"].into_iter().collect();
-    static ref META_TYPES: HashSet<&'static str> = ["step-start", "step-finish"].into_iter().collect();
+        ["thinking", "redacted_thinking", "reasoning"]
+            .into_iter()
+            .collect();
+    static ref META_TYPES: HashSet<&'static str> =
+        ["step-start", "step-finish"].into_iter().collect();
     static ref TOOL_PART_TYPES: HashSet<&'static str> =
         ["tool", "tool_use", "tool_result"].into_iter().collect();
 }
@@ -231,13 +234,19 @@ pub struct RetryState {
 pub struct TruncateState {
     #[serde(rename = "truncateAttempt")]
     pub truncate_attempt: u32,
-    #[serde(rename = "lastTruncatedPartId", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "lastTruncatedPartId",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub last_truncated_part_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryConfig {
-    #[serde(rename = "contextWindowRecovery", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "contextWindowRecovery",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub context_window_recovery: Option<bool>,
     #[serde(rename = "editErrorRecovery", skip_serializing_if = "Option::is_none")]
     pub edit_error_recovery: Option<bool>,
@@ -477,7 +486,7 @@ fn extract_tokens_from_message(message: &str) -> Option<(u64, u64)> {
 #[derive(Debug, Clone)]
 struct SessionState {
     retry_state: RetryState,
-    truncate_state: TruncateState,
+    _truncate_state: TruncateState,
     last_error_time_ms: u64,
     error_count: u32,
 }
@@ -503,7 +512,7 @@ fn get_session_state(session_id: &str) -> SessionState {
             attempt: 0,
             last_attempt_time_ms: 0,
         },
-        truncate_state: TruncateState {
+        _truncate_state: TruncateState {
             truncate_attempt: 0,
             last_truncated_part_id: None,
         },
@@ -575,7 +584,10 @@ pub fn parse_token_limit_error(err: &serde_json::Value) -> Option<ParsedTokenLim
     if let Some(s) = err_message {
         text_sources.push(s.to_string());
     }
-    if let Some(s) = err_error.and_then(|e| e.get("message")).and_then(|v| v.as_str()) {
+    if let Some(s) = err_error
+        .and_then(|e| e.get("message"))
+        .and_then(|v| v.as_str())
+    {
         text_sources.push(s.to_string());
     }
     for key in ["body", "details", "reason", "description"] {
@@ -735,7 +747,11 @@ fn generate_recovery_message(
         .and_then(|c| c.custom_messages.as_ref())
         .and_then(|m| m.get("context_window_limit"))
     {
-        return (state, Some(custom.clone()), parsed.map(|p| p.error_type.clone()));
+        return (
+            state,
+            Some(custom.clone()),
+            parsed.map(|p| p.error_type.clone()),
+        );
     }
 
     if parsed
@@ -1016,7 +1032,11 @@ impl RecoveryStorage {
         empty
     }
 
-    pub fn find_empty_message_by_index(&self, session_id: &str, target_index: isize) -> Option<String> {
+    pub fn find_empty_message_by_index(
+        &self,
+        session_id: &str,
+        target_index: isize,
+    ) -> Option<String> {
         let messages = self.read_messages(session_id);
         let indices_to_try = [
             target_index,
@@ -1054,7 +1074,11 @@ impl RecoveryStorage {
                 continue;
             }
             let parts = self.read_parts(&msg.id);
-            if parts.iter().any(|p| p.part_type().map(|t| THINKING_TYPES.contains(t)).unwrap_or(false)) {
+            if parts.iter().any(|p| {
+                p.part_type()
+                    .map(|t| THINKING_TYPES.contains(t))
+                    .unwrap_or(false)
+            }) {
                 result.push(msg.id);
             }
         }
@@ -1186,9 +1210,7 @@ impl RecoveryStorage {
 
     fn find_last_thinking_content(&self, session_id: &str, before_message_id: &str) -> String {
         let messages = self.read_messages(session_id);
-        let current_idx = messages
-            .iter()
-            .position(|m| m.id == before_message_id);
+        let current_idx = messages.iter().position(|m| m.id == before_message_id);
         let Some(current_idx) = current_idx else {
             return String::new();
         };
@@ -1250,7 +1272,11 @@ impl RecoveryStorage {
             "synthetic": true,
         });
 
-        fs::write(part_dir.join(format!("{}.json", part_id)), serde_json::to_string_pretty(&part).unwrap_or_default()).is_ok()
+        fs::write(
+            part_dir.join(format!("{}.json", part_id)),
+            serde_json::to_string_pretty(&part).unwrap_or_default(),
+        )
+        .is_ok()
     }
 
     pub fn strip_thinking_parts(&self, message_id: &str) -> bool {
@@ -1311,7 +1337,12 @@ impl RecoveryStorage {
                     if current_text.trim().is_empty() {
                         part["text"] = serde_json::Value::String(replacement_text.to_string());
                         part["synthetic"] = serde_json::Value::Bool(true);
-                        if fs::write(&path, serde_json::to_string_pretty(&part).unwrap_or_default()).is_ok() {
+                        if fs::write(
+                            &path,
+                            serde_json::to_string_pretty(&part).unwrap_or_default(),
+                        )
+                        .is_ok()
+                        {
                             any_replaced = true;
                         }
                     }
@@ -1455,11 +1486,19 @@ async fn recover_tool_result_missing(
                         if t == "tool" {
                             Some(MessagePartData {
                                 part_type: "tool_use".to_string(),
-                                id: v.get("callID")
+                                id: v
+                                    .get("callID")
                                     .and_then(|vv| vv.as_str())
                                     .map(|s| s.to_string())
-                                    .or_else(|| v.get("id").and_then(|vv| vv.as_str()).map(|s| s.to_string())),
-                                name: v.get("tool").and_then(|vv| vv.as_str()).map(|s| s.to_string()),
+                                    .or_else(|| {
+                                        v.get("id")
+                                            .and_then(|vv| vv.as_str())
+                                            .map(|s| s.to_string())
+                                    }),
+                                name: v
+                                    .get("tool")
+                                    .and_then(|vv| vv.as_str())
+                                    .map(|s| s.to_string()),
                                 input: v.get("state").and_then(|st| st.get("input")).cloned(),
                                 ..Default::default()
                             })
@@ -1530,8 +1569,8 @@ async fn recover_empty_content_message(
     failed_msg: &MessageData,
     error: &serde_json::Value,
 ) -> bool {
-    let target_index = extract_message_index_from_text(&get_error_message_value(error))
-        .map(|i| i as isize);
+    let target_index =
+        extract_message_index_from_text(&get_error_message_value(error)).map(|i| i as isize);
     let failed_id = failed_msg.info.as_ref().and_then(|i| i.id.clone());
     let mut any = false;
 
@@ -1759,7 +1798,9 @@ impl Hook for RecoveryHook {
                 let result = handle_edit_error_recovery(tool, output);
                 if result.attempted && result.success {
                     return Ok(HookOutput::continue_with_message(
-                        result.message.unwrap_or_else(|| EDIT_ERROR_REMINDER.to_string()),
+                        result
+                            .message
+                            .unwrap_or_else(|| EDIT_ERROR_REMINDER.to_string()),
                     ));
                 }
                 Ok(HookOutput::pass())
@@ -1825,8 +1866,9 @@ mod tests {
 
     #[test]
     fn test_parse_token_limit_error_string() {
-        let err = serde_json::Value::String("prompt is too long: 12000 tokens > 8000 maximum"
-            .to_string());
+        let err = serde_json::Value::String(
+            "prompt is too long: 12000 tokens > 8000 maximum".to_string(),
+        );
         let parsed = parse_token_limit_error(&err).unwrap();
         assert!(parsed.current_tokens >= parsed.max_tokens);
         assert!(parsed.error_type.contains("token"));
@@ -1866,7 +1908,10 @@ mod tests {
             session_id: session_id.to_string(),
             role: "assistant".to_string(),
             parent_id: None,
-            time: Some(StoredMessageTime { created: 1, completed: None }),
+            time: Some(StoredMessageTime {
+                created: 1,
+                completed: None,
+            }),
             error: None,
         };
         fs::write(
@@ -1876,7 +1921,10 @@ mod tests {
         .unwrap();
 
         // No parts => empty
-        assert_eq!(storage.find_empty_messages(session_id), vec!["m1".to_string()]);
+        assert_eq!(
+            storage.find_empty_messages(session_id),
+            vec!["m1".to_string()]
+        );
 
         // Inject text part => not empty
         assert!(storage.inject_text_part(session_id, "m1", "hello"));

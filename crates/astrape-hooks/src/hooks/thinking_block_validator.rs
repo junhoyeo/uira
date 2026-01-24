@@ -96,7 +96,9 @@ pub fn is_extended_thinking_model(model_id: &str) -> bool {
     if lower.contains("thinking") || lower.ends_with("-high") {
         return true;
     }
-    lower.contains("claude-sonnet-4") || lower.contains("claude-opus-4") || lower.contains("claude-3")
+    lower.contains("claude-sonnet-4")
+        || lower.contains("claude-opus-4")
+        || lower.contains("claude-3")
 }
 
 pub fn has_content_parts(parts: &[MessagePart]) -> bool {
@@ -104,12 +106,16 @@ pub fn has_content_parts(parts: &[MessagePart]) -> bool {
 }
 
 pub fn starts_with_thinking_block(parts: &[MessagePart]) -> bool {
-    parts.first()
+    parts
+        .first()
         .map(|p| is_thinking_part_type(&p.part_type))
         .unwrap_or(false)
 }
 
-pub fn find_previous_thinking_content(messages: &[MessageWithParts], current_index: usize) -> String {
+pub fn find_previous_thinking_content(
+    messages: &[MessageWithParts],
+    current_index: usize,
+) -> String {
     if current_index == 0 {
         return String::new();
     }
@@ -203,7 +209,10 @@ pub fn validate_message(
     }
 }
 
-pub fn validate_messages(messages: &mut [MessageWithParts], model_id: &str) -> Vec<ValidationResult> {
+pub fn validate_messages(
+    messages: &mut [MessageWithParts],
+    model_id: &str,
+) -> Vec<ValidationResult> {
     let snapshot = messages.to_vec();
     let mut results = Vec::with_capacity(messages.len());
     for (i, msg) in messages.iter_mut().enumerate() {
@@ -249,7 +258,10 @@ fn parse_messages_from_input(input: &HookInput) -> Option<Vec<MessageWithParts>>
     }
 }
 
-fn build_modified_input(original: &serde_json::Value, messages: &[MessageWithParts]) -> serde_json::Value {
+fn build_modified_input(
+    original: &serde_json::Value,
+    messages: &[MessageWithParts],
+) -> serde_json::Value {
     if original.is_array() {
         serde_json::to_value(messages).unwrap_or(serde_json::Value::Null)
     } else if original.is_object() {
@@ -303,7 +315,8 @@ impl Hook for ThinkingBlockValidatorHook {
             if messages[i].info.role != "assistant" {
                 continue;
             }
-            if has_content_parts(&messages[i].parts) && !starts_with_thinking_block(&messages[i].parts)
+            if has_content_parts(&messages[i].parts)
+                && !starts_with_thinking_block(&messages[i].parts)
             {
                 let prev = find_previous_thinking_content(&messages, i);
                 let content = if prev.is_empty() {

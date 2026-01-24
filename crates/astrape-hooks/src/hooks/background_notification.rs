@@ -162,13 +162,11 @@ fn truncate_chars(s: &str, max_chars: usize) -> (&str, bool) {
     }
 
     let mut end = 0usize;
-    let mut count = 0usize;
-    for (idx, ch) in s.char_indices() {
+    for (count, (idx, ch)) in s.char_indices().enumerate() {
         if count == max_chars {
             break;
         }
         end = idx + ch.len_utf8();
-        count += 1;
     }
     (&s[..end], true)
 }
@@ -181,12 +179,7 @@ fn format_duration(start: DateTime<Utc>, end: Option<DateTime<Utc>>) -> String {
     let hours = minutes_total / 60;
 
     if hours > 0 {
-        format!(
-            "{}h {}m {}s",
-            hours,
-            minutes_total % 60,
-            seconds_total % 60
-        )
+        format!("{}h {}m {}s", hours, minutes_total % 60, seconds_total % 60)
     } else if minutes_total > 0 {
         format!("{}m {}s", minutes_total, seconds_total % 60)
     } else {

@@ -140,7 +140,7 @@ impl Default for AgentTierPreferences {
 }
 
 /// Plugin settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PluginSettings {
     /// Enabled plugins
     #[serde(default)]
@@ -149,15 +149,6 @@ pub struct PluginSettings {
     /// Plugin-specific configuration
     #[serde(default)]
     pub config: HashMap<String, serde_json::Value>,
-}
-
-impl Default for PluginSettings {
-    fn default() -> Self {
-        Self {
-            enabled: Vec::new(),
-            config: HashMap::new(),
-        }
-    }
 }
 
 /// AI model configuration
@@ -202,19 +193,11 @@ impl Default for AiSettings {
 }
 
 /// MCP (Model Context Protocol) settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpSettings {
     /// Enabled MCP servers
     #[serde(default)]
     pub servers: HashMap<String, McpServerConfig>,
-}
-
-impl Default for McpSettings {
-    fn default() -> Self {
-        Self {
-            servers: HashMap::new(),
-        }
-    }
 }
 
 /// Individual MCP server configuration
@@ -233,19 +216,11 @@ pub struct McpServerConfig {
 }
 
 /// Agent settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSettings {
     /// Individual agent configurations
     #[serde(default)]
     pub agents: HashMap<String, AgentConfig>,
-}
-
-impl Default for AgentSettings {
-    fn default() -> Self {
-        Self {
-            agents: HashMap::new(),
-        }
-    }
 }
 
 /// Individual agent configuration
@@ -260,7 +235,7 @@ pub struct AgentConfig {
 }
 
 /// Git hooks configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HooksConfig {
     /// Pre-commit hook configuration
     #[serde(default)]
@@ -273,16 +248,6 @@ pub struct HooksConfig {
     /// Pre-push hook configuration
     #[serde(default)]
     pub pre_push: Option<HookConfig>,
-}
-
-impl Default for HooksConfig {
-    fn default() -> Self {
-        Self {
-            pre_commit: None,
-            post_commit: None,
-            pre_push: None,
-        }
-    }
 }
 
 /// Individual hook configuration
