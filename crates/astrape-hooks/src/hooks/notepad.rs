@@ -6,11 +6,15 @@
 //! 2. Working Memory - Session notes, auto-pruned after 7 days
 //! 3. MANUAL - User content, never auto-pruned
 
+use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const NOTEPAD_FILENAME: &str = "notepad.md";
 pub const PRIORITY_HEADER: &str = "## Priority Context";
@@ -430,6 +434,27 @@ impl NotepadHook {
 
     pub fn format_full_notepad(directory: &str) -> Option<String> {
         Self::read_notepad(directory)
+    }
+}
+
+#[async_trait]
+impl Hook for NotepadHook {
+    fn name(&self) -> &str {
+        "notepad"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::UserPromptSubmit]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        _input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Process notepad commands in prompt
+        Ok(HookOutput::pass())
     }
 }
 

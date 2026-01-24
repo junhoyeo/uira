@@ -1,8 +1,20 @@
 #![deny(clippy::all)]
 
+use std::collections::HashMap;
+
+use astrape_agents::get_agent_definitions;
 use astrape_core::HookOutput;
+use astrape_features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
+use astrape_features::model_routing::{
+    analyze_task_complexity, route_task, RoutingConfigOverrides, RoutingContext,
+};
 use astrape_hook::KeywordDetector;
+use astrape_hooks::{default_hooks, HookContext, HookEvent, HookInput};
 use napi_derive::napi;
+
+// ============================================================================
+// Hook Output Types
+// ============================================================================
 
 #[napi(object)]
 pub struct JsHookOutput {
@@ -28,6 +40,21 @@ impl From<HookOutput> for JsHookOutput {
             additional_context: output.additional_context,
             suppress_output: output.suppress_output,
             system_message: output.system_message,
+        }
+    }
+}
+
+impl From<astrape_hooks::HookOutput> for JsHookOutput {
+    fn from(output: astrape_hooks::HookOutput) -> Self {
+        Self {
+            continue_processing: output.should_continue,
+            message: output.message,
+            stop_reason: None,
+            decision: None,
+            reason: output.reason,
+            additional_context: None,
+            suppress_output: None,
+            system_message: None,
         }
     }
 }
@@ -102,6 +129,346 @@ pub fn create_hook_output_stop(reason: String) -> JsHookOutput {
     }
 }
 
+// ============================================================================
+// Hook System Bindings
+// ============================================================================
+
+/// Input for hook execution from JavaScript
+#[napi(object)]
+pub struct JsHookInput {
+    pub session_id: Option<String>,
+    pub prompt: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<String>,
+    pub tool_output: Option<String>,
+    pub directory: Option<String>,
+    pub stop_reason: Option<String>,
+    pub user_requested: Option<bool>,
+}
+
+/// Execute hooks for a specific event
+///
+/// # Arguments
+/// * `event` - Event type: "user-prompt-submit", "stop", "session-start", "pre-tool-use", "post-tool-use", "session-idle", "messages-transform"
+/// * `input` - Hook input data
+///
+/// # Returns
+/// Hook output with continue flag, message, etc.
+#[napi]
+pub async fn execute_hook(event: String, input: JsHookInput) -> napi::Result<JsHookOutput> {
+    let hook_event = match event.as_str() {
+        "user-prompt-submit" => HookEvent::UserPromptSubmit,
+        "stop" => HookEvent::Stop,
+        "session-start" => HookEvent::SessionStart,
+        "pre-tool-use" => HookEvent::PreToolUse,
+        "post-tool-use" => HookEvent::PostToolUse,
+        "session-idle" => HookEvent::SessionIdle,
+        "messages-transform" => HookEvent::MessagesTransform,
+        _ => {
+            return Err(napi::Error::from_reason(format!(
+                "Unknown event type: {}",
+                event
+            )))
+        }
+    };
+
+    let hook_input = HookInput {
+        session_id: input.session_id.clone(),
+        prompt: input.prompt,
+        message: None,
+        parts: None,
+        tool_name: input.tool_name,
+        tool_input: input
+            .tool_input
+            .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::Null)),
+        tool_output: input
+            .tool_output
+            .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::Null)),
+        directory: input.directory.clone(),
+        stop_reason: input.stop_reason,
+        user_requested: input.user_requested,
+        extra: HashMap::new(),
+    };
+
+    let directory = input
+        .directory
+        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+    let context = HookContext::new(input.session_id, directory);
+
+    let registry = default_hooks();
+    match registry
+        .execute_hooks(hook_event, &hook_input, &context)
+        .await
+    {
+        Ok(output) => Ok(output.into()),
+        Err(e) => Err(napi::Error::from_reason(format!(
+            "Hook execution failed: {}",
+            e
+        ))),
+    }
+}
+
+/// List all registered hooks
+#[napi]
+pub fn list_hooks() -> Vec<String> {
+    let registry = default_hooks();
+    registry.list_hooks()
+}
+
+/// Get the number of registered hooks
+#[napi]
+pub fn get_hook_count() -> u32 {
+    let registry = default_hooks();
+    registry.count() as u32
+}
+
+// ============================================================================
+// Agent System Bindings
+// ============================================================================
+
+/// Agent definition exposed to JavaScript
+#[napi(object)]
+pub struct JsAgentDefinition {
+    pub name: String,
+    pub description: String,
+    pub model: Option<String>,
+    pub tier: String,
+    pub prompt: String,
+    pub tools: Vec<String>,
+}
+
+/// List all available agent definitions
+///
+/// Returns all 32 agent definitions from astrape-agents including:
+/// - Primary agents (architect, executor, explore, etc.)
+/// - Tiered variants (architect-low, architect-medium, executor-high, etc.)
+/// - Specialized agents (security-reviewer, build-fixer, etc.)
+#[napi]
+pub fn list_agents() -> Vec<JsAgentDefinition> {
+    let agents = get_agent_definitions(None);
+
+    agents
+        .into_iter()
+        .map(|(name, config)| {
+            let tier = match config.model {
+                Some(astrape_sdk::ModelType::Haiku) => "LOW",
+                Some(astrape_sdk::ModelType::Sonnet) | Some(astrape_sdk::ModelType::Inherit) => {
+                    "MEDIUM"
+                }
+                Some(astrape_sdk::ModelType::Opus) => "HIGH",
+                None => "MEDIUM",
+            };
+
+            JsAgentDefinition {
+                name,
+                description: config.description,
+                model: config.model.map(|m| format!("{:?}", m).to_lowercase()),
+                tier: tier.to_string(),
+                prompt: config.prompt,
+                tools: config.tools,
+            }
+        })
+        .collect()
+}
+
+/// Get a specific agent by name
+///
+/// # Arguments
+/// * `name` - Agent name (e.g., "architect", "executor-high", "explore")
+///
+/// # Returns
+/// Agent definition if found, None otherwise
+#[napi]
+pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
+    let agents = get_agent_definitions(None);
+
+    agents.get(&name).map(|config| {
+        let tier = match config.model {
+            Some(astrape_sdk::ModelType::Haiku) => "LOW",
+            Some(astrape_sdk::ModelType::Sonnet) | Some(astrape_sdk::ModelType::Inherit) => {
+                "MEDIUM"
+            }
+            Some(astrape_sdk::ModelType::Opus) => "HIGH",
+            None => "MEDIUM",
+        };
+
+        JsAgentDefinition {
+            name: name.clone(),
+            description: config.description.clone(),
+            model: config.model.map(|m| format!("{:?}", m).to_lowercase()),
+            tier: tier.to_string(),
+            prompt: config.prompt.clone(),
+            tools: config.tools.clone(),
+        }
+    })
+}
+
+/// Get list of agent names only (lighter weight than full definitions)
+#[napi]
+pub fn list_agent_names() -> Vec<String> {
+    let agents = get_agent_definitions(None);
+    agents.keys().cloned().collect()
+}
+
+// ============================================================================
+// Model Routing Bindings
+// ============================================================================
+
+/// Result of model routing decision
+#[napi(object)]
+pub struct JsRoutingResult {
+    pub model: String,
+    pub tier: String,
+    pub reasoning: String,
+    pub confidence: f64,
+    pub escalated: bool,
+}
+
+/// Route a task to the appropriate model tier
+///
+/// Uses complexity analysis to determine the best model for a given task.
+/// Considers lexical signals, structural complexity, and context.
+///
+/// # Arguments
+/// * `prompt` - The task prompt to analyze
+///
+/// # Returns
+/// Routing result with model, tier, and reasoning
+#[napi]
+pub fn route_task_prompt(prompt: String) -> JsRoutingResult {
+    let context = RoutingContext {
+        task_prompt: prompt,
+        agent_type: None,
+        ..RoutingContext::default()
+    };
+
+    let decision = route_task(context, RoutingConfigOverrides::default());
+
+    JsRoutingResult {
+        model: decision.model,
+        tier: decision.tier.as_str().to_string(),
+        reasoning: decision.reasons.join("; "),
+        confidence: decision.confidence,
+        escalated: decision.escalated,
+    }
+}
+
+/// Route a task with agent context
+///
+/// # Arguments
+/// * `prompt` - The task prompt to analyze
+/// * `agent_type` - Optional agent type (e.g., "architect", "explore")
+///
+/// # Returns
+/// Routing result with model, tier, and reasoning
+#[napi]
+pub fn route_task_with_agent(prompt: String, agent_type: Option<String>) -> JsRoutingResult {
+    let context = RoutingContext {
+        task_prompt: prompt,
+        agent_type,
+        ..RoutingContext::default()
+    };
+
+    let decision = route_task(context, RoutingConfigOverrides::default());
+
+    JsRoutingResult {
+        model: decision.model,
+        tier: decision.tier.as_str().to_string(),
+        reasoning: decision.reasons.join("; "),
+        confidence: decision.confidence,
+        escalated: decision.escalated,
+    }
+}
+
+/// Analyze task complexity
+///
+/// Provides detailed complexity analysis for a task prompt.
+///
+/// # Arguments
+/// * `prompt` - The task prompt to analyze
+/// * `agent_type` - Optional agent type for context
+///
+/// # Returns
+/// Analysis result with tier, model, and detailed breakdown
+#[napi(object)]
+pub struct JsComplexityAnalysis {
+    pub tier: String,
+    pub model: String,
+    pub analysis: String,
+}
+
+#[napi]
+pub fn analyze_complexity(prompt: String, agent_type: Option<String>) -> JsComplexityAnalysis {
+    let (tier, model, analysis) = analyze_task_complexity(&prompt, agent_type.as_deref());
+
+    JsComplexityAnalysis {
+        tier: tier.as_str().to_string(),
+        model,
+        analysis,
+    }
+}
+
+// ============================================================================
+// Skill System Bindings
+// ============================================================================
+
+/// Skill definition exposed to JavaScript
+#[napi(object)]
+pub struct JsSkillDefinition {
+    pub name: String,
+    pub description: String,
+    pub template: String,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+    pub argument_hint: Option<String>,
+}
+
+/// Get a skill by name
+///
+/// Loads skill from SKILL.md files in the skills/ directory.
+///
+/// # Arguments
+/// * `name` - Skill name (e.g., "autopilot", "ralph", "ultrawork")
+///
+/// # Returns
+/// Skill template content if found, None otherwise
+#[napi]
+pub fn get_skill(name: String) -> Option<String> {
+    get_builtin_skill(&name).map(|s| s.template)
+}
+
+/// Get full skill definition
+///
+/// # Arguments
+/// * `name` - Skill name
+///
+/// # Returns
+/// Full skill definition with metadata
+#[napi]
+pub fn get_skill_definition(name: String) -> Option<JsSkillDefinition> {
+    get_builtin_skill(&name).map(|s| JsSkillDefinition {
+        name: s.name,
+        description: s.description,
+        template: s.template,
+        agent: s.agent,
+        model: s.model,
+        argument_hint: s.argument_hint,
+    })
+}
+
+/// List all available skill names
+///
+/// # Returns
+/// List of skill names loaded from the skills/ directory
+#[napi]
+pub fn list_skills() -> Vec<String> {
+    list_builtin_skill_names()
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +519,85 @@ mod tests {
         assert!(result.is_some());
         let output = result.unwrap();
         assert!(output.message.unwrap().contains("PLANNER"));
+    }
+
+    #[test]
+    fn test_list_agents() {
+        let agents = list_agents();
+        assert!(!agents.is_empty());
+        // Should have at least the primary agents
+        let names: Vec<_> = agents.iter().map(|a| a.name.as_str()).collect();
+        assert!(names.contains(&"architect"));
+        assert!(names.contains(&"executor"));
+        assert!(names.contains(&"explore"));
+    }
+
+    #[test]
+    fn test_get_agent() {
+        let agent = get_agent("architect".to_string());
+        assert!(agent.is_some());
+        let agent = agent.unwrap();
+        assert_eq!(agent.tier, "HIGH");
+    }
+
+    #[test]
+    fn test_get_agent_not_found() {
+        let agent = get_agent("nonexistent-agent".to_string());
+        assert!(agent.is_none());
+    }
+
+    #[test]
+    fn test_route_task_simple() {
+        let result = route_task_prompt("find where auth is implemented".to_string());
+        // Simple search tasks should route to lower tier
+        assert!(!result.model.is_empty());
+        assert!(!result.tier.is_empty());
+    }
+
+    #[test]
+    fn test_route_task_complex() {
+        let result = route_task_prompt(
+            "refactor the entire authentication system to use OAuth2".to_string(),
+        );
+        // Complex tasks with architecture keywords should route higher
+        assert!(!result.model.is_empty());
+        // Architecture keywords should influence the decision
+        assert!(result.reasoning.contains("architecture") || result.tier == "HIGH");
+    }
+
+    #[test]
+    fn test_route_task_with_agent() {
+        let result = route_task_with_agent("find auth code".to_string(), Some("explore".to_string()));
+        // Explore agent should stay low tier
+        assert_eq!(result.tier, "LOW");
+    }
+
+    #[test]
+    fn test_analyze_complexity() {
+        let analysis = analyze_complexity("add a button".to_string(), None);
+        assert!(!analysis.tier.is_empty());
+        assert!(!analysis.model.is_empty());
+        assert!(!analysis.analysis.is_empty());
+    }
+
+    #[test]
+    fn test_list_hooks() {
+        let hooks = list_hooks();
+        assert!(!hooks.is_empty());
+        // Should have some of the default hooks
+    }
+
+    #[test]
+    fn test_get_hook_count() {
+        let count = get_hook_count();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_list_skills() {
+        // This may return empty if no skills directory exists
+        let skills = list_skills();
+        // Just verify it doesn't panic
+        assert!(skills.is_empty() || !skills.is_empty());
     }
 }

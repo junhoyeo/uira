@@ -11,16 +11,11 @@ impl LanguageRegistry {
     pub fn new() -> Self {
         let mut extension_map = HashMap::new();
 
-        // Existing languages
+        // Core languages
         extension_map.insert("py", "python");
-        extension_map.insert("pyi", "python");
         extension_map.insert("js", "javascript");
         extension_map.insert("jsx", "javascript");
-        extension_map.insert("mjs", "javascript");
-        extension_map.insert("cjs", "javascript");
         extension_map.insert("ts", "typescript");
-        extension_map.insert("mts", "typescript");
-        extension_map.insert("cts", "typescript");
         extension_map.insert("tsx", "tsx");
         extension_map.insert("go", "go");
         extension_map.insert("java", "java");
@@ -34,25 +29,19 @@ impl LanguageRegistry {
         extension_map.insert("rb", "ruby");
         extension_map.insert("sh", "bash");
         extension_map.insert("bash", "bash");
-        extension_map.insert("zsh", "bash");
 
-        // New languages
+        // Additional languages (Phase 1)
         extension_map.insert("cs", "csharp");
+        extension_map.insert("php", "php");
+        extension_map.insert("scala", "scala");
+        extension_map.insert("sc", "scala");
         extension_map.insert("html", "html");
         extension_map.insert("htm", "html");
-        extension_map.insert("xml", "xml");
-
-        // Incompatible languages (parsers use tree-sitter < 0.24):
-        // extension_map.insert("swift", "swift");
-        // extension_map.insert("kt", "kotlin");
-        // extension_map.insert("kts", "kotlin");
-        // extension_map.insert("yaml", "yaml");
-        // extension_map.insert("yml", "yaml");
-        // extension_map.insert("toml", "toml");
-        // extension_map.insert("vue", "vue");
-        // extension_map.insert("svelte", "svelte");
-        // extension_map.insert("sql", "sql");
-        // extension_map.insert("lua", "lua");
+        extension_map.insert("css", "css");
+        extension_map.insert("json", "json");
+        extension_map.insert("hs", "haskell");
+        extension_map.insert("ml", "ocaml");
+        extension_map.insert("mli", "ocaml");
 
         Self { extension_map }
     }
@@ -73,7 +62,6 @@ impl LanguageRegistry {
 
     pub fn get_language(&self, name: &str) -> Option<Language> {
         match name {
-            // Existing languages
             "python" => Some(tree_sitter_python::LANGUAGE.into()),
             "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
             "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
@@ -85,25 +73,31 @@ impl LanguageRegistry {
             "java" => Some(tree_sitter_java::LANGUAGE.into()),
             "ruby" => Some(tree_sitter_ruby::LANGUAGE.into()),
             "bash" => Some(tree_sitter_bash::LANGUAGE.into()),
-            // New languages
             "csharp" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
+            "php" => Some(tree_sitter_php::LANGUAGE_PHP.into()),
+            "scala" => Some(tree_sitter_scala::LANGUAGE.into()),
             "html" => Some(tree_sitter_html::LANGUAGE.into()),
-            "xml" => Some(tree_sitter_html::LANGUAGE.into()),
-            // Incompatible parsers (use tree-sitter < 0.24):
-            // "swift" => Some(tree_sitter_swift::LANGUAGE.into()),
-            // "kotlin" => Some(tree_sitter_kotlin::LANGUAGE.into()),
-            // "yaml" => Some(tree_sitter_yaml::LANGUAGE.into()),
-            // "toml" => Some(tree_sitter_toml::language()),
-            // "vue" => Some(tree_sitter_vue::LANGUAGE.into()),
-            // "svelte" => Some(tree_sitter_svelte::LANGUAGE.into()),
-            // "sql" => Some(tree_sitter_sql::LANGUAGE.into()),
-            // "lua" => Some(tree_sitter_lua::LANGUAGE.into()),
+            "css" => Some(tree_sitter_css::LANGUAGE.into()),
+            "json" => Some(tree_sitter_json::LANGUAGE.into()),
+            "haskell" => Some(tree_sitter_haskell::LANGUAGE.into()),
+            "ocaml" => Some(tree_sitter_ocaml::LANGUAGE_OCAML.into()),
             _ => None,
         }
     }
 
     pub fn is_supported(&self, file_path: &str) -> bool {
         self.get_language_name(file_path).is_some()
+    }
+
+    pub fn supported_extensions(&self) -> Vec<&'static str> {
+        self.extension_map.keys().copied().collect()
+    }
+
+    pub fn supported_languages(&self) -> Vec<&'static str> {
+        let mut langs: Vec<_> = self.extension_map.values().copied().collect();
+        langs.sort();
+        langs.dedup();
+        langs
     }
 }
 
@@ -115,7 +109,6 @@ impl Default for LanguageRegistry {
 
 fn get_query_pattern(lang_name: &str) -> &'static str {
     match lang_name {
-        // Existing languages
         "rust" => "(line_comment) @comment (block_comment) @comment",
         "python" => "(comment) @comment",
         "javascript" | "typescript" | "tsx" => "(comment) @comment",
@@ -124,10 +117,14 @@ fn get_query_pattern(lang_name: &str) -> &'static str {
         "java" => "(comment) @comment (block_comment) @comment (line_comment) @comment",
         "ruby" => "(comment) @comment",
         "bash" => "(comment) @comment",
-        // New languages
-        "csharp" | "html" | "xml" => "(comment) @comment",
-        // Incompatible parsers (use tree-sitter < 0.24):
-        // "swift" | "kotlin" | "yaml" | "toml" | "vue" | "svelte" | "sql" | "lua" => "(comment) @comment",
+        "csharp" => "(comment) @comment",
+        "php" => "(comment) @comment",
+        "scala" => "(comment) @comment",
+        "html" => "(comment) @comment",
+        "css" => "(comment) @comment",
+        "json" => "(comment) @comment",
+        "haskell" => "(comment) @comment",
+        "ocaml" => "(comment) @comment",
         _ => "(comment) @comment",
     }
 }
@@ -147,6 +144,8 @@ mod tests {
         assert_eq!(registry.get_language_name("test.py"), Some("python"));
         assert_eq!(registry.get_language_name("test.js"), Some("javascript"));
         assert_eq!(registry.get_language_name("test.rs"), Some("rust"));
+        assert_eq!(registry.get_language_name("test.cs"), Some("csharp"));
+        assert_eq!(registry.get_language_name("test.php"), Some("php"));
         assert_eq!(registry.get_language_name("test.unknown"), None);
     }
 
@@ -155,6 +154,17 @@ mod tests {
         let registry = LanguageRegistry::new();
         assert!(registry.is_supported("test.py"));
         assert!(registry.is_supported("test.js"));
+        assert!(registry.is_supported("test.cs"));
         assert!(!registry.is_supported("test.unknown"));
+    }
+
+    #[test]
+    fn test_supported_languages() {
+        let registry = LanguageRegistry::new();
+        let langs = registry.supported_languages();
+        assert!(langs.contains(&"python"));
+        assert!(langs.contains(&"rust"));
+        assert!(langs.contains(&"csharp"));
+        assert!(langs.contains(&"php"));
     }
 }

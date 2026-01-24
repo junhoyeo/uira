@@ -2,32 +2,61 @@
 
 ![ASTRAPE](./.github/assets/cover.jpg)
 
-> Lightning-fast Rust-native git hooks manager with AI harness for Claude Code
+> Lightning-fast Rust-native multi-agent orchestration system with git hooks, native linting, and AI-assisted workflows
 
-Astrape (Greek: "lightning") is a comprehensive developer toolchain that combines git hooks management, native JavaScript/TypeScript linting, AI-assisted typos checking, and an extensible AI harness system for Claude Code.
+Astrape (Greek: "lightning") is a complete Rust port of [oh-my-claudecode](https://github.com/anthropics/oh-my-claudecode), providing multi-agent orchestration, smart model routing, and AI-assisted development tools.
 
 ## Features
 
-- **Native Rust CLI** - Single binary, no Node.js runtime for core features
-- **AI Harness System** - Extensible hooks for Claude Code integration
-- **oxc-powered linting** - AST-based JS/TS lint rules via oxc parser
-- **AI-assisted typos** - Smart spell checking with context-aware decisions
+### Core Orchestration
+- **32 Specialized Agents** - Analyst, Architect, Designer, Executor, Explorer, and more
+- **Smart Model Routing** - Automatically select Haiku/Sonnet/Opus based on task complexity
+- **Hook System** - 22 hooks for Claude Code integration (autopilot, ultrawork, ralph, etc.)
+- **MCP Integration** - Stdio client for Model Context Protocol servers
+- **Skill System** - Load and execute skill templates from SKILL.md files
+
+### Git Hooks & Linting
+- **Native Rust** - No Node.js runtime, single binary
+- **oxc-powered linting** - Uses oxc parser for AST-based JS/TS lint rules
+- **AI-assisted typos** - Smart spell checking with context-aware AI decisions
 - **Parallel execution** - Hooks run concurrently via Rayon
-- **Lefthook-style config** - Familiar YAML configuration
-- **Variable expansion** - `{staged_files}`, `{all_files}` in commands
+
+### Node.js Bindings
+- **NAPI bindings** - Use from Node.js/TypeScript
+- **Hook execution** - Run hooks from JavaScript
+- **Agent access** - Query agent definitions and routing
+
+## Install
+
+```bash
+cargo install astrape
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/junhoyeo/Astrape
+cd Astrape
+cargo install --path crates/astrape
+```
 
 ## Quick Start
 
-```bash
-# Install from source
-git clone https://github.com/junhoyeo/Astrape
-cd Astrape
-cargo install --path .
+### Git Hooks
 
-# Initialize configuration
+```bash
 astrape init      # Creates astrape.yml
 astrape install   # Installs git hooks
 git commit        # Hooks run automatically
+```
+
+### Agent Orchestration
+
+```bash
+astrape agent list              # List all 32 agents
+astrape agent info executor     # Show agent details
+astrape skill list              # List available skills
+astrape session start           # Start orchestration session
 ```
 
 ## Commands
@@ -38,151 +67,15 @@ git commit        # Hooks run automatically
 | `astrape install` | Install git hooks to `.git/hooks/` |
 | `astrape run <hook>` | Run a specific hook manually |
 | `astrape lint [files]` | Lint JS/TS files with native oxc |
-| `astrape typos` | Check for typos (fast, pre-commit) |
-| `astrape typos --ai` | AI-assisted typos with grouped fixes |
-| `astrape typos --ai --stage` | Auto-stage modified files after fixing |
-| `astrape hook install` | Install AI harness hooks for Claude Code |
-| `astrape hook list` | List installed AI harness hooks |
-
-## Configuration
-
-`astrape.yml`:
-
-```yaml
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-
-pre-commit:
-  parallel: true
-  commands:
-    - name: fmt
-      run: cargo fmt --check
-    - name: lint
-      run: astrape lint {staged_files}
-      glob: "**/*.{js,ts,jsx,tsx}"
-    - name: typos
-      run: astrape typos --ai --stage
-
-post-commit:
-  parallel: false
-  commands:
-    - name: auto-push
-      run: git push origin HEAD
-```
-
-### AI Config
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ai.model` | `anthropic/claude-sonnet-4-20250514` | Model in `provider/model` format |
-| `ai.host` | `127.0.0.1` | OpenCode server host |
-| `ai.port` | `4096` | OpenCode server port |
-| `ai.disable_tools` | `true` | Disable built-in tools (bash, edit, etc.) |
-| `ai.disable_mcp` | `true` | Disable MCP servers |
-
-### Variable Expansion
-
-| Variable | Expands To |
-|----------|------------|
-| `{staged_files}` | Git staged files matching glob |
-| `{all_files}` | All files matching glob |
-
-## AI-Assisted Typos
-
-The `--ai` flag enables intelligent batch typos handling:
-
-```bash
-astrape typos --ai --stage
-```
-
-**Features:**
-- **Batch processing** - Groups typos by keyword, sends unique typos in single AI request
-- **Smart decisions** - AI analyzes context and decides for each unique typo:
-  - **APPLY** - Fix automatically
-  - **IGNORE** - Add to `_typos.toml` ignore list
-  - **SKIP** - Leave unchanged (uncertain)
-- **Auto-staging** - `--stage` flag auto git-adds modified files
-
-**Example output:**
-```
-! Found 6 typo(s) (1 unique)
-  → Analyzing 1 unique typo(s) with AI...
-  ✓ AI analysis complete
-
-  → 'teh' → 'the' (6 occurrences) [IGNORE]
-      ./src/hooks/mod.rs:298
-      ./src/hooks/mod.rs:301
-      ... (all locations grouped)
-    ✓ Added 'teh' to _typos.toml
-  → Staging 1 modified file(s)...
-    ✓ _typos.toml
-```
-
-Requires [OpenCode](https://opencode.ai) to be installed.
-
-### AI Hooks
-
-Extend the AI typos workflow with custom hooks:
-
-```yaml
-ai_hooks:
-  pre-check:
-    - run: echo "Starting typos check"
-  
-  post-check:
-    - run: echo "Found $TYPO_COUNT typos"
-  
-  pre-ai:
-    - matcher: "*.rs"
-      run: echo "Checking $TYPO in $FILE"
-  
-  post-ai:
-    - run: echo "Decision: $DECISION for $TYPO"
-  
-  pre-fix:
-    - run: echo "Applying: $TYPO → $CORRECTION"
-  
-  post-fix:
-    - run: git add $FILE
-```
-
-| Hook | Event | Available Variables |
-|------|-------|---------------------|
-| `pre-check` | Before typos scan | - |
-| `post-check` | After typos found | `TYPO_COUNT` |
-| `pre-ai` | Before each AI decision | `FILE`, `LINE`, `TYPO`, `CORRECTIONS` |
-| `post-ai` | After each AI decision | `FILE`, `TYPO`, `DECISION` |
-| `pre-fix` | Before applying fix | `FILE`, `LINE`, `TYPO`, `CORRECTION` |
-| `post-fix` | After applying fix | `FILE`, `TYPO`, `CORRECTION` |
-
-## AI Harness System
-
-Astrape includes a comprehensive AI harness system for integrating with Claude Code. The harness provides extensible hooks that enhance AI interactions with features like persistent memory, smart prompting, and quality assurance.
-
-### Available Hooks
-
-| Hook | Purpose | Status |
-|------|---------|--------|
-| **keyword_detector** | Detect keywords in prompts and inject context | ✅ Implemented |
-| **notepad** | Persistent working memory across sessions | ✅ Implemented |
-| **persistent_mode** | Maintain conversation state persistence | ✅ Implemented |
-| **ralph** | Self-referential execution loop until completion | ✅ Implemented |
-| **think_mode** | Enhanced reasoning with thinking blocks | ✅ Implemented |
-| **todo_continuation** | Enforce task completion from todo lists | ✅ Implemented |
-| **ultraqa** | Quality assurance validation loop | ✅ Implemented |
-| **ultrawork** | Parallel work orchestration | ✅ Implemented |
-
-### Installing AI Harness Hooks
-
-```bash
-# Install for Claude Code
-astrape hook install
-
-# List installed hooks
-astrape hook list
-```
-
-Hooks are installed to Claude Code's configuration directory and automatically activate when you use Claude Code.
+| `astrape typos [--ai]` | Check for typos (optionally AI-assisted) |
+| `astrape hook install` | Install Claude Code AI hooks |
+| `astrape hook list` | List installed AI hooks |
+| `astrape agent list` | List all available agents |
+| `astrape agent info <name>` | Show agent details |
+| `astrape session start` | Start new SDK session |
+| `astrape session status` | Check session state |
+| `astrape skill list` | List available skills |
+| `astrape skill show <name>` | Display skill template |
 
 ## Architecture
 
@@ -190,64 +83,143 @@ Hooks are installed to Claude Code's configuration directory and automatically a
 
 ```
 crates/
-├── astrape/                    # Main CLI binary
-├── astrape-core/               # Core types and utilities
-├── astrape-hook/               # Hook execution engine
-├── astrape-hooks/              # AI harness hooks collection
-├── astrape-prompts/            # Prompt building system
-├── astrape-claude/             # Claude Code integration
-├── astrape-comment-checker/    # Code comment analyzer
-├── astrape-sdk/                # Claude Agent SDK bridge (TypeScript)
-└── astrape-napi/               # N-API bindings for TypeScript interop
+├── astrape/                 # CLI binary
+├── astrape-agents/          # 32 agent definitions
+├── astrape-hooks/           # 22 hook implementations
+├── astrape-features/        # State, routing, verification
+├── astrape-tools/           # Tool handlers (delegate, background, skill)
+├── astrape-mcp/             # MCP stdio client
+├── astrape-sdk/             # Session management
+├── astrape-config/          # Configuration schema
+├── astrape-napi/            # Node.js bindings
+├── astrape-comment-checker/ # Tree-sitter comment detection
+├── astrape-prompts/         # Prompt builder
+├── astrape-core/            # Core types
+├── astrape-hook/            # Hook traits
+└── astrape-claude/          # Claude Code integration
 ```
 
-### Technology Stack
+### Agent Tiers
 
-| Component | Technology |
-|-----------|------------|
-| Parser | oxc |
-| Parallel Execution | Rayon |
-| Git Operations | git2 |
-| CLI | clap |
-| Typos Detection | typos-cli |
-| AI Integration | OpenCode + Claude Agent SDK |
-| TypeScript Bridge | napi-rs |
+| Tier | Model | Use Case |
+|------|-------|----------|
+| LOW | Haiku | Quick lookups, simple tasks |
+| MEDIUM | Sonnet | Standard implementation work |
+| HIGH | Opus | Complex reasoning, architecture |
 
-### Built-in Lint Rules
+### Available Agents
 
-| Rule | Severity | Description |
-|------|----------|-------------|
-| `no-console` | warning | Disallow console.* calls |
-| `no-debugger` | error | Disallow debugger statements |
+| Category | Agents |
+|----------|--------|
+| Analysis | architect, architect-medium, architect-low, analyst, critic |
+| Execution | executor, executor-high, executor-low |
+| Search | explore, explore-medium, explore-high |
+| Design | designer, designer-high, designer-low |
+| Testing | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
+| Security | security-reviewer, security-reviewer-low |
+| Build | build-fixer, build-fixer-low |
+| Research | researcher, researcher-low, scientist, scientist-high, scientist-low |
+| Documentation | writer |
+| Visual | vision |
+| Planning | planner |
+| Code Review | code-reviewer, code-reviewer-low |
+
+### Hook Events
+
+| Event | Description |
+|-------|-------------|
+| `UserPromptSubmit` | Before user prompt is processed |
+| `Stop` | When agent stops |
+| `SessionStart` | Session initialization |
+| `PreToolUse` | Before tool execution |
+| `PostToolUse` | After tool execution |
+
+## Configuration
+
+### `astrape.yml`
+
+```yaml
+ai:
+  model: anthropic/claude-sonnet-4-20250514
+  temperature: 0.7
+
+hooks:
+  pre_commit:
+    parallel: true
+    commands:
+      - name: fmt
+        run: cargo fmt --check
+      - name: lint
+        run: astrape lint {staged_files}
+        glob: "**/*.{js,ts,jsx,tsx}"
+
+mcp:
+  servers:
+    filesystem:
+      command: npx
+      args: ["-y", "@anthropic/mcp-filesystem", "/path"]
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ASTRAPE_CONFIG` | Custom config file path |
+| `ASTRAPE_MODEL` | Override default model |
+| `ANTHROPIC_API_KEY` | API key for Claude |
+
+## Node.js Usage
+
+```typescript
+import {
+  listAgents,
+  getAgent,
+  routeTaskPrompt,
+  executeHook,
+  getSkill
+} from '@astrape/native';
+
+// List all agents
+const agents = listAgents();
+
+// Get specific agent
+const executor = getAgent('executor');
+
+// Route a task to appropriate model
+const routing = routeTaskPrompt('Implement user authentication');
+console.log(routing.model, routing.tier, routing.reasoning);
+
+// Execute hook
+const result = await executeHook('UserPromptSubmit', JSON.stringify({
+  prompt: 'ultrawork: fix all errors'
+}));
+
+// Get skill template
+const skill = getSkill('autopilot');
+```
 
 ## Development
 
-### Prerequisites
-
-- Rust 1.70+
-- Node.js 20+ (for AI harness features)
-- OpenCode CLI (for AI-assisted typos)
-
-### Building
-
 ```bash
-cargo build --release
+# Build all crates
+cargo build --workspace
+
+# Run tests
+cargo test --workspace
+
+# Run CLI
+cargo run -p astrape -- agent list
 ```
 
-### Testing
+## Stats
 
-```bash
-cargo test
-```
-
-## Documentation
-
-Comprehensive analysis and planning documents are available in `.sisyphus/`:
-
-- **[ANALYSIS_SUMMARY.md](.sisyphus/ANALYSIS_SUMMARY.md)** - Quick reference for SDK integration
-- **[TECHNICAL_DETAILS.md](.sisyphus/TECHNICAL_DETAILS.md)** - Deep dive into architecture
-- **[RECOMMENDATIONS.md](.sisyphus/RECOMMENDATIONS.md)** - Implementation roadmap
-- **[analysis-claude-agent-sdk.md](.sisyphus/analysis-claude-agent-sdk.md)** - Complete analysis
+| Metric | Value |
+|--------|-------|
+| Crates | 14 |
+| Lines of Rust | 37,000+ |
+| Agents | 32 |
+| Hooks | 22 |
+| Tests | 400+ |
 
 ## License
 

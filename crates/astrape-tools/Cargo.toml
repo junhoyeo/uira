@@ -1,0 +1,25 @@
+[package]
+name = "astrape-tools"
+description = "Tool definitions and foundations for Astrape multi-agent orchestration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tower-lsp = { version = "0.20", features = ["proposed"] }
+lsp-types = "0.95"
+tokio = { workspace = true }
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+astrape-agents = { path = "../astrape-agents" }
+astrape-features = { path = "../astrape-features" }
+astrape-sdk = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

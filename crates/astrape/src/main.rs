@@ -3,13 +3,17 @@ mod hooks;
 mod linter;
 mod typos;
 
+use astrape_agents::get_agent_definitions;
 use astrape_claude::{
     extract_prompt, install_hooks as install_claude_hooks, list_installed_hooks, read_input,
     write_output,
 };
 use astrape_core::HookEvent;
+use astrape_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
 use astrape_hook::KeywordDetector;
+use astrape_sdk::{create_astrape_session, SessionOptions};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use config::Config;
 use hooks::HookExecutor;
 use linter::Linter;
@@ -64,6 +68,57 @@ enum Commands {
         #[command(subcommand)]
         action: HookCommands,
     },
+    /// Manage agents
+    Agent {
+        #[command(subcommand)]
+        action: AgentCommands,
+    },
+    /// Manage SDK sessions
+    Session {
+        #[command(subcommand)]
+        action: SessionCommands,
+    },
+    /// Manage skills
+    Skill {
+        #[command(subcommand)]
+        action: SkillCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCommands {
+    /// List all available agents
+    List,
+    /// Show details of a specific agent
+    Info { name: String },
+    /// Delegate a task to an agent
+    Delegate {
+        #[arg(short, long)]
+        agent: String,
+        #[arg(short, long)]
+        prompt: String,
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommands {
+    /// Start a new session
+    Start {
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+    /// Show session status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// List available skills
+    List,
+    /// Show skill template
+    Show { name: String },
 }
 
 #[derive(Subcommand)]
@@ -91,6 +146,9 @@ fn main() {
         Commands::Typos { ai, stage, files } => typos_command(ai, stage, &files),
         Commands::Format { check, files } => format_command(check, &files),
         Commands::Hook { action } => hook_command(action),
+        Commands::Agent { action } => agent_command(action),
+        Commands::Session { action } => session_command(action),
+        Commands::Skill { action } => skill_command(action),
     };
 
     if let Err(e) = result {
@@ -468,6 +526,296 @@ fn hook_command(action: HookCommands) -> anyhow::Result<()> {
             }
 
             Ok(())
+        }
+    }
+}
+
+fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
+    match action {
+        AgentCommands::List => {
+            println!("{}", "⚡ Available Agents".bold());
+            println!();
+
+            let agents = get_agent_definitions(None);
+            let mut sorted_agents: Vec<_> = agents.iter().collect();
+            sorted_agents.sort_by_key(|(name, _)| name.as_str());
+
+            // Group agents by base name
+            let mut groups: std::collections::HashMap<String, Vec<(&String, &astrape_sdk::AgentConfig)>> =
+                std::collections::HashMap::new();
+
+            for (name, config) in &sorted_agents {
+                let base_name = name
+                    .split('-')
+                    .next()
+                    .unwrap_or(name)
+                    .to_string();
+                groups
+                    .entry(base_name)
+                    .or_default()
+                    .push((name, config));
+            }
+
+            let mut group_names: Vec<_> = groups.keys().cloned().collect();
+            group_names.sort();
+
+            for group in group_names {
+                let members = groups.get(&group).unwrap();
+                println!("  {}", group.cyan().bold());
+                for (name, config) in members {
+                    let model = config
+                        .model
+                        .map(|m| format!(" ({})", m))
+                        .unwrap_or_default();
+                    println!(
+                        "    {} {}{}",
+                        "•".dimmed(),
+                        name,
+                        model.dimmed()
+                    );
+                }
+                println!();
+            }
+
+            println!(
+                "{} {} agents available",
+                "Total:".bold(),
+                sorted_agents.len()
+            );
+            Ok(())
+        }
+        AgentCommands::Info { name } => {
+            let agents = get_agent_definitions(None);
+            if let Some(agent) = agents.get(&name) {
+                println!("{}", format!("⚡ Agent: {}", name).bold());
+                println!();
+                println!("{} {}", "Description:".cyan(), agent.description);
+                println!(
+                    "{} {}",
+                    "Model:".cyan(),
+                    agent
+                        .model
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| "default (sonnet)".to_string())
+                );
+                println!("{} {}", "Tools:".cyan(), agent.tools.join(", "));
+                println!();
+                println!("{}", "Prompt:".cyan());
+                println!("{}", "-".repeat(60).dimmed());
+
+                // Show first 500 chars of prompt or full if shorter
+                let prompt_preview = if agent.prompt.len() > 500 {
+                    format!("{}...\n\n[truncated, {} total chars]", &agent.prompt[..500], agent.prompt.len())
+                } else {
+                    agent.prompt.clone()
+                };
+                println!("{}", prompt_preview);
+                Ok(())
+            } else {
+                anyhow::bail!("Agent '{}' not found. Use 'astrape agent list' to see available agents.", name);
+            }
+        }
+        AgentCommands::Delegate {
+            agent,
+            prompt,
+            model,
+        } => {
+            let agents = get_agent_definitions(None);
+            if !agents.contains_key(&agent) {
+                anyhow::bail!(
+                    "Agent '{}' not found. Use 'astrape agent list' to see available agents.",
+                    agent
+                );
+            }
+
+            println!("{}", format!("⚡ Delegating to agent: {}", agent).bold());
+            println!("{} {}", "Prompt:".cyan(), prompt);
+            if let Some(m) = &model {
+                println!("{} {}", "Model override:".cyan(), m);
+            }
+            println!();
+
+            // For now, just show what would be delegated
+            // Full delegation requires SDK bridge implementation
+            println!("{}", "Note: Full delegation requires active SDK session.".yellow());
+            println!("To delegate, use the Task tool in an active Claude session:");
+            println!();
+            println!(
+                "  Task(subagent_type=\"astrape:{}\", prompt=\"{}\"{})",
+                agent,
+                prompt,
+                model.map(|m| format!(", model=\"{}\"", m)).unwrap_or_default()
+            );
+
+            Ok(())
+        }
+    }
+}
+
+fn session_command(action: SessionCommands) -> anyhow::Result<()> {
+    match action {
+        SessionCommands::Start { config } => {
+            println!("{}", "⚡ Starting Astrape Session".bold());
+            println!();
+
+            let options = SessionOptions {
+                working_directory: Some(std::env::current_dir()?.to_string_lossy().to_string()),
+                ..Default::default()
+            };
+
+            let session = create_astrape_session(Some(options));
+
+            println!("{} Created session with:", "✓".green());
+            println!(
+                "  {} {} agents",
+                "•".dimmed(),
+                session.query_options.agents.len()
+            );
+            println!(
+                "  {} {} tools",
+                "•".dimmed(),
+                session.query_options.allowed_tools.len()
+            );
+            println!(
+                "  {} {} MCP servers",
+                "•".dimmed(),
+                session.query_options.mcp_servers.len()
+            );
+            println!(
+                "  {} {} context files",
+                "•".dimmed(),
+                session.state.context_files.len()
+            );
+
+            if !session.state.context_files.is_empty() {
+                println!();
+                println!("{}", "Context files:".cyan());
+                for file in &session.state.context_files {
+                    println!("  {} {}", "•".dimmed(), file);
+                }
+            }
+
+            println!();
+            println!(
+                "{} Session ready. Use with Claude Agent SDK or astrape agent delegate.",
+                "✓".green()
+            );
+
+            if config.is_some() {
+                println!(
+                    "{} Custom config path specified but not yet implemented",
+                    "⚠".yellow()
+                );
+            }
+
+            Ok(())
+        }
+        SessionCommands::Status => {
+            println!("{}", "⚡ Session Status".bold());
+            println!();
+
+            // Check for state files
+            let state_dir = Path::new(".omc/state");
+            let astrape_state = Path::new(".astrape/state");
+
+            let has_omc = state_dir.exists();
+            let has_astrape = astrape_state.exists();
+
+            if has_omc || has_astrape {
+                println!("{} Active state found:", "✓".green());
+                if has_omc {
+                    println!("  {} .omc/state/", "•".dimmed());
+                }
+                if has_astrape {
+                    println!("  {} .astrape/state/", "•".dimmed());
+                }
+            } else {
+                println!("{} No active session state found", "•".dimmed());
+            }
+
+            // Check for config files
+            let config_candidates = ["astrape.yaml", "astrape.yml", "astrape.json", ".astrape.yaml"];
+            let found_config: Vec<_> = config_candidates
+                .iter()
+                .filter(|p| Path::new(p).exists())
+                .collect();
+
+            println!();
+            if found_config.is_empty() {
+                println!("{} No config file found", "•".dimmed());
+            } else {
+                println!("{} Config files:", "✓".green());
+                for cfg in found_config {
+                    println!("  {} {}", "•".dimmed(), cfg);
+                }
+            }
+
+            Ok(())
+        }
+    }
+}
+
+fn skill_command(action: SkillCommands) -> anyhow::Result<()> {
+    match action {
+        SkillCommands::List => {
+            println!("{}", "⚡ Available Skills".bold());
+            println!();
+
+            let skills = create_builtin_skills();
+
+            if skills.is_empty() {
+                println!("{} No skills found.", "•".dimmed());
+                println!();
+                println!("Skills are loaded from SKILL.md files in the skills/ directory.");
+                return Ok(());
+            }
+
+            for skill in &skills {
+                println!("  {} {}", "•".cyan(), skill.name.bold());
+                if !skill.description.is_empty() {
+                    println!("    {}", skill.description.dimmed());
+                }
+                if let Some(agent) = &skill.agent {
+                    println!("    Agent: {}", agent);
+                }
+                if let Some(model) = &skill.model {
+                    println!("    Model: {}", model);
+                }
+                println!();
+            }
+
+            println!("{} {} skills available", "Total:".bold(), skills.len());
+            Ok(())
+        }
+        SkillCommands::Show { name } => {
+            if let Some(skill) = get_builtin_skill(&name) {
+                println!("{}", format!("⚡ Skill: {}", skill.name).bold());
+                println!();
+
+                if !skill.description.is_empty() {
+                    println!("{} {}", "Description:".cyan(), skill.description);
+                }
+                if let Some(agent) = &skill.agent {
+                    println!("{} {}", "Agent:".cyan(), agent);
+                }
+                if let Some(model) = &skill.model {
+                    println!("{} {}", "Model:".cyan(), model);
+                }
+                if let Some(hint) = &skill.argument_hint {
+                    println!("{} {}", "Argument hint:".cyan(), hint);
+                }
+
+                println!();
+                println!("{}", "Template:".cyan());
+                println!("{}", "-".repeat(60).dimmed());
+                println!("{}", skill.template);
+                Ok(())
+            } else {
+                anyhow::bail!(
+                    "Skill '{}' not found. Use 'astrape skill list' to see available skills.",
+                    name
+                );
+            }
         }
     }
 }

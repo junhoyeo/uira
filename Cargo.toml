@@ -8,7 +8,13 @@ members = [
   "crates/astrape-napi",
   "crates/astrape-sdk",
   "crates/astrape-comment-checker",
-  "crates/astrape-hooks", "crates/astrape-prompts", "crates/astrape-features",
+  "crates/astrape-hooks",
+  "crates/astrape-prompts",
+  "crates/astrape-features",
+  "crates/astrape-agents",
+  "crates/astrape-tools",
+  "crates/astrape-config",
+  "crates/astrape-mcp",
 ]
 
 [workspace.package]
@@ -25,6 +31,10 @@ astrape-hook = { path = "crates/astrape-hook" }
 astrape-claude = { path = "crates/astrape-claude" }
 astrape-sdk = { path = "crates/astrape-sdk" }
 astrape-comment-checker = { path = "crates/astrape-comment-checker" }
+astrape-tools = { path = "crates/astrape-tools" }
+astrape-agents = { path = "crates/astrape-agents" }
+astrape-features = { path = "crates/astrape-features" }
+astrape-hooks = { path = "crates/astrape-hooks" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

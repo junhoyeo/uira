@@ -3,11 +3,15 @@
 //! Activates extended thinking/reasoning mode when users include
 //! think keywords in their prompts. Supports multilingual detection.
 
+use async_trait::async_trait;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::RwLock;
+
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 
 lazy_static! {
     static ref THINK_MODE_STATE: RwLock<HashMap<String, ThinkModeState>> =
@@ -511,6 +515,38 @@ impl ThinkModeHook {
 impl Default for ThinkModeHook {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl Hook for ThinkModeHook {
+    fn name(&self) -> &str {
+        "think-mode"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::UserPromptSubmit]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        input: &HookInput,
+        _context: &HookContext,
+    ) -> HookResult {
+        // Check for think mode triggers in the user prompt
+        if let Some(prompt) = &input.prompt {
+            let should_activate = Self::should_activate(prompt);
+            let should_activate_ultra = Self::should_activate_ultrathink(prompt);
+
+            if should_activate || should_activate_ultra {
+                // Think mode detected - this would typically trigger model/config changes
+                // For now, just pass through
+                return Ok(HookOutput::pass());
+            }
+        }
+
+        Ok(HookOutput::pass())
     }
 }
 
