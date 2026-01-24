@@ -1,5 +1,7 @@
 # Astrape ⚡
 
+![ASTRAPE](./.github/assets/cover.jpg)
+
 > Lightning-fast Rust-native git hooks manager with native oxc linting and AI-assisted typos checking
 
 Astrape (Greek: "lightning") combines git hooks management with native JavaScript/TypeScript linting powered by [oxc](https://oxc.rs) and AI-assisted spell checking via [opencode](https://opencode.ai).
