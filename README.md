@@ -179,14 +179,46 @@ cargo build --release -p astrape-comment-checker
 
 ## Architecture
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Claude Code                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+          ┌──────────────────────────┼──────────────────────────┐
+          ▼                          ▼                          ▼
+┌───────────────────┐  ┌───────────────────────┐  ┌───────────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │  │  astrape-comment-checker  │
+│  (NAPI Bindings)  │  │     (MCP Server)      │  │    (Comment Detection)    │
+└───────────────────┘  └───────────────────────┘  └───────────────────────────┘
+          │                          │
+          │              ┌───────────┴───────────┐
+          │              ▼                       ▼
+          │    ┌─────────────────┐    ┌─────────────────┐
+          │    │  astrape-tools  │    │   astrape-oxc   │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │
+          │    └─────────────────┘    └─────────────────┘
+          │
+          ├──────────────────┬──────────────────┬──────────────────┐
+          ▼                  ▼                  ▼                  ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  astrape-hooks  │ │ astrape-agents  │ │astrape-features │ │  astrape-hook   │
+│   (22 Hooks)    │ │  (32 Agents)    │ │ (Skills/Router) │ │ (Keyword Match) │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            astrape (CLI)                                    │
+│                     Git Hooks · Typo Check · Dev Tools                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 The plugin uses native Rust NAPI bindings for performance-critical operations:
 
 | Crate | Description |
 |-------|-------------|
 | **astrape** | Standalone CLI for git hooks and dev tools |
-| **astrape-mcp-server** | MCP server binary with LSP and AST-grep tools |
+| **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
 | **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
-| **astrape-tools** | LSP client and AST-grep wrappers |
+| **astrape-tools** | LSP client, tool registry, and orchestration utilities |
 | **astrape-hook** | Keyword detection and pattern matching |
 | **astrape-hooks** | Hook implementations (22 hooks) |
 | **astrape-agents** | Agent definitions and prompt loading |
