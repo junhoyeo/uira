@@ -1,7 +1,7 @@
-mod keyword;
 mod executor;
+mod keyword;
 mod matcher;
 
-pub use keyword::*;
 pub use executor::*;
+pub use keyword::*;
 pub use matcher::*;

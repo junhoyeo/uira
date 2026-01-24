@@ -47,6 +47,8 @@ enum Commands {
     Typos {
         #[arg(long, help = "Use AI to decide whether to apply fixes or ignore")]
         ai: bool,
+        #[arg(long, help = "Automatically stage modified files after fixing")]
+        stage: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
@@ -79,7 +81,7 @@ fn main() {
         Commands::Install => install_command(),
         Commands::Run { hook } => run_command(&hook),
         Commands::Lint { files } => lint_command(&files),
-        Commands::Typos { ai, files } => typos_command(ai, &files),
+        Commands::Typos { ai, stage, files } => typos_command(ai, stage, &files),
         Commands::Hook { action } => hook_command(action),
     };
 
@@ -247,7 +249,7 @@ fn lint_command(files: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn typos_command(ai: bool, files: &[String]) -> anyhow::Result<()> {
+fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
     if ai {
         println!("🔍 Checking for typos with AI assistance...\n");
 
@@ -255,7 +257,7 @@ fn typos_command(ai: bool, files: &[String]) -> anyhow::Result<()> {
         let ai_config = config.as_ref().and_then(|c| c.ai.clone());
         let ai_hooks = config.and_then(|c| c.ai_hooks);
 
-        let mut checker = TyposChecker::with_hooks(ai_config, ai_hooks);
+        let mut checker = TyposChecker::with_hooks(ai_config, ai_hooks).with_auto_stage(stage);
         let success = checker.run(files)?;
         if !success {
             process::exit(1);

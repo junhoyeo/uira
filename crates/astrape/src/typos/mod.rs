@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use std::path::Path;
@@ -83,12 +83,19 @@ pub struct TyposChecker {
     host: String,
     port: u16,
     hook_executor: Option<AiHookExecutor>,
+    modified_files: HashSet<String>,
+    auto_stage: bool,
 }
 
 impl TyposChecker {
     #[allow(dead_code)]
     pub fn new(config: Option<AiConfig>) -> Self {
         Self::with_hooks(config, None)
+    }
+
+    pub fn with_auto_stage(mut self, auto_stage: bool) -> Self {
+        self.auto_stage = auto_stage;
+        self
     }
 
     pub fn with_hooks(config: Option<AiConfig>, hooks_config: Option<HooksConfig>) -> Self {
@@ -112,6 +119,8 @@ impl TyposChecker {
             host,
             port,
             hook_executor,
+            modified_files: HashSet::new(),
+            auto_stage: false,
         }
     }
 
@@ -189,7 +198,7 @@ impl TyposChecker {
 
         let decision_map: HashMap<String, Decision> = unique_typos
             .iter()
-            .zip(decisions.into_iter())
+            .zip(decisions)
             .map(|(t, d)| (t.typo.clone(), d))
             .collect();
 
@@ -245,6 +254,10 @@ impl TyposChecker {
         }
 
         self.cleanup_server()?;
+
+        if self.auto_stage && !self.modified_files.is_empty() {
+            self.stage_modified_files()?;
+        }
 
         println!();
         println!(
@@ -562,7 +575,7 @@ Your response (one word per line, {} lines total):"#,
             .ok_or_else(|| anyhow::anyhow!("Line not found"))
     }
 
-    fn apply_fix(&self, typo: &TypoEntry) -> Result<()> {
+    fn apply_fix(&mut self, typo: &TypoEntry) -> Result<()> {
         if typo.corrections.is_empty() {
             return Ok(());
         }
@@ -587,6 +600,7 @@ Your response (one word per line, {} lines total):"#,
         }
 
         fs::write(&typo.path, lines.join("\n") + "\n")?;
+        self.modified_files.insert(typo.path.clone());
         println!("    {} Fixed: {} → {}", "✓".green(), typo.typo, correction);
 
         let mut post_fix_ctx = HookContext::new();
@@ -598,7 +612,7 @@ Your response (one word per line, {} lines total):"#,
         Ok(())
     }
 
-    fn add_to_ignore_list(&self, word: &str) -> Result<()> {
+    fn add_to_ignore_list(&mut self, word: &str) -> Result<()> {
         let config_path = "_typos.toml";
         let mut config: TyposConfig = if Path::new(config_path).exists() {
             let content = fs::read_to_string(config_path)?;
@@ -614,9 +628,44 @@ Your response (one word per line, {} lines total):"#,
 
         let toml_str = toml::to_string_pretty(&config)?;
         fs::write(config_path, toml_str)?;
+        self.modified_files.insert(config_path.to_string());
 
         println!("    {} Added '{}' to {}", "✓".yellow(), word, config_path);
         Ok(())
+    }
+
+    fn stage_modified_files(&self) -> Result<()> {
+        if self.modified_files.is_empty() {
+            return Ok(());
+        }
+
+        let files: Vec<&str> = self.modified_files.iter().map(|s| s.as_str()).collect();
+        println!(
+            "  {} Staging {} modified file(s)...",
+            "→".dimmed(),
+            files.len()
+        );
+
+        let status = Command::new("git")
+            .arg("add")
+            .args(&files)
+            .status()
+            .context("Failed to run git add")?;
+
+        if status.success() {
+            for file in &files {
+                println!("    {} {}", "✓".green(), file);
+            }
+        } else {
+            anyhow::bail!("git add failed");
+        }
+
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn get_modified_files(&self) -> &HashSet<String> {
+        &self.modified_files
     }
 }
 
