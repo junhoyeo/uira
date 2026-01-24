@@ -67,6 +67,8 @@ struct MessageInfo {
 struct MessageMeta {
     #[allow(dead_code)]
     id: String,
+    #[serde(default)]
+    role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -423,7 +425,39 @@ Just respond with the single word, nothing else."#,
         Ok(decision)
     }
 
-    fn wait_for_response(&self, session_id: &str, _message_id: &str) -> Result<String> {
+    fn find_assistant_response(
+        &self,
+        messages: &[MessageInfo],
+        user_message_id: &str,
+    ) -> Option<String> {
+        let mut passed_user_message = false;
+        for msg in messages {
+            if msg.info.id == user_message_id {
+                passed_user_message = true;
+                continue;
+            }
+            if !passed_user_message {
+                continue;
+            }
+            let is_assistant = msg.info.role.as_deref().map_or(true, |r| r == "assistant");
+            if !is_assistant {
+                continue;
+            }
+            for part in &msg.parts {
+                if part.part_type == "text" {
+                    if let Some(text) = &part.text {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_uppercase());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn wait_for_response(&self, session_id: &str, user_message_id: &str) -> Result<String> {
         for _ in 0..60 {
             std::thread::sleep(Duration::from_millis(500));
 
@@ -438,17 +472,10 @@ Just respond with the single word, nothing else."#,
 
             let messages: Vec<MessageInfo> = resp.json().context("Failed to parse messages")?;
 
-            if let Some(last) = messages.last() {
-                if last.info.id != _message_id {
-                    continue;
-                }
-                for part in &last.parts {
-                    if part.part_type == "text" {
-                        if let Some(text) = &part.text {
-                            return Ok(text.trim().to_uppercase());
-                        }
-                    }
-                }
+            if let Some(assistant_response) =
+                self.find_assistant_response(&messages, user_message_id)
+            {
+                return Ok(assistant_response);
             }
         }
 

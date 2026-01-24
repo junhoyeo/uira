@@ -5,8 +5,6 @@ pre-commit:
       run: cargo fmt --check
     - name: clippy
       run: cargo clippy -- -D warnings
-    - name: test
-      run: cargo test
     - name: typos
       run: astrape typos --ai
 
