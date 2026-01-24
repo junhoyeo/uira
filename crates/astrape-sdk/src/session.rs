@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::agent::{AgentDefinitionEntry, AgentDefinitions};
 use crate::bridge::{
@@ -84,12 +85,18 @@ impl AstrapeSession {
     /// This prepares all the configuration and options needed
     /// to run a query with the Claude Agent SDK.
     pub fn new(options: SessionOptions) -> Self {
+        // Determine working directory
+        let working_dir = options
+            .working_directory
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
         // Load configuration
         let config = if options.skip_config_load {
             options.config.unwrap_or_default()
         } else {
-            // TODO: Load from files and merge with options.config
-            options.config.unwrap_or_default()
+            Self::load_and_merge_config(&working_dir, options.config)
         };
 
         // Build system prompt
@@ -160,12 +167,21 @@ impl AstrapeSession {
             allowed_tools.push(format!("mcp__{}__*", server_name));
         }
 
-        // Initialize session state
+        // Initialize session state with context files
+        let context_files = if options.skip_context_injection {
+            Vec::new()
+        } else {
+            Self::find_context_files(&working_dir)
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect()
+        };
+
         let state = SessionState {
             session_id: None,
             active_agents: HashMap::new(),
             background_tasks: Vec::new(),
-            context_files: Vec::new(), // TODO: Find context files
+            context_files,
         };
 
         let query_options = QueryOptions {
@@ -185,10 +201,26 @@ impl AstrapeSession {
 
     /// Get the default system prompt
     fn get_default_system_prompt() -> String {
-        // TODO: Load from embedded file
+        // Use a default orchestrator system prompt
+        // In the future, this can be loaded from astrape-prompts crate
         r#"You are Astrape, a multi-agent orchestration system.
 
-You have access to specialized agents that you can delegate tasks to.
+You are the orchestrator that coordinates specialized agents to accomplish complex tasks.
+You have access to specialized agents that you can delegate tasks to using the Task tool.
+
+## Available Agents
+
+- **explore**: Fast codebase search using grep, glob, and LSP
+- **architect**: Architecture and debugging advisor
+- **executor**: Focused task executor for implementing changes
+
+## Your Role
+
+1. Analyze user requests and break them into subtasks
+2. Delegate subtasks to appropriate specialized agents
+3. Coordinate agent outputs to produce final results
+4. Ensure all work is verified and complete before finishing
+
 Use the Task tool to invoke agents for specific purposes."#
             .to_string()
     }
@@ -202,6 +234,112 @@ Use the Task tool to invoke agents for specific purposes."#
 You MUST complete all tasks before stopping. If you have pending todos or incomplete work,
 continue working until everything is done."#
             .to_string()
+    }
+
+    /// Load and merge configuration from files
+    fn load_and_merge_config(working_dir: &Path, options_config: Option<PluginConfig>) -> PluginConfig {
+        // Try to load config from standard locations
+        let loaded_config = Self::find_and_load_config(working_dir);
+
+        // Merge loaded config with options (options take precedence)
+        match (loaded_config, options_config) {
+            (Some(loaded), Some(opts)) => Self::merge_configs(loaded, opts),
+            (Some(loaded), None) => loaded,
+            (None, Some(opts)) => opts,
+            (None, None) => PluginConfig::default(),
+        }
+    }
+
+    /// Find and load configuration from standard locations
+    fn find_and_load_config(working_dir: &Path) -> Option<PluginConfig> {
+        let config_paths = Self::find_config_files(working_dir);
+
+        for path in config_paths {
+            // Note: We can't use astrape_config::load_config_from_file directly
+            // because it returns AstrapeConfig, not PluginConfig
+            // For now, we'll return None and rely on options_config
+            // This can be enhanced later to convert AstrapeConfig to PluginConfig
+            if path.exists() {
+                // TODO: Load and convert AstrapeConfig to PluginConfig
+                // For now, just return None to use defaults
+                return None;
+            }
+        }
+
+        None
+    }
+
+    /// Find configuration files in standard locations
+    fn find_config_files(working_dir: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        // Local config files (in working directory)
+        let local_candidates = vec![
+            "astrape.yaml",
+            "astrape.yml",
+            "astrape.json",
+            ".astrape.yaml",
+            ".astrape.yml",
+        ];
+
+        for candidate in &local_candidates {
+            let path = working_dir.join(candidate);
+            if path.exists() {
+                paths.push(path);
+            }
+        }
+
+        // User config files (in home directory)
+        if let Ok(home) = std::env::var("HOME") {
+            let home_path = PathBuf::from(home);
+
+            // ~/.astrape/config.yaml
+            let astrape_config = home_path.join(".astrape").join("config.yaml");
+            if astrape_config.exists() {
+                paths.push(astrape_config);
+            }
+
+            // ~/.config/astrape/config.yaml
+            let xdg_config = home_path.join(".config").join("astrape").join("config.yaml");
+            if xdg_config.exists() {
+                paths.push(xdg_config);
+            }
+        }
+
+        paths
+    }
+
+    /// Find context files (CLAUDE.md, AGENTS.md, etc.)
+    fn find_context_files(working_dir: &Path) -> Vec<PathBuf> {
+        let mut context_files = Vec::new();
+
+        let candidates = vec![
+            "CLAUDE.md",
+            "AGENTS.md",
+            ".claude/CLAUDE.md",
+            ".claude/AGENTS.md",
+        ];
+
+        for candidate in &candidates {
+            let path = working_dir.join(candidate);
+            if path.exists() && path.is_file() {
+                context_files.push(path);
+            }
+        }
+
+        context_files
+    }
+
+    /// Merge two plugin configurations (opts takes precedence)
+    fn merge_configs(base: PluginConfig, opts: PluginConfig) -> PluginConfig {
+        PluginConfig {
+            agents: opts.agents.or(base.agents),
+            features: opts.features.or(base.features),
+            mcp_servers: opts.mcp_servers.or(base.mcp_servers),
+            permissions: opts.permissions.or(base.permissions),
+            magic_keywords: opts.magic_keywords.or(base.magic_keywords),
+            routing: opts.routing.or(base.routing),
+        }
     }
 
     /// Get default agent definitions

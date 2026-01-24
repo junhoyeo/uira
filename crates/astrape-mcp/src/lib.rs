@@ -36,7 +36,7 @@ pub mod client;
 pub mod registry;
 pub mod types;
 
-pub use client::{McpClient, McpClientError, McpResult};
+pub use client::{McpClient, McpClientError, McpResult, StdioMcpClient, StdioMcpClientBuilder};
 pub use registry::McpServerRegistry;
 pub use types::{
     McpCapabilities, McpPrompt, McpResource, McpServerConfig, McpTool, McpToolResponse,
