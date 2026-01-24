@@ -176,7 +176,7 @@ mod tests {
     fn test_allowed_paths() {
         assert!(is_allowed_path(".omc/plans/test.md"));
         assert!(is_allowed_path(".claude/config.json"));
-        assert!(is_allowed_path("~/. claude/settings.json"));
+        assert!(is_allowed_path("~/.claude/settings.json"));
         assert!(is_allowed_path("CLAUDE.md"));
         assert!(is_allowed_path("docs/AGENTS.md"));
         assert!(!is_allowed_path("src/main.rs"));

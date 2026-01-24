@@ -183,7 +183,7 @@ impl ToolExecutor {
             || file_path.ends_with(".cjs");
 
         if is_js_ts {
-            self.run_oxc_lint(file_path, severity_filter).await
+            self.run_oxc_lint(file_path, severity_filter)
         } else if file_path.ends_with(".rs") {
             self.run_cargo_check(file_path).await
         } else if file_path.ends_with(".py") {
@@ -360,7 +360,7 @@ impl ToolExecutor {
             .map_err(|e| format!("Failed to serialize results: {}", e))
     }
 
-    async fn run_oxc_lint(&self, file_path: &str, severity_filter: &str) -> Result<String, String> {
+    fn run_oxc_lint(&self, file_path: &str, severity_filter: &str) -> Result<String, String> {
         let linter = Linter::new(LintRule::recommended());
         let diagnostics = linter.lint_file(file_path)?;
 

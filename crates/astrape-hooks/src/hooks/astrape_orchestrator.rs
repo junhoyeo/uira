@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use super::orchestrator_constants::{
     is_allowed_path, is_write_edit_tool, orchestrator_delegation_required, DIRECT_WORK_REMINDER,
@@ -9,16 +8,6 @@ use crate::hook::{Hook, HookContext, HookResult};
 use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const HOOK_NAME: &str = "astrape-orchestrator";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub tool: String,
-    pub file_path: String,
-    pub decision: String,
-    pub reason: String,
-    pub session_id: Option<String>,
-    pub timestamp: String,
-}
 
 pub struct AstrapeOrchestratorHook;
 
