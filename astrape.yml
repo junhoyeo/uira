@@ -2,10 +2,15 @@ ai:
   model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
-  parallel: true
+  parallel: false  # fmt must run first to auto-fix before clippy checks
   commands:
     - name: fmt
-      run: cargo fmt --check
+      # Auto-format staged .rs files and re-stage them
+      run: |
+        staged=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+        [ -z "$staged" ] && exit 0
+        echo "$staged" | xargs cargo fmt --
+        echo "$staged" | xargs git add
     - name: clippy
       run: cargo clippy -- -D warnings
     - name: typos
