@@ -1,0 +1,17 @@
+[package]
+name = "astrape-agents"
+description = "Agent infrastructure for Astrape multi-agent orchestration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrape-sdk = { workspace = true }
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
