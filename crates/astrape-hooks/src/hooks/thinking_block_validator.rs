@@ -1,7 +1,5 @@
 //! Thinking Block Validator Hook
 //!
-//! Port of oh-my-claudecode's `src/hooks/thinking-block-validator/*`.
-//!
 //! Prevents Anthropic extended-thinking models from rejecting assistant messages
 //! whose content starts with `tool_use`/`text` without a leading `thinking` block.
 

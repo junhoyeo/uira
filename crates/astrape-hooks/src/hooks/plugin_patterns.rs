@@ -1,4 +1,4 @@
-//! Popular Plugin Patterns (ported from TypeScript)
+//! Popular Plugin Patterns
 //!
 //! Utility functions commonly used in Claude Code hook plugins:
 //! - Auto-format
@@ -6,9 +6,6 @@
 //! - Conventional commit validation
 //! - Type checking
 //! - Test runner detection
-//!
-//! This is a single-file Rust port of:
-//! `oh-my-claudecode/src/hooks/plugin-patterns/index.ts`.
 
 use lazy_static::lazy_static;
 use regex::Regex;

@@ -1,8 +1,6 @@
-//! Learner Hook (ported from TypeScript)
+//! Learner Hook
 //!
 //! Extracts reusable skills from sessions and injects matching skills into context.
-//! This is a single-file Rust port of:
-//! `oh-my-claudecode/src/hooks/learner/*`.
 //!
 //! Key requirements:
 //! - Skill file parsing/writing with YAML frontmatter (custom parser; no YAML libs)
@@ -1454,7 +1452,7 @@ pub fn generate_extraction_prompt(detection: &DetectionResult) -> String {
     };
 
     format!(
-        "I noticed this conversation contains {} that might be worth saving as a reusable skill.\n\n**Confidence:** {}%\n**Suggested triggers:** {}\n\nWould you like me to extract this as a learned skill? Type `/oh-my-claudecode:learner` to save it, or continue with your current task.",
+        "I noticed this conversation contains {} that might be worth saving as a reusable skill.\n\n**Confidence:** {}%\n**Suggested triggers:** {}\n\nWould you like me to extract this as a learned skill? Type `/astrape:learner` to save it, or continue with your current task.",
         type_desc,
         detection.confidence,
         if detection.suggested_triggers.is_empty() {

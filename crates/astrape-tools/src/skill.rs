@@ -11,7 +11,7 @@ pub fn tool_definition() -> ToolDefinition {
             "properties": {
                 "skill": {
                     "type": "string",
-                    "description": "Skill name, e.g., 'commit', 'review-pr', 'oh-my-claudecode:autopilot'"
+                    "description": "Skill name, e.g., 'commit', 'review-pr', 'astrape:autopilot'"
                 },
                 "args": {
                     "type": "array",
@@ -48,7 +48,7 @@ async fn handle_skill(input: ToolInput) -> Result<ToolOutput, ToolError> {
     // Load skill - try builtin first, handling both namespaced and non-namespaced names
     let skill = astrape_features::builtin_skills::get_builtin_skill(skill_name)
         .or_else(|| {
-            // If skill_name has a namespace (e.g., "oh-my-claudecode:autopilot"),
+            // If skill_name has a namespace (e.g., "astrape:autopilot"),
             // try looking up just the name part after the colon
             if let Some(idx) = skill_name.rfind(':') {
                 let name_without_namespace = &skill_name[idx + 1..];

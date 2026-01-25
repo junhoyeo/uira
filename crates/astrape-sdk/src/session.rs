@@ -1,7 +1,6 @@
 //! Session management for Astrape SDK
 //!
-//! Provides the main entry point for creating orchestration sessions,
-//! mirroring oh-my-claudecode's createSisyphusSession function.
+//! Provides the main entry point for creating orchestration sessions.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -68,7 +67,6 @@ pub struct QueryOptions {
 }
 
 /// Result of creating an Astrape session
-/// Mirrors oh-my-claudecode's SisyphusSession
 #[derive(Debug, Clone)]
 pub struct AstrapeSession {
     /// Query options to pass to Claude Agent SDK

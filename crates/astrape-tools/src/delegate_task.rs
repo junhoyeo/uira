@@ -18,7 +18,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegateTaskParams {
-    /// Agent type to delegate to (e.g., "oh-my-claudecode:executor")
+    /// Agent type to delegate to (e.g., "astrape:executor")
     agent: String,
     /// Task description/prompt
     prompt: String,
@@ -78,7 +78,7 @@ fn tier_to_model_type(tier: ModelTier) -> ModelType {
 }
 
 /// Extract base agent name from prefixed agent type
-/// e.g., "oh-my-claudecode:executor" -> "executor"
+/// e.g., "astrape:executor" -> "executor"
 fn extract_agent_name(agent_type: &str) -> &str {
     agent_type.split(':').next_back().unwrap_or(agent_type)
 }
@@ -193,7 +193,7 @@ pub fn tool_definition() -> ToolDefinition {
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent type to delegate to (e.g., 'oh-my-claudecode:executor', 'architect', 'explore')"
+                    "description": "Agent type to delegate to (e.g., 'astrape:executor', 'architect', 'explore')"
                 },
                 "prompt": {
                     "type": "string",
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn test_extract_agent_name() {
-        assert_eq!(extract_agent_name("oh-my-claudecode:executor"), "executor");
+        assert_eq!(extract_agent_name("astrape:executor"), "executor");
         assert_eq!(extract_agent_name("executor"), "executor");
         assert_eq!(extract_agent_name("astrape:architect"), "architect");
     }
@@ -241,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn test_delegate_task_basic() {
         let input = json!({
-            "agent": "oh-my-claudecode:executor",
+            "agent": "astrape:executor",
             "prompt": "Add error handling to auth module"
         });
 
@@ -255,7 +255,7 @@ mod tests {
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
         assert!(response.success);
-        assert_eq!(response.agent_type, "oh-my-claudecode:executor");
+        assert_eq!(response.agent_type, "astrape:executor");
         assert!(response.session_id.is_some());
     }
 

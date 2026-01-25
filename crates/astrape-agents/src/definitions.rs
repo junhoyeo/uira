@@ -6,7 +6,7 @@ use crate::config::apply_overrides;
 use crate::prompt_loader::{default_agents_dir, PromptLoader};
 use crate::tool_restrictions::ToolRestrictionsRegistry;
 
-/// Equivalent to oh-my-claudecode's `getAgentDefinitions()`.
+/// Returns all agent definitions with their configurations.
 ///
 /// This builds the full agent config map. Prompts are loaded from
 /// `packages/claude-plugin/agents/{name}.md` by default.

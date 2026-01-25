@@ -1,6 +1,4 @@
 //! Plugin configuration types for Astrape SDK
-//!
-//! Mirrors oh-my-claudecode/src/shared/types.ts PluginConfig
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

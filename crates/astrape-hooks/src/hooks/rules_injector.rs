@@ -1,11 +1,8 @@
-//! Rules Injector Hook (ported from TypeScript)
+//! Rules Injector Hook
 //!
 //! Automatically injects relevant rule files when tools access files.
 //! Supports project-level rule discovery (.github/instructions, .cursor/rules, .claude/rules)
 //! and user-level rules (~/.claude/rules).
-//!
-//! This is a single-file Rust port of the TypeScript module:
-//! `oh-my-claudecode/src/hooks/rules-injector/*`.
 
 use async_trait::async_trait;
 use dirs::home_dir;
