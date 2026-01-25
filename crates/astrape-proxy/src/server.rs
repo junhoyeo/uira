@@ -27,22 +27,16 @@ pub async fn serve(config: ProxyConfig) -> Result<()> {
     let addr = format!("0.0.0.0:{}", config.port);
     info!(addr = %addr, "astrape-proxy listening");
 
-    let config_clone = config.clone();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
+        .build()
+        .context("failed to build reqwest client")?;
+
+    let state = web::Data::new(AppState { config, client });
+
     HttpServer::new(move || {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(
-                config_clone.request_timeout_secs,
-            ))
-            .build()
-            .expect("failed to build reqwest client");
-
-        let state = web::Data::new(AppState {
-            config: config_clone.clone(),
-            client,
-        });
-
         App::new()
-            .app_data(state)
+            .app_data(state.clone())
             .wrap(Cors::permissive())
             .route("/health", web::get().to(health_check))
             .route("/v1/messages", web::post().to(handle_messages))
