@@ -8,7 +8,6 @@ members = [
   "crates/astrape-sdk",
   "crates/astrape-comment-checker",
   "crates/astrape-hooks",
-  "crates/astrape-prompts",
   "crates/astrape-features",
   "crates/astrape-agents",
   "crates/astrape-tools",

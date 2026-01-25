@@ -594,15 +594,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astrape-prompts"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "astrape-proxy"
 version = "0.1.0"
 dependencies = [
