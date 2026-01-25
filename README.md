@@ -9,7 +9,7 @@
 
 ## Features
 
-- **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Researcher, and more with tiered variants (Haiku/Sonnet/Opus)
+- **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Librarian, and more with tiered variants (Haiku/Sonnet/Opus)
 - **Smart Model Routing** - Automatically select the right model based on task complexity
 - **HTTP Proxy** - Agent-based routing proxy for using non-Anthropic models with Claude Code
 - **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
@@ -60,7 +60,7 @@ Just talk naturally - Astrape activates automatically:
 | **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
 | **Security** | security-reviewer, security-reviewer-low |
 | **Build** | build-fixer, build-fixer-low |
-| **Research** | researcher, researcher-low, scientist, scientist-high, scientist-low |
+| **Research** | librarian, scientist, scientist-high, scientist-low |
 | **Other** | writer, vision, planner, code-reviewer, code-reviewer-low |
 
 ### Model Tiers
@@ -70,6 +70,20 @@ Just talk naturally - Astrape activates automatically:
 | LOW | Haiku | Quick lookups, simple tasks |
 | MEDIUM | Sonnet | Standard implementation |
 | HIGH | Opus | Complex reasoning, architecture |
+
+### Custom Model Routing
+
+Some agents can be configured to use non-Anthropic models via `astrape.yml`:
+
+```yaml
+agents:
+  librarian:
+    model: "opencode/big-pickle"
+  explore:
+    model: "opencode/gpt-5-nano"
+```
+
+**Important:** Agents with custom model routing must use the `spawn_agent` MCP tool instead of the built-in Task tool. The Claude Code plugin automatically blocks Task tool calls for these agents and provides guidance to use `spawn_agent`.
 
 ## Skills
 
@@ -255,6 +269,23 @@ Claude Code → astrape-proxy → Anthropic API
 - `GET /health` - Health check (returns "OK")
 - `POST /v1/messages` - Chat completions (streaming & non-streaming)
 - `POST /v1/messages/count_tokens` - Token counting
+- `POST /agent/{name}/v1/messages` - Path-based agent routing
+
+### Path-Based Agent Routing
+
+For agents requiring custom model routing (like `librarian` and `explore`), the proxy supports path-based routing:
+
+```
+POST /agent/librarian/v1/messages
+POST /agent/explore/v1/messages
+```
+
+This is used by the `spawn_agent` MCP tool, which sets:
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8787/agent/librarian
+```
+
+The proxy extracts the agent name from the URL path and routes to the configured model in `astrape.yml`.
 
 ### Development
 
@@ -485,6 +516,33 @@ The `astrape-mcp` binary exposes development tools via the Model Context Protoco
 |------|-------------|
 | `ast_search` | Search code patterns with ast-grep |
 | `ast_replace` | Search and replace code patterns |
+
+### Agent Tools
+| Tool | Description |
+|------|-------------|
+| `spawn_agent` | Spawn agent with automatic model routing via astrape-proxy |
+
+#### spawn_agent
+
+Spawns a specialized agent with automatic model routing through astrape-proxy. The agent runs with `ANTHROPIC_BASE_URL` pointing to the proxy, which routes requests to the configured model.
+
+**Parameters:**
+- `agent` (required): Agent name (e.g., `librarian`, `explore`, `architect`)
+- `prompt` (required): The task for the agent to execute
+- `model` (optional): Override model (sonnet, opus, haiku)
+- `allowedTools` (optional): List of tools to allow
+- `maxTurns` (optional): Maximum turns before stopping (default: 10)
+- `proxyPort` (optional): Proxy port (default: 8787)
+
+**Example:**
+```json
+{
+  "agent": "librarian",
+  "prompt": "Find examples of JWT authentication in Express.js"
+}
+```
+
+The proxy extracts the agent name and routes to the configured model (e.g., `librarian` → `opencode/big-pickle`).
 
 ## OXC Tools
 
