@@ -12,7 +12,7 @@ pub type AgentModelConfig = HashMap<String, String>;
 /// Returns all agent definitions with their configurations.
 ///
 /// This builds the full agent config map. Prompts are loaded from
-/// `packages/claude-plugin/agents/{name}.md` by default.
+/// `packages/astrape/claude-plugin/agents/{name}.md` by default.
 pub fn get_agent_definitions(overrides: Option<&AgentOverrides>) -> HashMap<String, AgentConfig> {
     let loader = PromptLoader::from_fs(default_agents_dir());
     get_agent_definitions_with_loader(&loader, overrides, None)

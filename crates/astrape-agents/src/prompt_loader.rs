@@ -84,8 +84,8 @@ impl PromptLoader {
 /// use astrape_agents::{PromptLoader, include_agent_prompts};
 ///
 /// static PROMPTS: &[(&str, &str)] = include_agent_prompts!(
-///   "architect" => "../../packages/claude-plugin/agents/architect.md",
-///   "explore" => "../../packages/claude-plugin/agents/explore.md",
+///   "architect" => "../../packages/astrape/claude-plugin/agents/architect.md",
+///   "explore" => "../../packages/astrape/claude-plugin/agents/explore.md",
 /// );
 ///
 /// let loader = PromptLoader::from_embedded_map(PROMPTS);
@@ -100,10 +100,10 @@ macro_rules! include_agent_prompts {
 }
 
 pub fn default_agents_dir() -> PathBuf {
-    // crates/astrape-agents -> packages/claude-plugin/agents
+    // crates/astrape-agents -> packages/astrape/claude-plugin/agents
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("packages/claude-plugin/agents")
+        .join("packages/astrape/claude-plugin/agents")
 }
 
 pub fn strip_yaml_frontmatter(content: &str) -> String {
@@ -138,7 +138,7 @@ pub fn strip_yaml_frontmatter(content: &str) -> String {
 
 pub fn fallback_prompt(agent_name: &str) -> String {
     format!(
-        "Agent: {agent_name}\n\nPrompt file not found. Please ensure packages/claude-plugin/agents/{agent_name}.md exists.",
+        "Agent: {agent_name}\n\nPrompt file not found. Please ensure packages/astrape/claude-plugin/agents/{agent_name}.md exists.",
     )
 }
 

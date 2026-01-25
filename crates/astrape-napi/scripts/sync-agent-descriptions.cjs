@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const AGENTS_DIR = path.resolve(__dirname, '../../../packages/claude-plugin/agents');
+const AGENTS_DIR = path.resolve(__dirname, '../../../packages/astrape/claude-plugin/agents');
 
 // Default models for each agent (matches definitions.rs)
 const DEFAULT_MODELS = {

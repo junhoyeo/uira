@@ -35,7 +35,7 @@ cargo build --release
 cd crates/astrape-napi && bun run build
 
 # Install plugin in Claude Code
-# Add packages/claude-plugin to your Claude Code plugins
+# Add packages/astrape/claude-plugin to your Claude Code plugins
 ```
 
 ### Usage in Claude Code

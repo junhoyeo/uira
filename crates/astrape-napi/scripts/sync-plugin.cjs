@@ -4,8 +4,8 @@ const path = require('path');
 const os = require('os');
 
 const SOURCE_PATH = path.resolve(__dirname, '..');
-const PLUGIN_PKG_PATH = path.resolve(__dirname, '../../../packages/claude-plugin/native');
-const PLUGIN_PKG_JSON = path.resolve(__dirname, '../../../packages/claude-plugin/package.json');
+const PLUGIN_PKG_PATH = path.resolve(__dirname, '../../../packages/astrape/native');
+const PLUGIN_PKG_JSON = path.resolve(__dirname, '../../../packages/astrape/package.json');
 
 function getPluginCachePath() {
   try {
@@ -67,14 +67,14 @@ function syncTo(targetPath, label) {
   console.log(`[sync] ${label}`);
 }
 
-syncTo(PLUGIN_PKG_PATH, 'packages/claude-plugin/native');
+syncTo(PLUGIN_PKG_PATH, 'packages/astrape/native');
 syncTo(getPluginCachePath(), '~/.claude/plugins/cache (installed)');
 
 // Sync agent descriptions with configured models
 require('./sync-agent-descriptions.cjs');
 
 // Also sync agents directory to cache (with cleanup of stale files)
-const AGENTS_SRC = path.resolve(__dirname, '../../../packages/claude-plugin/agents');
+const AGENTS_SRC = path.resolve(__dirname, '../../../packages/astrape/claude-plugin/agents');
 // Use path.join for cross-platform compatibility instead of string replace
 const AGENTS_CACHE = path.join(path.dirname(getPluginCachePath()), 'agents');
 if (fs.existsSync(AGENTS_SRC) && fs.existsSync(path.dirname(AGENTS_CACHE))) {
