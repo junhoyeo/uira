@@ -11,7 +11,7 @@ use astrape_claude::{
 use astrape_core::HookEvent;
 use astrape_features::astrape_state::has_astrape_state;
 use astrape_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
-use astrape_hook::KeywordDetector;
+use astrape_keywords::KeywordDetector;
 use astrape_sdk::{create_astrape_session, SessionOptions};
 use clap::{Parser, Subcommand};
 use colored::Colorize;

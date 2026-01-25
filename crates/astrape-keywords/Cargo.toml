@@ -1,6 +1,6 @@
 [package]
-name = "astrape-hook"
-description = "Hook execution engine with keyword detection for Astrape"
+name = "astrape-keywords"
+description = "Keyword detection for triggering modes in Astrape"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

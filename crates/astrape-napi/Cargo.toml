@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 astrape-core = { workspace = true }
-astrape-hook = { workspace = true }
+astrape-keywords = { workspace = true }
 astrape-hooks = { workspace = true }
 astrape-agents = { workspace = true }
 astrape-features = { workspace = true }

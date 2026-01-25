@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 astrape-core = { workspace = true }
-astrape-hook = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

@@ -1,13 +1,12 @@
 #!/usr/bin/env bun
 /**
  * Astrape PostToolUse Hook
- * - Runs comment-checker on Write/Edit/MultiEdit results
+ * - Runs all PostToolUse hooks via native executeHook (includes CommentCheckerHook)
  * - Tracks background task completion events
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
-import { spawn } from 'bun';
 
 const __dirname = dirname(new URL(import.meta.url).pathname);
 
@@ -17,6 +16,8 @@ try {
   astrape = require(join(__dirname, '..', 'native', 'index.js'));
 } catch {
   // Native module not available, continue without it
+  console.log(JSON.stringify({ continue: true }));
+  process.exit(0);
 }
 
 // Read stdin
@@ -55,78 +56,33 @@ if (toolName === 'Task' && data.tool_response && astrape?.notifyBackgroundEvent)
   } catch {}
 }
 
-// Comment checker for file writing tools
-const CHECKABLE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
-if (!CHECKABLE_TOOLS.includes(toolName)) {
-  console.log(JSON.stringify({ continue: true }));
-  process.exit(0);
-}
-
-// Find comment-checker binary
-function findCommentChecker() {
-  const candidates = [
-    join(__dirname, '..', '..', '..', 'target', 'release', 'comment-checker'),
-    join(__dirname, '..', '..', '..', 'target', 'debug', 'comment-checker'),
-    // Check if in PATH (will be found by spawn)
-  ];
-
-  for (const path of candidates) {
-    if (existsSync(path)) {
-      return path;
-    }
-  }
-
-  // Try PATH
-  return 'comment-checker';
-}
-
-async function runCommentChecker() {
-  const binary = findCommentChecker();
-
-  // Prepare input for comment-checker
-  const checkerInput = {
-    tool_name: toolName,
-    tool_input: toolInput,
-    session_id: data.session_id || data.sessionId,
-    cwd: process.cwd(),
-  };
-
+// Execute all PostToolUse hooks via native module (includes CommentCheckerHook)
+async function runHooks() {
   try {
-    const proc = spawn([binary], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const hookInput = {
+      sessionId: data.session_id || data.sessionId,
+      toolName: toolName,
+      toolInput: JSON.stringify(toolInput),
+      toolOutput: data.tool_output ? JSON.stringify(data.tool_output) : undefined,
+      directory: process.cwd(),
+    };
 
-    // Write input to stdin
-    proc.stdin.write(JSON.stringify(checkerInput));
-    proc.stdin.end();
-
-    // Read stderr concurrently with waiting for exit to avoid deadlock
-    // (child blocks if pipe buffer fills before parent reads)
-    const [exitCode, stderr] = await Promise.all([
-      proc.exited,
-      new Response(proc.stderr).text(),
-    ]);
-
-    // Exit code 2 = comments detected
-    if (exitCode === 2 && stderr.trim()) {
-      return {
-        continue: true,
-        message: stderr.trim(),
-      };
+    const result = await astrape.executeHook('post-tool-use', hookInput);
+    
+    if (result) {
+      console.log(JSON.stringify({
+        continue: result.shouldContinue !== false,
+        message: result.message || undefined,
+        reason: result.reason || undefined,
+      }));
+    } else {
+      console.log(JSON.stringify({ continue: true }));
     }
   } catch (err) {
-    // Binary not found or failed to execute - silently continue
-    // console.error('[post-tool-use] Comment checker error:', err.message);
+    // Hook execution failed - silently continue
+    // console.error('[post-tool-use] Hook execution error:', err.message);
+    console.log(JSON.stringify({ continue: true }));
   }
-
-  return { continue: true };
 }
 
-// Run async
-runCommentChecker().then(result => {
-  console.log(JSON.stringify(result));
-}).catch(() => {
-  console.log(JSON.stringify({ continue: true }));
-});
+runHooks();
