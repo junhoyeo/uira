@@ -1,13 +1,17 @@
 #!/usr/bin/env bun
-/**
- * Astrape Stop Hook
- * Continuation control for persistent modes
- */
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
 
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+const __dirname = dirname(new URL(import.meta.url).pathname);
 
-// Read stdin
+let astrape;
+try {
+  astrape = require(join(__dirname, '..', 'native', 'index.js'));
+} catch (e) {
+  console.log(JSON.stringify({ continue: true }));
+  process.exit(0);
+}
+
 let input = '';
 try {
   input = readFileSync(0, 'utf8');
@@ -16,7 +20,6 @@ try {
   process.exit(0);
 }
 
-// Parse JSON input
 let data;
 try {
   data = JSON.parse(input);
@@ -25,37 +28,31 @@ try {
   process.exit(0);
 }
 
-// If user requested stop, allow it
 if (data.user_requested || data.userRequested) {
   console.log(JSON.stringify({ continue: true }));
   process.exit(0);
 }
 
-// Check for active modes that should continue
-const activeStates = [];
-const stateDir = join(process.cwd(), '.astrape', 'state');
+const hookInput = {
+  sessionId: data.session_id || data.sessionId,
+  prompt: data.prompt,
+  directory: process.cwd(),
+  stopReason: data.stop_reason || data.stopReason,
+  userRequested: data.user_requested || data.userRequested,
+  transcriptPath: data.transcript_path || data.transcriptPath,
+};
 
-const modes = ['ultrawork', 'ralph', 'autopilot', 'ultrapilot'];
-for (const mode of modes) {
-  try {
-    const statePath = join(stateDir, `${mode}-state.json`);
-    if (existsSync(statePath)) {
-      const state = JSON.parse(readFileSync(statePath, 'utf8'));
-      if (state.active) {
-        activeStates.push(mode);
-      }
-    }
-  } catch {
-    // Ignore errors
-  }
-}
-
-if (activeStates.length > 0) {
+try {
+  const result = await astrape.executeHook('stop', hookInput);
   console.log(JSON.stringify({
-    continue: false,
-    stopReason: `Stop hook prevented continuation`,
-    message: `Active modes: ${activeStates.join(', ')}`
+    continue: result.continue,
+    message: result.message,
+    stopReason: result.stopReason,
+    decision: result.decision,
+    reason: result.reason,
   }));
-} else {
+} catch (e) {
   console.log(JSON.stringify({ continue: true }));
 }
+
+process.exit(0);

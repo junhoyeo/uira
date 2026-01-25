@@ -17,6 +17,7 @@ members = [
   "crates/astrape-mcp",
   "crates/astrape-mcp-server",
   "crates/astrape-oxc",
+  "crates/astrape-goals",
 ]
 
 [workspace.package]
@@ -37,6 +38,8 @@ astrape-tools = { path = "crates/astrape-tools" }
 astrape-agents = { path = "crates/astrape-agents" }
 astrape-features = { path = "crates/astrape-features" }
 astrape-hooks = { path = "crates/astrape-hooks" }
+astrape-goals = { path = "crates/astrape-goals" }
+astrape-config = { path = "crates/astrape-config" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

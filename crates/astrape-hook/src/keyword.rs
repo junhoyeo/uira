@@ -39,6 +39,11 @@ impl KeywordDetector {
     pub fn new() -> Self {
         Self {
             patterns: vec![
+                KeywordPattern::new(
+                    "ralph",
+                    r"(?i)\b(ralph|don't stop|must complete|until done)\b",
+                    ralph_message,
+                ),
                 KeywordPattern::new("ultrawork", r"(?i)\b(ultrawork|ulw)\b", ultrawork_message),
                 KeywordPattern::new(
                     "search",
@@ -113,6 +118,10 @@ fn search_message(_agent: Option<&str>) -> String {
 
 fn analyze_message(_agent: Option<&str>) -> String {
     ANALYZE_MODE_MESSAGE.to_string()
+}
+
+fn ralph_message(_agent: Option<&str>) -> String {
+    RALPH_MODE_MESSAGE.to_string()
 }
 
 const ULTRAWORK_MESSAGE: &str = r#"<ultrawork-mode>
@@ -201,6 +210,48 @@ NEVER stop at first result - be exhaustive.
 
 "#;
 
+const RALPH_MODE_MESSAGE: &str = r#"<ralph-mode>
+
+[RALPH MODE ACTIVATED]
+
+You are in RALPH mode - a self-referential work loop that continues until VERIFIED completion.
+
+## CRITICAL RULES
+
+1. **NEVER STOP** until the task is truly complete
+2. **TRACK PROGRESS** using todo list - mark items complete as you go
+3. **SIGNAL COMPLETION** with: <promise>TASK COMPLETE</promise>
+
+## COMPLETION PROTOCOL
+
+When you believe the task is done:
+1. Verify all requirements are met
+2. Ensure all tests pass (if applicable)
+3. Check all todos are complete
+4. Output: <promise>TASK COMPLETE</promise>
+
+The system will verify your completion claim against configured goals.
+If verification fails, you will be asked to continue.
+
+## STATUS BLOCK (Optional)
+
+You can output a status block to track progress:
+
+---RALPH_STATUS---
+STATUS: IN_PROGRESS | COMPLETE | BLOCKED
+TASKS_COMPLETED_THIS_LOOP: <number>
+FILES_MODIFIED: <number>
+TESTS_STATUS: PASSING | FAILING | NOT_RUN
+WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING | DEBUGGING
+EXIT_SIGNAL: false | true
+---END_RALPH_STATUS---
+
+</ralph-mode>
+
+---
+
+"#;
+
 const ANALYZE_MODE_MESSAGE: &str = r#"<analyze-mode>
 ANALYSIS MODE. Gather context before diving deep:
 
@@ -222,6 +273,22 @@ SYNTHESIZE findings before proceeding.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_detect_ralph() {
+        let detector = KeywordDetector::new();
+
+        let result = detector.detect("ralph: do something", None);
+        assert!(result.is_some());
+        let msg = result.unwrap().message.unwrap();
+        assert!(msg.contains("ralph-mode"));
+
+        let result = detector.detect("don't stop until done", None);
+        assert!(result.is_some());
+
+        let result = detector.detect("must complete this task", None);
+        assert!(result.is_some());
+    }
 
     #[test]
     fn test_detect_ultrawork() {

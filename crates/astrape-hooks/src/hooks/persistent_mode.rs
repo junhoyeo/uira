@@ -64,6 +64,7 @@ pub fn reset_todo_continuation_attempts(session_id: &str) {
     attempts.remove(session_id);
 }
 
+#[allow(dead_code)]
 fn check_ralph_loop(session_id: Option<&str>, directory: &str) -> Option<PersistentModeResult> {
     let state = RalphHook::read_state(Some(directory))?;
 
@@ -266,11 +267,12 @@ pub fn check_persistent_modes(
         TodoContinuationHook::check_incomplete_todos(session_id, directory, stop_context);
     let has_incomplete_todos = todo_result.count > 0;
 
-    if let Some(result) = check_ralph_loop(session_id, directory) {
-        if result.should_block {
-            return result;
-        }
-    }
+    // Ralph is now handled by the RalphHook directly for full goal-based verification
+    // if let Some(result) = check_ralph_loop(session_id, directory) {
+    //     if result.should_block {
+    //         return result;
+    //     }
+    // }
 
     if let Some(result) = check_ultrawork(session_id, directory, has_incomplete_todos) {
         if result.should_block {

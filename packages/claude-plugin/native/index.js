@@ -577,6 +577,9 @@ if (!nativeBinding) {
 
 module.exports = nativeBinding
 module.exports.analyzeComplexity = nativeBinding.analyzeComplexity
+module.exports.checkGoal = nativeBinding.checkGoal
+module.exports.checkGoals = nativeBinding.checkGoals
+module.exports.checkGoalsFromConfig = nativeBinding.checkGoalsFromConfig
 module.exports.checkNotifications = nativeBinding.checkNotifications
 module.exports.createHookOutputDeny = nativeBinding.createHookOutputDeny
 module.exports.createHookOutputStop = nativeBinding.createHookOutputStop
@@ -590,6 +593,7 @@ module.exports.getSkill = nativeBinding.getSkill
 module.exports.getSkillDefinition = nativeBinding.getSkillDefinition
 module.exports.listAgentNames = nativeBinding.listAgentNames
 module.exports.listAgents = nativeBinding.listAgents
+module.exports.listGoalsFromConfig = nativeBinding.listGoalsFromConfig
 module.exports.listHooks = nativeBinding.listHooks
 module.exports.listSkills = nativeBinding.listSkills
 module.exports.notifyBackgroundEvent = nativeBinding.notifyBackgroundEvent

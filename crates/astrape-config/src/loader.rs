@@ -70,7 +70,19 @@ fn expand_env_vars(config: AstrapeConfig) -> AstrapeConfig {
         agents: config.agents,
         hooks: config.hooks,
         ai_hooks: config.ai_hooks,
+        goals: expand_goals_settings(config.goals),
     }
+}
+
+/// Expand environment variables in Goals settings
+fn expand_goals_settings(mut goals: crate::schema::GoalsConfig) -> crate::schema::GoalsConfig {
+    for goal in goals.goals.iter_mut() {
+        goal.command = expand_env_string(&goal.command);
+        if let Some(ws) = &goal.workspace {
+            goal.workspace = Some(expand_env_string(ws));
+        }
+    }
+    goals
 }
 
 /// Expand environment variables in AI settings

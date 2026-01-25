@@ -66,7 +66,7 @@ use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState};
-use crate::hooks::todo_continuation::IncompleteTodosResult;
+use crate::hooks::todo_continuation::{IncompleteTodosResult, TodoContinuationHook};
 use crate::hooks::ultrawork::UltraworkHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
@@ -242,6 +242,8 @@ pub enum SignalType {
     BuildSuccess,
     /// All todos marked complete
     TodosComplete,
+    /// All configured goals passing their target scores
+    GoalsPassing,
 }
 
 impl CompletionSignals {
@@ -717,15 +719,22 @@ impl RalphHook {
         text.contains(promise)
     }
 
-    /// Detect all completion signals in text
     pub fn detect_completion_signals(
         text: &str,
         promise: &str,
         todo_result: Option<&IncompleteTodosResult>,
     ) -> CompletionSignals {
+        Self::detect_completion_signals_with_goals(text, promise, todo_result, None)
+    }
+
+    pub fn detect_completion_signals_with_goals(
+        text: &str,
+        promise: &str,
+        todo_result: Option<&IncompleteTodosResult>,
+        goals_result: Option<&astrape_goals::VerificationResult>,
+    ) -> CompletionSignals {
         let mut signals = CompletionSignals::default();
 
-        // Signal 1: Promise token (weight: 40)
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::PromiseToken,
             weight: 40,
@@ -733,7 +742,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 2: EXIT_SIGNAL in RALPH_STATUS (weight: 30)
         let exit_signal = Self::detect_exit_signal(text);
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::ExitSignal,
@@ -742,7 +750,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 3: Completion keywords (weight: 10)
         let keywords = [
             "all tasks complete",
             "work is done",
@@ -757,7 +764,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 4: Tests passing (weight: 15)
         let tests_passing = text.contains("tests passed") || text.contains("All tests pass");
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::TestsPassing,
@@ -766,7 +772,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 5: Build success (weight: 15)
         let build_success = text.contains("Build successful") || text.contains("build completed");
         signals.signals.push(CompletionSignal {
             signal_type: SignalType::BuildSuccess,
@@ -775,7 +780,6 @@ impl RalphHook {
             evidence: None,
         });
 
-        // Signal 6: Todos complete (weight: 20)
         let (todo_detected, todo_evidence) = if let Some(result) = todo_result {
             (
                 result.count == 0 && result.total > 0,
@@ -795,11 +799,27 @@ impl RalphHook {
             evidence: todo_evidence,
         });
 
+        let (goals_detected, goals_evidence) = if let Some(result) = goals_result {
+            let passed = result.results.iter().filter(|r| r.passed).count();
+            let total = result.results.len();
+            (
+                result.all_passed && total > 0,
+                Some(format!("{}/{} goals passed", passed, total)),
+            )
+        } else {
+            (false, None)
+        };
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::GoalsPassing,
+            weight: 25,
+            detected: goals_detected,
+            evidence: goals_evidence,
+        });
+
         signals.calculate_confidence();
         signals
     }
 
-    /// Detect EXIT_SIGNAL in RALPH_STATUS block
     fn detect_exit_signal(text: &str) -> bool {
         if let Some(start) = text.find("---RALPH_STATUS---") {
             if let Some(end) = text[start..].find("---END_RALPH_STATUS---") {
@@ -810,7 +830,148 @@ impl RalphHook {
         false
     }
 
-    /// Get continuation prompt
+    pub async fn check_goals_from_config(
+        directory: &str,
+    ) -> Option<astrape_goals::VerificationResult> {
+        let config_path = std::path::Path::new(directory).join("astrape.yml");
+        if !config_path.exists() {
+            return None;
+        }
+
+        let config = astrape_config::load_config(Some(&config_path)).ok()?;
+
+        if !config.goals.auto_verify {
+            return None;
+        }
+
+        let goals = &config.goals.goals;
+
+        if goals.is_empty() {
+            return None;
+        }
+
+        let runner = astrape_goals::GoalRunner::new(directory);
+        Some(runner.check_all(goals).await)
+    }
+
+    fn build_verification_feedback(
+        signals: &CompletionSignals,
+        state: &RalphState,
+        goals_result: &Option<astrape_goals::VerificationResult>,
+    ) -> String {
+        let mut feedback = Vec::new();
+
+        if signals.confidence < state.min_confidence {
+            feedback.push(format!(
+                "Confidence {} is below minimum threshold {}",
+                signals.confidence, state.min_confidence
+            ));
+        }
+
+        if state.require_dual_condition && !signals.is_exit_allowed() {
+            let has_subjective = signals.signals.iter().any(|s| {
+                s.detected
+                    && matches!(
+                        s.signal_type,
+                        SignalType::PromiseToken | SignalType::ExitSignal
+                    )
+            });
+            let objective_count = signals
+                .signals
+                .iter()
+                .filter(|s| {
+                    s.detected
+                        && !matches!(
+                            s.signal_type,
+                            SignalType::PromiseToken | SignalType::ExitSignal
+                        )
+                })
+                .count();
+
+            if !has_subjective {
+                feedback.push("Missing subjective intent (promise or exit signal)".to_string());
+            }
+            if objective_count < 2 {
+                feedback.push(format!(
+                    "Need 2+ objective signals, only have {}",
+                    objective_count
+                ));
+            }
+        }
+
+        if let Some(goals) = goals_result {
+            for result in &goals.results {
+                if !result.passed {
+                    feedback.push(format!(
+                        "Goal '{}': {:.1}% (target: {:.1}%)",
+                        result.name, result.score, result.target
+                    ));
+                }
+            }
+        }
+
+        for signal in &signals.signals {
+            if !signal.detected {
+                match signal.signal_type {
+                    SignalType::TodosComplete => {
+                        if let Some(evidence) = &signal.evidence {
+                            feedback.push(format!("Todos incomplete: {}", evidence));
+                        }
+                    }
+                    SignalType::TestsPassing => {
+                        feedback.push("Tests not passing".to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if feedback.is_empty() {
+            "Unknown verification failure".to_string()
+        } else {
+            feedback.join("\n- ")
+        }
+    }
+
+    fn get_verification_failure_prompt(state: &RalphState, feedback: &str) -> String {
+        format!(
+            r#"<ralph-verification-failed>
+
+[RALPH - ITERATION {}/{} - VERIFICATION FAILED]
+
+You signaled completion, but the system verification checks did not pass.
+
+VERIFICATION FAILURES:
+- {}
+
+WHAT YOU MUST DO:
+1. Review the failures above
+2. Fix each issue before signaling completion again
+3. For goals: ensure your commands output scores meeting the target
+4. For todos: mark ALL items complete
+5. For tests: ensure all tests pass
+
+When ALL verifications pass, output: <promise>{}</promise>
+
+{}
+
+</ralph-verification-failed>
+
+---
+
+"#,
+            state.iteration,
+            state.max_iterations,
+            feedback,
+            state.completion_promise,
+            state
+                .prompt
+                .as_ref()
+                .map(|p| format!("Original task: {}", p))
+                .unwrap_or_default()
+        )
+    }
+
     fn get_continuation_prompt(state: &RalphState) -> String {
         format!(
             r#"<ralph-continuation>
@@ -908,16 +1069,63 @@ impl Hook for RalphHook {
             )));
         }
 
-        // Check transcript for completion promise using get_last_assistant_response()
+        // Check for completion intent via transcript
         if let Some(last_response) = input.get_last_assistant_response() {
-            if Self::detect_completion_promise(&last_response, &state.completion_promise) {
-                // Clear both ralph and linked ultrawork
-                Self::clear_state(Some(&context.directory));
-                UltraworkHook::deactivate(Some(&context.directory));
-                return Ok(HookOutput::continue_with_message(format!(
-                    "[RALPH COMPLETE] Completion promise detected after {} iterations. Task finished successfully!",
-                    state.iteration
-                )));
+            let has_promise =
+                Self::detect_completion_promise(&last_response, &state.completion_promise);
+            let has_exit_signal = Self::detect_exit_signal(&last_response);
+
+            if has_promise || has_exit_signal {
+                let todo_result = TodoContinuationHook::check_incomplete_todos(
+                    input.session_id.as_deref(),
+                    &context.directory,
+                    None,
+                );
+
+                let goals_result = Self::check_goals_from_config(&context.directory).await;
+
+                let signals = Self::detect_completion_signals_with_goals(
+                    &last_response,
+                    &state.completion_promise,
+                    Some(&todo_result),
+                    goals_result.as_ref(),
+                );
+
+                // Fail-open: if no goals configured, config missing, or config parse error,
+                // default to passing. Goals are optional and shouldn't block indefinitely.
+                let goals_gate_passed = goals_result.as_ref().map(|g| g.all_passed).unwrap_or(true);
+
+                let exit_allowed = if state.require_dual_condition {
+                    signals.is_exit_allowed()
+                        && signals.confidence >= state.min_confidence
+                        && goals_gate_passed
+                } else {
+                    signals.confidence >= state.min_confidence && goals_gate_passed
+                };
+
+                if exit_allowed {
+                    Self::clear_state(Some(&context.directory));
+                    UltraworkHook::deactivate(Some(&context.directory));
+                    return Ok(HookOutput {
+                        should_continue: false,
+                        message: Some(format!(
+                            "[RALPH COMPLETE] All verification passed after {} iterations (confidence: {}%). Task finished successfully!",
+                            state.iteration,
+                            signals.confidence
+                        )),
+                        reason: None,
+                        modified_input: None,
+                    });
+                } else {
+                    let feedback =
+                        Self::build_verification_feedback(&signals, &state, &goals_result);
+                    let new_state = match Self::increment_iteration(Some(&context.directory)) {
+                        Some(s) => s,
+                        None => return Ok(HookOutput::pass()),
+                    };
+                    let message = Self::get_verification_failure_prompt(&new_state, &feedback);
+                    return Ok(HookOutput::block_with_reason(message));
+                }
             }
         }
 
@@ -943,7 +1151,7 @@ impl Hook for RalphHook {
     }
 
     fn priority(&self) -> i32 {
-        100 // Highest priority - ralph takes precedence
+        250
     }
 }
 
@@ -1210,19 +1418,165 @@ More output"#;
 
     #[test]
     fn test_detect_exit_signal_various_formats() {
-        // With spaces
         assert!(RalphHook::detect_exit_signal(
             "---RALPH_STATUS---\nEXIT_SIGNAL: true\n---END_RALPH_STATUS---"
         ));
-        // Without spaces
         assert!(RalphHook::detect_exit_signal(
             "---RALPH_STATUS---\nEXIT_SIGNAL:true\n---END_RALPH_STATUS---"
         ));
-        // Not in block - should not match
         assert!(!RalphHook::detect_exit_signal("EXIT_SIGNAL: true"));
-        // False value
         assert!(!RalphHook::detect_exit_signal(
             "---RALPH_STATUS---\nEXIT_SIGNAL: false\n---END_RALPH_STATUS---"
         ));
+    }
+
+    #[test]
+    fn test_build_verification_feedback_low_confidence() {
+        let mut signals = CompletionSignals::default();
+        signals.confidence = 30;
+        let state = RalphState {
+            min_confidence: 50,
+            require_dual_condition: false,
+            ..Default::default()
+        };
+
+        let feedback = RalphHook::build_verification_feedback(&signals, &state, &None);
+        assert!(feedback.contains("Confidence 30"));
+        assert!(feedback.contains("below minimum threshold 50"));
+    }
+
+    #[test]
+    fn test_build_verification_feedback_missing_objective_signals() {
+        let mut signals = CompletionSignals::default();
+        signals.confidence = 60;
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::PromiseToken,
+            weight: 40,
+            detected: true,
+            evidence: None,
+        });
+        signals.signals.push(CompletionSignal {
+            signal_type: SignalType::TestsPassing,
+            weight: 15,
+            detected: true,
+            evidence: None,
+        });
+
+        let state = RalphState {
+            min_confidence: 50,
+            require_dual_condition: true,
+            ..Default::default()
+        };
+
+        let feedback = RalphHook::build_verification_feedback(&signals, &state, &None);
+        assert!(feedback.contains("Need 2+ objective signals"));
+    }
+
+    #[test]
+    fn test_build_verification_feedback_goals_failed() {
+        let signals = CompletionSignals {
+            confidence: 80,
+            signals: vec![
+                CompletionSignal {
+                    signal_type: SignalType::PromiseToken,
+                    weight: 40,
+                    detected: true,
+                    evidence: None,
+                },
+                CompletionSignal {
+                    signal_type: SignalType::TestsPassing,
+                    weight: 15,
+                    detected: true,
+                    evidence: None,
+                },
+                CompletionSignal {
+                    signal_type: SignalType::TodosComplete,
+                    weight: 20,
+                    detected: true,
+                    evidence: None,
+                },
+            ],
+        };
+
+        let state = RalphState {
+            min_confidence: 50,
+            require_dual_condition: true,
+            ..Default::default()
+        };
+
+        let goals_result = astrape_goals::VerificationResult {
+            all_passed: false,
+            results: vec![astrape_goals::GoalCheckResult {
+                name: "pixel-match".to_string(),
+                score: 85.0,
+                target: 99.0,
+                passed: false,
+                checked_at: Utc::now(),
+                duration_ms: 100,
+                error: None,
+            }],
+            checked_at: Utc::now(),
+            iteration: 1,
+        };
+
+        let feedback =
+            RalphHook::build_verification_feedback(&signals, &state, &Some(goals_result));
+        assert!(feedback.contains("pixel-match"));
+        assert!(feedback.contains("85.0%"));
+        assert!(feedback.contains("99.0%"));
+    }
+
+    #[test]
+    fn test_get_verification_failure_prompt() {
+        let state = RalphState {
+            active: true,
+            iteration: 5,
+            max_iterations: 10,
+            completion_promise: "DONE".to_string(),
+            prompt: Some("Build feature".to_string()),
+            ..Default::default()
+        };
+
+        let feedback = "Goal 'coverage': 75% (target: 90%)";
+        let prompt = RalphHook::get_verification_failure_prompt(&state, feedback);
+
+        assert!(prompt.contains("ITERATION 5/10"));
+        assert!(prompt.contains("VERIFICATION FAILED"));
+        assert!(prompt.contains("coverage"));
+        assert!(prompt.contains("<promise>DONE</promise>"));
+        assert!(prompt.contains("Build feature"));
+    }
+
+    #[test]
+    fn test_detect_completion_signals_with_goals_passing() {
+        let goals_result = astrape_goals::VerificationResult {
+            all_passed: true,
+            results: vec![astrape_goals::GoalCheckResult {
+                name: "test".to_string(),
+                score: 100.0,
+                target: 95.0,
+                passed: true,
+                checked_at: Utc::now(),
+                duration_ms: 50,
+                error: None,
+            }],
+            checked_at: Utc::now(),
+            iteration: 1,
+        };
+
+        let signals = RalphHook::detect_completion_signals_with_goals(
+            "<promise>DONE</promise>",
+            "DONE",
+            None,
+            Some(&goals_result),
+        );
+
+        let goals_signal = signals
+            .signals
+            .iter()
+            .find(|s| s.signal_type == SignalType::GoalsPassing)
+            .unwrap();
+        assert!(goals_signal.detected);
+        assert!(goals_signal.evidence.as_ref().unwrap().contains("1/1"));
     }
 }

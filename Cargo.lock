@@ -160,8 +160,10 @@ dependencies = [
  "assert_cmd",
  "astrape-agents",
  "astrape-claude",
+ "astrape-config",
  "astrape-core",
  "astrape-features",
+ "astrape-goals",
  "astrape-hook",
  "astrape-sdk",
  "clap",
@@ -180,6 +182,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "toml",
  "toml_edit",
 ]
@@ -282,6 +285,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrape-goals"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "astrape-config",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
 name = "astrape-hook"
 version = "0.1.0"
 dependencies = [
@@ -299,6 +317,8 @@ name = "astrape-hooks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "astrape-config",
+ "astrape-goals",
  "async-trait",
  "chrono",
  "dirs",
@@ -348,8 +368,10 @@ name = "astrape-napi"
 version = "0.1.0"
 dependencies = [
  "astrape-agents",
+ "astrape-config",
  "astrape-core",
  "astrape-features",
+ "astrape-goals",
  "astrape-hook",
  "astrape-hooks",
  "astrape-sdk",

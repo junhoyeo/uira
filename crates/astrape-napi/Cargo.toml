@@ -17,6 +17,8 @@ astrape-hooks = { workspace = true }
 astrape-agents = { workspace = true }
 astrape-features = { workspace = true }
 astrape-sdk = { workspace = true }
+astrape-config = { path = "../astrape-config" }
+astrape-goals = { path = "../astrape-goals" }
 napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }
 napi-derive = "3"
 serde = { workspace = true }

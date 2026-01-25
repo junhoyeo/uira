@@ -30,7 +30,7 @@ pub use hooks::{
         check_persistent_modes, reset_todo_continuation_attempts, PersistentMode,
         PersistentModeHook, PersistentModeMetadata, PersistentModeResult,
     },
-    ralph::{RalphHook, RalphOptions, RalphState},
+    ralph::{CompletionSignal, CompletionSignals, RalphHook, RalphOptions, RalphState, SignalType},
     think_mode::{ThinkModeHook, ThinkModeState, ThinkingConfig, THINKING_CONFIGS},
     todo_continuation::{
         IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
@@ -45,3 +45,5 @@ pub use hooks::{
 };
 pub use registry::{default_hooks, HookRegistry};
 pub use types::{HookEvent, HookInput, HookOutput, HookType};
+
+pub use astrape_goals::{GoalCheckResult, GoalRunner, VerificationResult, VerifyOptions};

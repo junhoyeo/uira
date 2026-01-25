@@ -16,6 +16,9 @@ astrape-claude = { workspace = true }
 astrape-sdk = { workspace = true }
 astrape-agents = { workspace = true }
 astrape-features = { workspace = true }
+astrape-config = { path = "../astrape-config" }
+astrape-goals = { path = "../astrape-goals" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

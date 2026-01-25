@@ -42,6 +42,6 @@
     "artifacts": "napi artifacts"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0-alpha.70"
+    "@napi-rs/cli": "^3.5.1"
   }
 }

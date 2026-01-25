@@ -419,3 +419,290 @@ async fn test_empty_prompt_returns_pass() {
     assert!(result.should_continue);
     assert!(result.message.is_none());
 }
+
+mod ralph_goals_integration {
+    use super::*;
+    use astrape_hooks::hooks::ralph::RalphHook;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_test_directory() -> TempDir {
+        tempfile::tempdir().expect("Failed to create temp directory")
+    }
+
+    fn write_ralph_state(dir: &std::path::Path, session_id: &str) {
+        let astrape_dir = dir.join(".astrape");
+        fs::create_dir_all(&astrape_dir).unwrap();
+
+        let state = serde_json::json!({
+            "active": true,
+            "iteration": 1,
+            "max_iterations": 10,
+            "completion_promise": "TASK COMPLETE",
+            "session_id": session_id,
+            "prompt": "Test ralph goal verification",
+            "started_at": "2026-01-24T00:00:00Z",
+            "last_checked_at": "2026-01-24T00:00:00Z",
+            "min_confidence": 50,
+            "require_dual_condition": false,
+            "session_hours": 24,
+            "circuit_breaker": {
+                "state": "closed",
+                "consecutive_no_progress": 0,
+                "error_history": [],
+                "output_sizes": [],
+                "trip_reason": null
+            },
+            "circuit_config": {
+                "no_progress_threshold": 3,
+                "same_error_threshold": 5,
+                "output_decline_threshold": 70
+            }
+        });
+
+        fs::write(
+            astrape_dir.join("ralph-state.json"),
+            serde_json::to_string_pretty(&state).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn write_goals_config(dir: &std::path::Path, target: f64) {
+        let config = format!(
+            r#"goals:
+  auto_verify: true
+  goals:
+    - name: progress-check
+      command: cat progress.txt
+      target: {}
+"#,
+            target
+        );
+        fs::write(dir.join("astrape.yml"), config).unwrap();
+    }
+
+    fn write_progress(dir: &std::path::Path, value: u32) {
+        fs::write(dir.join("progress.txt"), value.to_string()).unwrap();
+    }
+
+    fn write_transcript_with_promise(dir: &std::path::Path) -> std::path::PathBuf {
+        let transcript_path = dir.join("test-transcript.jsonl");
+        let entry = serde_json::json!({
+            "type": "progress",
+            "data": {
+                "message": {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            { "type": "text", "text": "<promise>TASK COMPLETE</promise>" }
+                        ]
+                    }
+                }
+            }
+        });
+        fs::write(
+            &transcript_path,
+            serde_json::to_string(&entry).unwrap() + "\n",
+        )
+        .unwrap();
+        transcript_path
+    }
+
+    fn create_stop_input(
+        session_id: &str,
+        dir: &std::path::Path,
+        transcript_path: Option<&std::path::Path>,
+    ) -> HookInput {
+        HookInput {
+            session_id: Some(session_id.to_string()),
+            prompt: Some(String::new()),
+            message: None,
+            parts: None,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            directory: Some(dir.to_string_lossy().to_string()),
+            stop_reason: Some("end_turn".to_string()),
+            user_requested: Some(false),
+            transcript_path: transcript_path.map(|p| p.to_string_lossy().to_string()),
+            extra: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ralph_goals_pass_returns_complete() {
+        let temp_dir = create_test_directory();
+        let dir = temp_dir.path();
+
+        write_ralph_state(dir, "test-session");
+        write_goals_config(dir, 90.0);
+        write_progress(dir, 95);
+        let transcript_path = write_transcript_with_promise(dir);
+
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(RalphHook::new()));
+
+        let input = create_stop_input("test-session", dir, Some(&transcript_path));
+        let context = HookContext::new(
+            Some("test-session".to_string()),
+            dir.to_string_lossy().to_string(),
+        );
+
+        let result = registry
+            .execute_hooks(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
+
+        assert!(
+            !result.should_continue,
+            "Should stop hook chain on ralph complete"
+        );
+        assert!(
+            result
+                .message
+                .as_ref()
+                .map_or(false, |m| m.contains("RALPH COMPLETE")),
+            "Should contain RALPH COMPLETE message, got: {:?}",
+            result.message
+        );
+        assert!(
+            !dir.join(".astrape/ralph-state.json").exists(),
+            "Ralph state should be cleared on success"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ralph_goals_fail_returns_verification_failure() {
+        let temp_dir = create_test_directory();
+        let dir = temp_dir.path();
+
+        write_ralph_state(dir, "test-session");
+        write_goals_config(dir, 90.0);
+        write_progress(dir, 80);
+        let transcript_path = write_transcript_with_promise(dir);
+
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(RalphHook::new()));
+
+        let input = create_stop_input("test-session", dir, Some(&transcript_path));
+        let context = HookContext::new(
+            Some("test-session".to_string()),
+            dir.to_string_lossy().to_string(),
+        );
+
+        let result = registry
+            .execute_hooks(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
+
+        assert!(
+            !result.should_continue,
+            "Should block on verification failure"
+        );
+        assert!(
+            result
+                .reason
+                .as_ref()
+                .map_or(false, |r| r.contains("verification-failed")),
+            "Should contain verification-failed in reason, got: {:?}",
+            result.reason
+        );
+        assert!(
+            dir.join(".astrape/ralph-state.json").exists(),
+            "Ralph state should remain active on failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ralph_without_transcript_continues_loop() {
+        let temp_dir = create_test_directory();
+        let dir = temp_dir.path();
+
+        write_ralph_state(dir, "test-session");
+
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(RalphHook::new()));
+
+        let input = create_stop_input("test-session", dir, None);
+        let context = HookContext::new(
+            Some("test-session".to_string()),
+            dir.to_string_lossy().to_string(),
+        );
+
+        let result = registry
+            .execute_hooks(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
+
+        assert!(!result.should_continue, "Should block to continue loop");
+        assert!(
+            result
+                .reason
+                .as_ref()
+                .map_or(false, |r| r.contains("ralph-continuation")),
+            "Should contain ralph-continuation in reason, got: {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ralph_inactive_state_passes() {
+        let temp_dir = create_test_directory();
+        let dir = temp_dir.path();
+
+        // Use a unique session ID that won't match any leftover global state
+        let unique_session = format!("unique-inactive-{}", std::process::id());
+
+        let mut registry = HookRegistry::new();
+        registry.register(Arc::new(RalphHook::new()));
+
+        let input = create_stop_input(&unique_session, dir, None);
+        let context = HookContext::new(
+            Some(unique_session.clone()),
+            dir.to_string_lossy().to_string(),
+        );
+
+        let result = registry
+            .execute_hooks(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
+
+        assert!(
+            result.should_continue,
+            "Should pass when no ralph state exists (mismatched session_id)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transcript_parsing_extracts_promise() {
+        let temp_dir = create_test_directory();
+        let dir = temp_dir.path();
+        let transcript_path = write_transcript_with_promise(dir);
+
+        let input = HookInput {
+            session_id: None,
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            directory: None,
+            stop_reason: None,
+            user_requested: None,
+            transcript_path: Some(transcript_path.to_string_lossy().to_string()),
+            extra: HashMap::new(),
+        };
+
+        let response = input.get_last_assistant_response();
+        assert!(
+            response.is_some(),
+            "Should extract response from transcript"
+        );
+        assert!(
+            response.as_ref().unwrap().contains("TASK COMPLETE"),
+            "Should contain promise text, got: {:?}",
+            response
+        );
+    }
+}
