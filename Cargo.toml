@@ -12,7 +12,6 @@ members = [
   "crates/astrape-agents",
   "crates/astrape-tools",
   "crates/astrape-config",
-  "crates/astrape-mcp",
   "crates/astrape-mcp-server",
   "crates/astrape-oxc",
   "crates/astrape-goals",
