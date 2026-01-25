@@ -53,32 +53,134 @@ Install hooks with:
 astrape install
 ```
 
-## Goals
+## Ralph Mode & Goal Verification
 
-Define verification goals that must pass before a persistent work loop (ralph mode) can complete:
+Ralph mode is a persistent work loop that keeps Claude working until tasks are truly complete. Combined with goal verification, it ensures objective completion criteria are met before exiting.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Ralph Mode Flow                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  User triggers  │
+                    │  "ralph: task"  │
+                    └────────┬────────┘
+                             │
+                             ▼
+              ┌──────────────────────────────┐
+              │   Claude works on task...    │◄────────────────┐
+              └──────────────┬───────────────┘                 │
+                             │                                 │
+                             ▼                                 │
+              ┌──────────────────────────────┐                 │
+              │  Claude signals completion:  │                 │
+              │  <promise>TASK COMPLETE</promise>              │
+              │  or EXIT_SIGNAL: true        │                 │
+              └──────────────┬───────────────┘                 │
+                             │                                 │
+                             ▼                                 │
+              ┌──────────────────────────────┐                 │
+              │    Run Goal Verification     │                 │
+              │  (execute configured cmds)   │                 │
+              └──────────────┬───────────────┘                 │
+                             │                                 │
+                    ┌────────┴────────┐                        │
+                    ▼                 ▼                        │
+            ┌─────────────┐   ┌─────────────┐                  │
+            │ All goals   │   │ Goals fail  │                  │
+            │ pass ✓      │   │ or missing  │──────────────────┘
+            └──────┬──────┘   └─────────────┘
+                   │            (continue loop with feedback)
+                   ▼
+            ┌─────────────┐
+            │  Exit loop  │
+            │  Task done! │
+            └─────────────┘
+```
+
+### Activation
+
+Ralph mode activates when Claude detects keywords in your prompt:
+
+```
+"ralph: implement the auth system"
+"don't stop until tests pass"
+"keep working on this feature"
+```
+
+### Goal Configuration
+
+Define verification goals in `astrape.yml`:
 
 ```yaml
 goals:
-  auto_verify: true
+  auto_verify: true              # Enable automatic verification on completion
   goals:
     - name: test-coverage
       command: ./scripts/coverage.sh
-      target: 80.0
+      target: 80.0               # Must output score >= 80
+      timeout_secs: 60           # Optional, default 30
+      
     - name: build-check
       command: cargo build --release && echo 100
       target: 100.0
+      
     - name: lint-score
       command: ./scripts/lint-score.sh
       target: 95.0
-      enabled: false  # temporarily disabled
+      enabled: false             # Temporarily disabled
+      
+    - name: e2e-tests
+      command: npm test
+      workspace: packages/app    # Run in subdirectory
+      target: 100.0
 ```
 
-Each goal command should output a score (0-100) to stdout. Goals act as a hard gate — ralph mode will not complete until all enabled goals pass their targets.
+**Goal command requirements:**
+- Must output a single number (0-100) to stdout
+- Last numeric line is used as the score
+- Non-zero exit code = goal failure
+
+### Exit Conditions
+
+Ralph mode exits only when ALL conditions are met:
+
+| Condition | Description |
+|-----------|-------------|
+| **Completion Intent** | Claude outputs `<promise>TASK COMPLETE</promise>` or `EXIT_SIGNAL: true` |
+| **Goals Pass** | All enabled goals meet their targets (hard gate) |
+| **Confidence Threshold** | Combined signal confidence ≥ 50% (configurable) |
+
+If goals fail, Claude receives detailed feedback and continues working:
+
+```
+[RALPH VERIFICATION FAILED - Iteration 3/10]
+
+Goals not met:
+  ✗ test-coverage: 72.5/80.0
+  ✓ build-check: 100.0/100.0
+
+Continue working to meet all goals, then signal completion again.
+```
+
+### CLI Commands
 
 ```bash
-astrape goals list   # List configured goals
-astrape goals check  # Run all goals and show results
+astrape goals list           # List all configured goals
+astrape goals check          # Run all goals, show results
+astrape goals check coverage # Run specific goal by name
 ```
+
+### Safety Features
+
+- **Max iterations**: Stops after 10 iterations (configurable) to prevent infinite loops
+- **Circuit breaker**: Detects stagnation (no progress for 3 iterations) and exits
+- **Session expiration**: Ralph state expires after 24 hours
+- **Fail-open**: Config errors don't block indefinitely — goals are optional
 
 ## Quick Start
 
@@ -227,16 +329,19 @@ cargo build --release -p astrape-comment-checker
           │    │  (LSP Client)   │    │  (JS/TS Tools)  │
           │    └─────────────────┘    └─────────────────┘
           │
-          ├──────────────────┬──────────────────┬──────────────────┐
-          ▼                  ▼                  ▼                  ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  astrape-hooks  │ │ astrape-agents  │ │astrape-features │ │  astrape-hook   │
-│   (22 Hooks)    │ │  (32 Agents)    │ │ (Skills/Router) │ │ (Keyword Match) │
-└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+          ├───────────────┬───────────────┬───────────────┬───────────────┐
+          ▼               ▼               ▼               ▼               ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│ astrape-hooks │ │astrape-agents │ │astrape-features│ │ astrape-hook │ │ astrape-goals │
+│  (22 Hooks)   │ │  (32 Agents)  │ │(Skills/Router)│ │(Keyword Match)│ │  (Goal Verify)│
+└───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘
+        │                                                                       │
+        └───────────────────────── Ralph Hook ──────────────────────────────────┘
+                                (Stop event verification)
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            astrape (CLI)                                    │
-│                     Git Hooks · Typo Check · Dev Tools                      │
+│                  Git Hooks · Typo Check · Goals · Dev Tools                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
