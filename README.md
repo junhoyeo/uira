@@ -57,6 +57,22 @@ astrape install
 
 Ralph mode is a persistent work loop that keeps Claude working until tasks are truly complete. Combined with goal verification, it ensures objective completion criteria are met before exiting.
 
+### Philosophy
+
+**The Problem**: AI agents in persistent loops tend to declare victory prematurely. They say "fixed" without verifying. They drift from goals. They break things they previously fixed.
+
+**The Solution**: Separate the judge from the worker.
+
+| Role | Responsibility |
+|------|----------------|
+| **Worker** (AI) | Write code, try fixes, iterate |
+| **Judge** (Script) | Measure reality objectively |
+| **System** (Astrape) | Keep worker working until judge says "done" |
+
+An agent can *think* it's done. A test coverage report doesn't hallucinate. A pixel-diff script doesn't confabulate. **Numbers don't lie.**
+
+The goal system is intentionally simple: `run command → parse stdout → compare to threshold`. This "dumb pipe" approach means infinite flexibility — any measurable property becomes a goal. Write a script, output a number, done.
+
 ### How It Works
 
 ```
