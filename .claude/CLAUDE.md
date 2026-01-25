@@ -83,7 +83,7 @@ cargo build --release
 cd crates/astrape-napi && bun run build
 
 # Copy native module to plugin
-cp crates/astrape-napi/astrape.darwin-arm64.node packages/claude-plugin/native/
+cp crates/astrape-napi/astrape.darwin-arm64.node packages/astrape/native/
 
 # Build bridge (for SDK integration)
 cd packages/bridge && npm run build
