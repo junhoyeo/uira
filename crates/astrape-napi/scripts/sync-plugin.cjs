@@ -69,3 +69,20 @@ function syncTo(targetPath, label) {
 
 syncTo(PLUGIN_PKG_PATH, 'packages/claude-plugin/native');
 syncTo(getPluginCachePath(), '~/.claude/plugins/cache (installed)');
+
+// Sync agent descriptions with configured models
+require('./sync-agent-descriptions.cjs');
+
+// Also sync agents directory to cache
+const AGENTS_SRC = path.resolve(__dirname, '../../../packages/claude-plugin/agents');
+const AGENTS_CACHE = getPluginCachePath().replace('/native', '/agents');
+if (fs.existsSync(AGENTS_SRC) && fs.existsSync(path.dirname(AGENTS_CACHE))) {
+  const agentFiles = fs.readdirSync(AGENTS_SRC).filter(f => f.endsWith('.md'));
+  if (!fs.existsSync(AGENTS_CACHE)) {
+    fs.mkdirSync(AGENTS_CACHE, { recursive: true });
+  }
+  for (const file of agentFiles) {
+    fs.copyFileSync(path.join(AGENTS_SRC, file), path.join(AGENTS_CACHE, file));
+  }
+  console.log(`[sync] agents → ~/.claude/plugins/cache (${agentFiles.length} files)`);
+}

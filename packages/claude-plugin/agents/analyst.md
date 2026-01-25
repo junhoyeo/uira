@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Pre-planning consultant (Sonnet).
+description: Pre-planning consultant. (sonnet)
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep"]

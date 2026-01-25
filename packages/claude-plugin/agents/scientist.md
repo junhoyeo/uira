@@ -1,6 +1,6 @@
 ---
 name: scientist
-description: Data/ML specialist (Sonnet).
+description: Data/ML specialist. (sonnet)
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "Bash", "python_repl"]

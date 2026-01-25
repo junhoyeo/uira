@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Fast codebase pattern matching (Haiku).
+description: Fast codebase pattern matching. (opencode/gpt-5-nano)
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep"]

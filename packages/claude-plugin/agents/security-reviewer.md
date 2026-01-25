@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Security vulnerability detection specialist (Opus). Use for security audits and code review.
+description: Security vulnerability detection specialist. Use for security audits and code review. (opus)
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Bash"]

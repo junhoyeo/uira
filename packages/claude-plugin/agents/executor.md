@@ -1,6 +1,6 @@
 ---
 name: executor
-description: description: Focused executor for implementation tasks. Use when the user needs code changes, feature implementation, refactoring, or bug fixes.
+description: Focused executor for implementation tasks. (sonnet)
 model: 
 color: green
 tools: [""]

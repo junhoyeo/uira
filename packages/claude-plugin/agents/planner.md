@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Strategic planner for comprehensive implementation plans (Opus).
+description: Strategic planner for comprehensive implementation plans. (opus)
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Write"]

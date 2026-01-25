@@ -1,6 +1,6 @@
 ---
 name: designer-low
-description: Simple styling and minor UI tweaks (Haiku). Use for trivial frontend work.
+description: Simple styling and minor UI tweaks. Use for trivial frontend work. (haiku)
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

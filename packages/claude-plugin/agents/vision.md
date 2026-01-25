@@ -1,6 +1,6 @@
 ---
 name: vision
-description: Visual analysis specialist (Sonnet).
+description: Visual analysis specialist. (sonnet)
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep"]

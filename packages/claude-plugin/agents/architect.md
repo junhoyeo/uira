@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Architecture & Debugging Advisor (Opus). Use for complex problems.
+description: Architecture & Debugging Advisor. Use for complex problems. (opus)
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]

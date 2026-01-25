@@ -1,6 +1,6 @@
 ---
 name: tdd-guide-low
-description: Quick test suggestion specialist (Haiku). Use for simple test case ideas.
+description: Quick test suggestion specialist. Use for simple test case ideas. (haiku)
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Bash"]

@@ -46,6 +46,8 @@ export declare function executeHook(event: string, input: JsHookInput): Promise<
  *
  * # Returns
  * Agent definition if found, None otherwise
+ *
+ * Agent description includes the actual configured model from astrape.yml.
  */
 export declare function getAgent(name: string): JsAgentDefinition | null
 
@@ -200,6 +202,8 @@ export declare function listAgentNames(): Array<string>
  * - Primary agents (architect, executor, explore, etc.)
  * - Tiered variants (architect-low, architect-medium, executor-high, etc.)
  * - Specialized agents (security-reviewer, build-fixer, etc.)
+ *
+ * Agent descriptions include the actual configured model from astrape.yml.
  */
 export declare function listAgents(): Array<JsAgentDefinition>
 

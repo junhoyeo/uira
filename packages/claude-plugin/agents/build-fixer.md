@@ -1,6 +1,6 @@
 ---
 name: build-fixer
-description: Build and TypeScript error resolution specialist (Sonnet). Use for fixing build errors.
+description: Build and TypeScript error resolution specialist. Use for fixing build errors. (sonnet)
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

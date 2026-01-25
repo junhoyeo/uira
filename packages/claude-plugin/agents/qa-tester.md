@@ -1,6 +1,6 @@
 ---
 name: qa-tester
-description: CLI testing specialist (Opus).
+description: CLI testing specialist. (opus)
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Bash", "TodoWrite"]

@@ -1,6 +1,6 @@
 ---
 name: scientist-high
-description: Complex research, hypothesis testing, and ML specialist (Opus). Use for deep analysis.
+description: Complex research, hypothesis testing, and ML specialist. Use for deep analysis. (opus)
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Bash", "python_repl"]

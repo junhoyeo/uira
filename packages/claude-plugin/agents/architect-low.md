@@ -1,6 +1,6 @@
 ---
 name: architect-low
-description: Quick code questions & simple lookups (Haiku). Use for simple questions that need fast answers.
+description: Quick code questions & simple lookups. Use for simple questions that need fast answers. (haiku)
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
