@@ -55,11 +55,10 @@ serde_yaml = "0.9"
 # HTTP
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 
-# HTTP server framework
-axum = { version = "0.7", features = ["macros"] }
-hyper = { version = "1.0", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+# HTTP server framework (Actix Web)
+actix-web = "4"
+actix-rt = "2"
+actix-cors = "0.7"
 
 # Async utilities
 async-stream = "0.3"
@@ -68,26 +67,18 @@ futures = "0.3"
 # Parallel execution
 rayon = "1.10"
 
-# File operations
-globset = "0.4"
-
-# Git operations
-git2 = "0.19"
-
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
 
 # Terminal output
 colored = "2.1"
-console = "0.15"
 
 # OXC - Native JS/TS toolchain
 oxc = { version = "0.110", features = ["full"] }
 
 # TOML for config
 toml = "0.8"
-toml_edit = "0.22"
 
 # Regex for keyword detection
 regex = "1.12"
