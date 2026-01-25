@@ -183,6 +183,19 @@ Goals not met:
 Continue working to meet all goals, then signal completion again.
 ```
 
+### Example Use Cases
+
+| Use Case | Command | Target |
+|----------|---------|--------|
+| Pixel-perfect UI | `bun run pixel-diff.ts` | 99.9 |
+| Test coverage | `jest --coverage --json \| jq '.total'` | 80 |
+| Lighthouse perf | `lighthouse --output=json \| jq '.categories.performance.score * 100'` | 90 |
+| Bundle size budget | `./scripts/bundle-score.sh` | 100 |
+| Type coverage | `type-coverage --json \| jq '.percent'` | 95 |
+| Zero console errors | `playwright test --reporter=json \| jq '.suites[].specs[].ok' \| grep -c true` | 100 |
+| API response time | `./scripts/latency-check.sh` | 95 |
+| Accessibility | `pa11y --reporter=json \| jq '100 - (.issues \| length)'` | 100 |
+
 ### CLI Commands
 
 ```bash
