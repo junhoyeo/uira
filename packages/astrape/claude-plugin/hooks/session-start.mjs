@@ -1,13 +1,7 @@
-#!/usr/bin/env bun
-/**
- * Astrape SessionStart Hook
- * Initialize session state
- */
-
+#!/usr/bin/env node
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
-// Read stdin
 let input = '';
 try {
   input = readFileSync(0, 'utf8');
@@ -16,7 +10,6 @@ try {
   process.exit(0);
 }
 
-// Parse JSON input
 let data;
 try {
   data = JSON.parse(input);
@@ -28,13 +21,11 @@ try {
 const sessionId = data.session_id || data.sessionId || `session-${Date.now()}`;
 const stateDir = join(process.cwd(), '.astrape', 'state');
 
-// Ensure state directory exists
 try {
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
 
-  // Initialize session state
   const sessionState = {
     sessionId,
     startedAt: new Date().toISOString(),
@@ -46,8 +37,6 @@ try {
     join(stateDir, 'session.json'),
     JSON.stringify(sessionState, null, 2)
   );
-} catch {
-  // Non-fatal
-}
+} catch {}
 
 console.log(JSON.stringify({ continue: true, message: 'Success' }));

@@ -59,8 +59,7 @@ function download(url, destPath, maxRedirects = 5) {
       response.pipe(file);
       
       file.on('finish', () => {
-        file.close();
-        resolve();
+        file.close(resolve);
       });
       
       file.on('error', (err) => {

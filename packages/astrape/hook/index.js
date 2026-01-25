@@ -134,7 +134,7 @@ export async function init(options = {}) {
  * @param {object} options
  * @param {string} [options.cwd] - Working directory (default: process.cwd())
  * @param {string} [options.name] - Specific goal name to check (optional)
- * @returns {Promise<{passed: boolean, results: Array}>}
+ * @returns {Promise<{passed: boolean, stdout: string, stderr: string}>}
  */
 export async function checkGoals(options = {}) {
   const args = ['goals', 'check'];

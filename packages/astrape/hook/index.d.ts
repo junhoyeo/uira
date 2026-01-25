@@ -29,11 +29,8 @@ export interface CheckGoalsOptions {
 }
 
 export interface CheckGoalsResult {
-  /** Whether all goals passed */
   passed: boolean;
-  /** Standard output from the command */
   stdout: string;
-  /** Standard error from the command */
   stderr: string;
 }
 
