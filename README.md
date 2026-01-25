@@ -188,7 +188,7 @@ Continue working to meet all goals, then signal completion again.
 | Use Case | Command | Target |
 |----------|---------|--------|
 | Pixel-perfect UI | `bun run pixel-diff.ts` | 99.9 |
-| Test coverage | `jest --coverage --json \| jq '.total'` | 80 |
+| Test coverage | `jest --coverage --json \| jq '.total.lines.pct'` | 80 |
 | Lighthouse perf | `lighthouse --output=json \| jq '.categories.performance.score * 100'` | 90 |
 | Bundle size budget | `./scripts/bundle-score.sh` | 100 |
 | Type coverage | `type-coverage --json \| jq '.percent'` | 95 |
