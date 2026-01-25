@@ -181,24 +181,30 @@ async fn handle_anthropic_passthrough(
     headers: HeaderMap,
     req: MessagesRequest,
 ) -> axum::response::Response {
-    let auth_header = match headers.get(header::AUTHORIZATION) {
-        Some(h) => h.clone(),
-        None => {
-            return (StatusCode::UNAUTHORIZED, "Missing Authorization header").into_response();
-        }
-    };
+    let x_api_key = headers.get("x-api-key").cloned();
+    let auth_header = headers.get(header::AUTHORIZATION).cloned();
+
+    if x_api_key.is_none() && auth_header.is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Missing authentication: provide x-api-key or Authorization header",
+        )
+            .into_response();
+    }
 
     let url = "https://api.anthropic.com/v1/messages";
 
     let mut request_builder = state
         .client
         .post(url)
-        .header(header::AUTHORIZATION, auth_header)
         .header("anthropic-version", "2023-06-01")
         .header(header::CONTENT_TYPE, "application/json");
 
-    if let Some(api_key) = headers.get("x-api-key") {
-        request_builder = request_builder.header("x-api-key", api_key.clone());
+    if let Some(key) = x_api_key {
+        request_builder = request_builder.header("x-api-key", key);
+    }
+    if let Some(auth) = auth_header {
+        request_builder = request_builder.header(header::AUTHORIZATION, auth);
     }
 
     let upstream = match request_builder.json(&req).send().await {
