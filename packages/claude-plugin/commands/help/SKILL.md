@@ -30,9 +30,11 @@ Say these naturally in your prompt:
 
 ## Agents
 
-32 agents across 3 tiers (Haiku/Sonnet/Opus):
-- architect, executor, explore, designer
-- researcher, writer, qa-tester, scientist
-- security-reviewer, build-fixer, code-reviewer
+30 agents across 3 tiers (Haiku/Sonnet/Opus):
+- **Analysis**: architect, analyst, critic, planner
+- **Execution**: executor, explore, librarian
+- **Frontend**: designer, vision
+- **Quality**: qa-tester, code-reviewer, security-reviewer
+- **Specialists**: scientist, writer, tdd-guide, build-fixer
 
-Use `-low`, `-medium`, `-high` suffixes for tier control.
+Use `-low`, `-medium`, `-high` suffixes for tier control (e.g., `executor-low`, `architect-high`).

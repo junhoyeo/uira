@@ -1,12 +1,16 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
-const __dirname = dirname(new URL(import.meta.url).pathname);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
 
 let astrape;
 try {
-  astrape = require(join(__dirname, '..', 'native', 'index.js'));
+  astrape = require(join(__dirname, '..', 'native', 'index.cjs'));
 } catch {
   console.log(JSON.stringify({ continue: true }));
   process.exit(0);
@@ -92,7 +96,9 @@ try {
     }
     process.exit(0);
   }
-} catch {}
+} catch (e) {
+  console.error('[astrape] checkNotifications error:', e.message);
+}
 
 if (result) {
   console.log(JSON.stringify(result));

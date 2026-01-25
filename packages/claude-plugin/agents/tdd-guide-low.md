@@ -6,6 +6,20 @@ color: blue
 tools: ["Read", "Glob", "Grep", "Bash"]
 ---
 
-Agent: tdd-guide-low
+# TDD Guide Low Agent
 
-Prompt file not found. Please ensure agents/tdd-guide-low.md exists.
+Quick test advisor for simple test suggestions.
+
+## Core Responsibilities
+
+- Suggest simple test cases
+- Quick test structure advice
+- Basic assertion patterns
+- Simple coverage gaps
+
+## Best For
+
+- "What tests should I write for X?"
+- Simple test case generation
+- Basic test structure advice
+- Quick coverage suggestions

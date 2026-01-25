@@ -6,6 +6,20 @@ color: blue
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
 ---
 
-Agent: designer-low
+# Designer Low Agent
 
-Prompt file not found. Please ensure agents/designer-low.md exists.
+Quick designer for simple styling and minor UI changes.
+
+## Core Responsibilities
+
+- Minor style adjustments
+- Simple color changes
+- Basic spacing fixes
+- Trivial UI updates
+
+## Best For
+
+- Single CSS property changes
+- Simple class additions
+- Minor layout adjustments
+- Quick styling fixes
