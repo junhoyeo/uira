@@ -1,5 +1,3 @@
-//! Tool execution for the MCP server
-
 use ast_grep_language::{LanguageExt, SupportLang};
 use astrape_oxc::{LintRule, Linter, Severity};
 use astrape_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
@@ -9,8 +7,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::Command;
 use walkdir::WalkDir;
+
+use crate::proxy_manager::ProxyManager;
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
     match lang {
@@ -48,14 +49,16 @@ fn extract_text(output: ToolOutput) -> String {
 pub struct ToolExecutor {
     root_path: PathBuf,
     lsp_client: LspClientImpl,
+    proxy_manager: Arc<ProxyManager>,
 }
 
 impl ToolExecutor {
-    pub fn new(root_path: PathBuf) -> Self {
+    pub fn new(root_path: PathBuf, proxy_manager: Arc<ProxyManager>) -> Self {
         let lsp_client = LspClientImpl::new(root_path.clone());
         Self {
             root_path,
             lsp_client,
+            proxy_manager,
         }
     }
 
@@ -446,16 +449,9 @@ impl ToolExecutor {
     // Agent Spawning with Proxy Routing
     // =========================================================================
 
-    /// Spawn a specialized agent with automatic model routing through astrape-proxy.
-    ///
-    /// This sets ANTHROPIC_BASE_URL to point to the proxy with the agent name in the path,
-    /// e.g., `http://localhost:8787/agent/librarian`. The proxy then routes requests to
-    /// the configured model for that agent (e.g., librarian -> opencode/big-pickle).
     async fn spawn_agent(&self, args: Value) -> Result<String, String> {
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
 
-        // Validate agent name to prevent URL path manipulation
-        // Only allow alphanumeric, hyphens, and underscores
         if !agent
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
@@ -470,12 +466,10 @@ impl ToolExecutor {
             .as_str()
             .ok_or("Missing 'prompt' parameter")?;
 
-        let proxy_port = args["proxyPort"].as_u64().unwrap_or(8787);
+        self.proxy_manager.ensure_running().await?;
 
-        // Build ANTHROPIC_BASE_URL with agent in path for proxy routing
-        let base_url = format!("http://localhost:{}/agent/{}", proxy_port, agent);
+        let base_url = self.proxy_manager.get_agent_url(agent);
 
-        // Build command
         let mut cmd = Command::new("claude");
         cmd.arg("-p")
             .arg(prompt)
@@ -483,12 +477,10 @@ impl ToolExecutor {
             .arg("json")
             .arg("--no-session-persistence");
 
-        // Override model if specified
         if let Some(model) = args["model"].as_str() {
             cmd.arg("--model").arg(model);
         }
 
-        // Set allowed tools if specified
         if let Some(tools) = args["allowedTools"].as_array() {
             let tools_str: Vec<&str> = tools.iter().filter_map(|t| t.as_str()).collect();
             if !tools_str.is_empty() {
@@ -496,21 +488,12 @@ impl ToolExecutor {
             }
         }
 
-        // Note: maxTurns is accepted but not currently passed to claude CLI
-        // as there's no direct CLI flag for it. Could be implemented via proxy
-        // turn counting in the future.
-
-        // Set environment with proxy URL
         cmd.env("ANTHROPIC_BASE_URL", &base_url);
         cmd.current_dir(&self.root_path);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        tracing::info!(
-            agent = %agent,
-            base_url = %base_url,
-            "Spawning agent with proxy routing"
-        );
+        tracing::info!(agent = %agent, base_url = %base_url, "Spawning agent with proxy routing");
 
         let output = cmd
             .output()
@@ -530,17 +513,13 @@ impl ToolExecutor {
             ));
         }
 
-        // Parse the JSON output to extract the result
         if let Ok(json_output) = serde_json::from_str::<Value>(&stdout) {
-            // Extract the result field if present
             if let Some(result) = json_output.get("result").and_then(|r| r.as_str()) {
                 Ok(result.to_string())
             } else {
-                // Return the full JSON if no result field
                 Ok(stdout.to_string())
             }
         } else {
-            // Return raw output if not valid JSON
             Ok(stdout.to_string())
         }
     }

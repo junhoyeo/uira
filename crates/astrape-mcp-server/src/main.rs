@@ -1,8 +1,3 @@
-//! Astrape MCP Server
-//!
-//! Exposes LSP and AST-grep tools via the Model Context Protocol.
-//! Run with: astrape-mcp
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -10,8 +5,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+mod proxy_manager;
 mod tools;
 
+use proxy_manager::{ProxyManager, DEFAULT_PROXY_PORT};
 use tools::ToolExecutor;
 
 #[derive(Debug, Serialize)]
@@ -44,12 +41,18 @@ struct JsonRpcRequest {
 
 struct McpServer {
     executor: Arc<RwLock<ToolExecutor>>,
+    proxy_manager: Arc<ProxyManager>,
 }
 
 impl McpServer {
     fn new(root_path: PathBuf) -> Self {
+        let proxy_manager = Arc::new(ProxyManager::new(DEFAULT_PROXY_PORT));
         Self {
-            executor: Arc::new(RwLock::new(ToolExecutor::new(root_path))),
+            executor: Arc::new(RwLock::new(ToolExecutor::new(
+                root_path,
+                proxy_manager.clone(),
+            ))),
+            proxy_manager,
         }
     }
 
@@ -213,7 +216,7 @@ impl McpServer {
 
     async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         match request.method.as_str() {
-            "initialize" => self.handle_initialize(request.id),
+            "initialize" => self.handle_initialize(request.id).await,
             "notifications/initialized" => {
                 // No response needed for notifications
                 JsonRpcResponse {
@@ -240,7 +243,11 @@ impl McpServer {
         }
     }
 
-    fn handle_initialize(&self, id: Option<Value>) -> JsonRpcResponse {
+    async fn handle_initialize(&self, id: Option<Value>) -> JsonRpcResponse {
+        if let Err(e) = self.proxy_manager.ensure_running().await {
+            tracing::warn!(error = %e, "Failed to start proxy on initialize (non-fatal)");
+        }
+
         JsonRpcResponse {
             jsonrpc: "2.0",
             id,

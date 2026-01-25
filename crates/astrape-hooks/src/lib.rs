@@ -13,7 +13,6 @@ pub use hooks::{
         AutopilotConfig, AutopilotHook, AutopilotPhase, AutopilotSignal, AutopilotState,
         AUTOPILOT_STATE_FILE,
     },
-    comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME},
     background_notification::{
         background_tasks_dir, check_background_notifications, handle_background_event_public,
         process_background_notification, BackgroundNotificationHook,
@@ -21,6 +20,7 @@ pub use hooks::{
         BackgroundNotificationHookOutput, BackgroundNotificationManager, BackgroundTask,
         BackgroundTaskStatus, NotificationCheckResult, TaskProgress, MANAGER,
     },
+    comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME},
     keyword_detector::{KeywordDetectorHook, KeywordType},
     notepad::{
         NotepadConfig, NotepadHook, NotepadStats, PriorityContextResult, PruneResult,

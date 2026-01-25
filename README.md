@@ -208,14 +208,18 @@ Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform 
 
 ### Usage
 
-**Start the proxy:**
+**Automatic startup (recommended):**
+
+When using the Astrape Claude Code plugin, the proxy starts automatically when you use `spawn_agent`. The MCP server manages the proxy lifecycle - it starts on first use and stops when Claude Code exits.
+
+**Manual startup (for development/testing):**
 
 ```bash
 cargo run --release -p astrape-proxy
 # Output: astrape-proxy listening addr=0.0.0.0:8787
 ```
 
-**Use with Claude Code:**
+**Use with Claude Code (without plugin):**
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:8787 claude
