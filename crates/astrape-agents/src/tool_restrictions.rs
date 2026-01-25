@@ -67,8 +67,8 @@ impl ToolRestrictionsRegistry {
             allow(&["Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
         );
         reg.register(
-            "researcher",
-            allow(&["Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
+            "librarian",
+            allow(&["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"]),
         );
         reg.register("explore", allow(&["Read", "Glob", "Grep"]));
         reg.register(
@@ -99,7 +99,6 @@ impl ToolRestrictionsRegistry {
             "architect-medium",
             "executor-low",
             "executor-high",
-            "researcher-low",
             "designer-low",
             "designer-high",
             "qa-tester-high",

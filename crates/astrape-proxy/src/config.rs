@@ -46,6 +46,10 @@ struct AgentConfig {
 
 impl Default for ProxyConfig {
     fn default() -> Self {
+        let mut agent_models = HashMap::new();
+        // Default model for librarian agent
+        agent_models.insert("librarian".to_string(), "opencode/big-pickle".to_string());
+
         Self {
             port: env::var("PORT")
                 .ok()
@@ -57,7 +61,7 @@ impl Default for ProxyConfig {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(120),
-            agent_models: HashMap::new(),
+            agent_models,
         }
     }
 }
@@ -71,17 +75,15 @@ impl ProxyConfig {
         let yaml_config: AstrapeYamlConfig =
             serde_yaml::from_str(&content).with_context(|| "Failed to parse astrape.yml")?;
 
-        let mut agent_models = HashMap::new();
+        // Start with defaults and merge user overrides
+        let mut config = Self::default();
         for (agent_name, agent_config) in yaml_config.agents {
             if let Some(model) = agent_config.model {
-                agent_models.insert(agent_name, model);
+                config.agent_models.insert(agent_name, model);
             }
         }
 
-        Ok(Self {
-            agent_models,
-            ..Self::default()
-        })
+        Ok(config)
     }
 
     pub fn get_model_for_agent(&self, agent_name: &str) -> Option<&str> {
@@ -108,6 +110,7 @@ mod tests {
         let mut agent_models = HashMap::new();
         agent_models.insert("explore".to_string(), "opencode/gpt-5-nano".to_string());
         agent_models.insert("architect".to_string(), "openai/gpt-4.1".to_string());
+        agent_models.insert("librarian".to_string(), "opencode/big-pickle".to_string());
 
         let config = ProxyConfig {
             port: 8787,
@@ -124,6 +127,10 @@ mod tests {
             config.get_model_for_agent("architect"),
             Some("openai/gpt-4.1")
         );
+        assert_eq!(
+            config.get_model_for_agent("librarian"),
+            Some("opencode/big-pickle")
+        );
         assert_eq!(config.get_model_for_agent("nonexistent"), None);
 
         assert_eq!(
@@ -133,6 +140,15 @@ mod tests {
         assert_eq!(
             config.resolve_model_for_agent("nonexistent", "fallback"),
             "fallback"
+        );
+    }
+
+    #[test]
+    fn test_default_has_librarian() {
+        let config = ProxyConfig::default();
+        assert_eq!(
+            config.get_model_for_agent("librarian"),
+            Some("opencode/big-pickle")
         );
     }
 }

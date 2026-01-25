@@ -6,7 +6,11 @@ use tempfile::NamedTempFile;
 fn test_proxy_config_defaults() {
     let config = ProxyConfig::default();
     assert_eq!(config.port, 8787);
-    assert!(config.agent_models.is_empty());
+    // Librarian has a default model configured
+    assert_eq!(
+        config.get_model_for_agent("librarian"),
+        Some("opencode/big-pickle")
+    );
 }
 
 #[test]
@@ -33,6 +37,11 @@ agents:
     assert_eq!(
         config.get_model_for_agent("architect"),
         Some("openai/gpt-4.1")
+    );
+    // Librarian keeps default even when loading from YAML
+    assert_eq!(
+        config.get_model_for_agent("librarian"),
+        Some("opencode/big-pickle")
     );
     assert_eq!(config.get_model_for_agent("nonexistent"), None);
 

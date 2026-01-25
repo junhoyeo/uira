@@ -28,15 +28,15 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "architect",
-        "Architecture & Debugging Advisor (Opus). Use for complex problems.",
+        "Architecture & Debugging Advisor. Use for complex problems.",
         Some(ModelType::Opus),
     );
     insert(
         &mut agents,
         prompt_loader,
         &tools,
-        "researcher",
-        "Documentation and external reference finder (Sonnet).",
+        "librarian",
+        "Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation.",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -44,7 +44,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "explore",
-        "Fast codebase pattern matching (Haiku).",
+        "Fast codebase pattern matching.",
         Some(ModelType::Haiku),
     );
     insert(
@@ -52,7 +52,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "designer",
-        "UI/UX specialist (Sonnet).",
+        "UI/UX specialist.",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -60,7 +60,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "writer",
-        "Technical writing specialist (Haiku).",
+        "Technical writing specialist.",
         Some(ModelType::Haiku),
     );
     insert(
@@ -68,7 +68,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "vision",
-        "Visual analysis specialist (Sonnet).",
+        "Visual analysis specialist.",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -76,7 +76,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "critic",
-        "Plan/work reviewer (Opus).",
+        "Plan/work reviewer.",
         Some(ModelType::Opus),
     );
     insert(
@@ -84,7 +84,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "analyst",
-        "Pre-planning consultant (Sonnet).",
+        "Pre-planning consultant.",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -92,7 +92,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "executor",
-        "Focused executor for implementation tasks (Sonnet).",
+        "Focused executor for implementation tasks.",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -100,7 +100,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "planner",
-        "Strategic planner for comprehensive implementation plans (Opus).",
+        "Strategic planner for comprehensive implementation plans.",
         Some(ModelType::Opus),
     );
     insert(
@@ -108,7 +108,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "qa-tester",
-        "CLI testing specialist (Opus).",
+        "CLI testing specialist.",
         Some(ModelType::Opus),
     );
     insert(
@@ -116,7 +116,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "scientist",
-        "Data/ML specialist (Sonnet).",
+        "Data/ML specialist.",
         Some(ModelType::Sonnet),
     );
 
@@ -125,52 +125,47 @@ pub fn get_agent_definitions_with_loader(
         (
             "architect-medium",
             ModelType::Sonnet,
-            "Architecture & Debugging Advisor - Medium complexity (Sonnet). Use for moderate analysis.",
+            "Architecture & Debugging Advisor - Medium complexity. Use for moderate analysis.",
         ),
         (
             "architect-low",
             ModelType::Haiku,
-            "Quick code questions & simple lookups (Haiku). Use for simple questions that need fast answers.",
+            "Quick code questions & simple lookups. Use for simple questions that need fast answers.",
         ),
         (
             "executor-high",
             ModelType::Opus,
-            "Complex task executor for multi-file changes (Opus). Use for tasks requiring deep reasoning.",
+            "Complex task executor for multi-file changes. Use for tasks requiring deep reasoning.",
         ),
         (
             "executor-low",
             ModelType::Haiku,
-            "Simple single-file task executor (Haiku). Use for trivial tasks.",
-        ),
-        (
-            "researcher-low",
-            ModelType::Haiku,
-            "Quick documentation lookups (Haiku). Use for simple documentation queries.",
+            "Simple single-file task executor. Use for trivial tasks.",
         ),
         (
             "designer-low",
             ModelType::Haiku,
-            "Simple styling and minor UI tweaks (Haiku). Use for trivial frontend work.",
+            "Simple styling and minor UI tweaks. Use for trivial frontend work.",
         ),
         (
             "designer-high",
             ModelType::Opus,
-            "Complex UI architecture and design systems (Opus). Use for sophisticated frontend work.",
+            "Complex UI architecture and design systems. Use for sophisticated frontend work.",
         ),
         (
             "qa-tester-high",
             ModelType::Opus,
-            "Comprehensive production-ready QA testing with Opus.",
+            "Comprehensive production-ready QA testing.",
         ),
         (
             "scientist-low",
             ModelType::Haiku,
-            "Quick data inspection and simple statistics (Haiku). Use for fast, simple queries.",
+            "Quick data inspection and simple statistics. Use for fast, simple queries.",
         ),
         (
             "scientist-high",
             ModelType::Opus,
-            "Complex research, hypothesis testing, and ML specialist (Opus). Use for deep analysis.",
+            "Complex research, hypothesis testing, and ML specialist. Use for deep analysis.",
         ),
     ] {
         insert(
@@ -188,52 +183,45 @@ pub fn get_agent_definitions_with_loader(
         (
             "security-reviewer",
             ModelType::Opus,
-            "Security vulnerability detection specialist (Opus). Use for security audits and code review.",
+            "Security vulnerability detection specialist. Use for security audits and code review.",
         ),
         (
             "security-reviewer-low",
             ModelType::Haiku,
-            "Quick security scan specialist (Haiku). Use for fast security checks on small code changes.",
+            "Quick security scan specialist. Use for fast security checks on small code changes.",
         ),
         (
             "build-fixer",
             ModelType::Sonnet,
-            "Build and TypeScript error resolution specialist (Sonnet). Use for fixing build errors.",
+            "Build and TypeScript error resolution specialist. Use for fixing build errors.",
         ),
         (
             "build-fixer-low",
             ModelType::Haiku,
-            "Simple build error fixer (Haiku). Use for trivial type errors and single-line fixes.",
+            "Simple build error fixer. Use for trivial type errors and single-line fixes.",
         ),
         (
             "tdd-guide",
             ModelType::Sonnet,
-            "Test-Driven Development specialist (Sonnet). Use for TDD workflows and test coverage.",
+            "Test-Driven Development specialist. Use for TDD workflows and test coverage.",
         ),
         (
             "tdd-guide-low",
             ModelType::Haiku,
-            "Quick test suggestion specialist (Haiku). Use for simple test case ideas.",
+            "Quick test suggestion specialist. Use for simple test case ideas.",
         ),
         (
             "code-reviewer",
             ModelType::Opus,
-            "Expert code review specialist (Opus). Use for comprehensive code quality review.",
+            "Expert code review specialist. Use for comprehensive code quality review.",
         ),
         (
             "code-reviewer-low",
             ModelType::Haiku,
-            "Quick code quality checker (Haiku). Use for fast review of small changes.",
+            "Quick code quality checker. Use for fast review of small changes.",
         ),
     ] {
-        insert(
-            &mut agents,
-            prompt_loader,
-            &tools,
-            name,
-            desc,
-            Some(model),
-        );
+        insert(&mut agents, prompt_loader, &tools, name, desc, Some(model));
     }
 
     apply_overrides(agents, overrides)
