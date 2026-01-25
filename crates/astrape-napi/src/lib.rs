@@ -8,7 +8,7 @@ use astrape_features::builtin_skills::{get_builtin_skill, list_builtin_skill_nam
 use astrape_features::model_routing::{
     analyze_task_complexity, route_task, RoutingConfigOverrides, RoutingContext,
 };
-use astrape_hook::KeywordDetector;
+use astrape_keywords::KeywordDetector;
 use astrape_hooks::{default_hooks, HookContext, HookEvent, HookInput};
 use napi_derive::napi;
 

@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 astrape-config = { path = "../astrape-config" }
 astrape-goals = { path = "../astrape-goals" }
+astrape-comment-checker = { path = "../astrape-comment-checker" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
