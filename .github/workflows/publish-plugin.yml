@@ -160,7 +160,7 @@ jobs:
       - name: Create release archive
         run: |
           cd packages/claude-plugin
-          tar -czvf ../../astrape-plugin-${{ inputs.version }}.tar.gz .
+          tar -czvf "../../astrape-plugin-${{ inputs.version }}.tar.gz" .
 
       - name: Upload plugin archive
         uses: actions/upload-artifact@v4
