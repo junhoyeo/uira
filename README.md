@@ -21,6 +21,127 @@
 - **Git Hooks** - Configurable pre/post commit hooks via `astrape.yml`
 - **Goal Verification** - Score-based verification for persistent work loops (ralph mode)
 
+## Quick Start
+
+### As Claude Code Plugin
+
+```bash
+# Clone and build
+git clone https://github.com/junhoyeo/Astrape astrape
+cd astrape
+cargo build --release
+
+# Build NAPI bindings (automatically syncs to plugin)
+cd crates/astrape-napi && bun run build
+
+# Install plugin in Claude Code
+# Add packages/claude-plugin to your Claude Code plugins
+```
+
+### Usage in Claude Code
+
+Just talk naturally - Astrape activates automatically:
+
+```
+"ultrawork: fix all TypeScript errors"    → Maximum parallel execution
+"analyze why this test fails"             → Deep investigation mode
+"search for authentication handling"      → Comprehensive codebase search
+"plan the new API design"                 → Strategic planning interview
+```
+
+## Agents
+
+| Category | Agents |
+|----------|--------|
+| **Analysis** | architect, architect-medium, architect-low, analyst, critic |
+| **Execution** | executor, executor-high, executor-low |
+| **Search** | explore |
+| **Design** | designer, designer-high, designer-low |
+| **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
+| **Security** | security-reviewer, security-reviewer-low |
+| **Build** | build-fixer, build-fixer-low |
+| **Research** | researcher, researcher-low, scientist, scientist-high, scientist-low |
+| **Other** | writer, vision, planner, code-reviewer, code-reviewer-low |
+
+### Model Tiers
+
+| Tier | Model | Use Case |
+|------|-------|----------|
+| LOW | Haiku | Quick lookups, simple tasks |
+| MEDIUM | Sonnet | Standard implementation |
+| HIGH | Opus | Complex reasoning, architecture |
+
+## Skills
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
+| `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
+| `/astrape:search` | `search`, `find` | Comprehensive codebase search |
+| `/astrape:plan` | `plan` | Strategic planning |
+| `/astrape:help` | - | Usage guide |
+
+### Keyword Modes
+
+| Keyword | Description |
+|---------|-------------|
+| `ralph`, `don't stop` | Persistent work loop with goal verification (see [Ralph Mode](#ralph-mode--goal-verification)) |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Claude Code                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+          ┌──────────────────────────┼────────────────────────────┐
+          ▼                          ▼                            ▼
+┌───────────────────┐  ┌───────────────────────┐  ┌─────────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │  │   astrape-proxy         │
+│  (NAPI Bindings)  │  │     (MCP Server)      │  │ (HTTP Proxy / Routing)  │
+└───────────────────┘  └───────────────────────┘  └─────────────────────────┘
+          │                          │                            │
+          │              ┌───────────┴───────────┐                │
+          │              ▼                       ▼                │
+          │    ┌─────────────────┐    ┌─────────────────┐        │
+          │    │  astrape-tools  │    │   astrape-oxc   │        │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │        │
+          │    └─────────────────┘    └─────────────────┘        │
+          │                                                       │
+          └───────┬─────────────┬─────────────┬───────────────────┘
+                  ▼             ▼             ▼
+    ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
+    │   astrape-hooks   │ │  agents   │ │ astrape-features│
+    │ (Hooks + Goals)   │ │(32 Agents)│ │ (Skills/Router) │
+    └───────────────────┘ └───────────┘ └─────────────────┘
+              │
+              └── Ralph Hook (Stop event → goal verification)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            astrape (CLI)                                    │
+│                  Git Hooks · Typo Check · Goals · Dev Tools                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+The plugin uses native Rust NAPI bindings for performance-critical operations:
+
+| Crate | Description |
+|-------|-------------|
+| **astrape** | Standalone CLI for git hooks and dev tools |
+| **astrape-proxy** | HTTP proxy for agent-based model routing with OpenCode auth |
+| **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
+| **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
+| **astrape-tools** | LSP client, tool registry, and orchestration utilities |
+| **astrape-hook** | Keyword detection and pattern matching |
+| **astrape-hooks** | Hook implementations (22 hooks) |
+| **astrape-agents** | Agent definitions and prompt loading |
+| **astrape-features** | Model routing, skills, state management |
+| **astrape-goals** | Score-based goal verification for ralph mode |
+| **astrape-napi** | Node.js bindings exposing Rust to the plugin |
+| **astrape-comment-checker** | Tree-sitter based comment detection |
+| **astrape-core** | Shared types and utilities |
+| **astrape-config** | Configuration loading and management |
+
 ## HTTP Proxy
 
 The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
@@ -345,70 +466,6 @@ astrape goals check coverage # Run specific goal by name
 - **Session expiration**: Ralph state expires after 24 hours
 - **Fail-open**: Config errors don't block indefinitely — goals are optional
 
-## Quick Start
-
-### As Claude Code Plugin
-
-```bash
-# Clone and build
-git clone https://github.com/junhoyeo/Astrape astrape
-cd astrape
-cargo build --release
-
-# Build NAPI bindings
-cd crates/astrape-napi && bun run build
-
-# Copy native module to plugin
-cp *.node ../../packages/claude-plugin/native/
-
-# Install plugin in Claude Code
-# Add packages/claude-plugin to your Claude Code plugins
-```
-
-### Usage in Claude Code
-
-Just talk naturally - Astrape activates automatically:
-
-```
-"ultrawork: fix all TypeScript errors"    → Maximum parallel execution
-"analyze why this test fails"             → Deep investigation mode
-"search for authentication handling"      → Comprehensive codebase search
-"plan the new API design"                 → Strategic planning interview
-```
-
-## Agents
-
-| Category | Agents |
-|----------|--------|
-| **Analysis** | architect, architect-medium, architect-low, analyst, critic |
-| **Execution** | executor, executor-high, executor-low |
-| **Search** | explore |
-| **Design** | designer, designer-high, designer-low |
-| **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
-| **Security** | security-reviewer, security-reviewer-low |
-| **Build** | build-fixer, build-fixer-low |
-| **Research** | researcher, researcher-low, scientist, scientist-high, scientist-low |
-| **Other** | writer, vision, planner, code-reviewer, code-reviewer-low |
-
-### Model Tiers
-
-| Tier | Model | Use Case |
-|------|-------|----------|
-| LOW | Haiku | Quick lookups, simple tasks |
-| MEDIUM | Sonnet | Standard implementation |
-| HIGH | Opus | Complex reasoning, architecture |
-
-## Skills
-
-| Skill | Trigger | Description |
-|-------|---------|-------------|
-| `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
-| `/astrape:ralph` | `ralph`, `don't stop` | Persistent work loop with goal verification |
-| `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
-| `/astrape:search` | `search`, `find` | Comprehensive codebase search |
-| `/astrape:plan` | `plan` | Strategic planning |
-| `/astrape:help` | - | Usage guide |
-
 ## MCP Server
 
 The `astrape-mcp` binary exposes development tools via the Model Context Protocol:
@@ -461,7 +518,7 @@ Minify JavaScript with optional mangling and compression, returning compression 
 # Build all crates
 cargo build --workspace --release
 
-# Build NAPI module
+# Build NAPI module (automatically syncs to plugin)
 cd crates/astrape-napi && bun run build
 
 # Run tests
@@ -470,58 +527,3 @@ cargo test --workspace
 # Build comment-checker
 cargo build --release -p astrape-comment-checker
 ```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Claude Code                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                     │
-          ┌──────────────────────────┼────────────────────────────┐
-          ▼                          ▼                            ▼
-┌───────────────────┐  ┌───────────────────────┐  ┌─────────────────────────┐
-│  astrape-napi     │  │   astrape-mcp-server  │  │   astrape-proxy         │
-│  (NAPI Bindings)  │  │     (MCP Server)      │  │ (HTTP Proxy / Routing)  │
-└───────────────────┘  └───────────────────────┘  └─────────────────────────┘
-          │                          │                            │
-          │              ┌───────────┴───────────┐                │
-          │              ▼                       ▼                │
-          │    ┌─────────────────┐    ┌─────────────────┐        │
-          │    │  astrape-tools  │    │   astrape-oxc   │        │
-          │    │  (LSP Client)   │    │  (JS/TS Tools)  │        │
-          │    └─────────────────┘    └─────────────────┘        │
-          │                                                       │
-          └───────┬─────────────┬─────────────┬───────────────────┘
-                  ▼             ▼             ▼
-    ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
-    │   astrape-hooks   │ │  agents   │ │ astrape-features│
-    │ (Hooks + Goals)   │ │(32 Agents)│ │ (Skills/Router) │
-    └───────────────────┘ └───────────┘ └─────────────────┘
-              │
-              └── Ralph Hook (Stop event → goal verification)
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            astrape (CLI)                                    │
-│                  Git Hooks · Typo Check · Goals · Dev Tools                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-The plugin uses native Rust NAPI bindings for performance-critical operations:
-
-| Crate | Description |
-|-------|-------------|
-| **astrape** | Standalone CLI for git hooks and dev tools |
-| **astrape-proxy** | HTTP proxy for agent-based model routing with OpenCode auth |
-| **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
-| **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
-| **astrape-tools** | LSP client, tool registry, and orchestration utilities |
-| **astrape-hook** | Keyword detection and pattern matching |
-| **astrape-hooks** | Hook implementations (22 hooks) |
-| **astrape-agents** | Agent definitions and prompt loading |
-| **astrape-features** | Model routing, skills, state management |
-| **astrape-goals** | Score-based goal verification for ralph mode |
-| **astrape-napi** | Node.js bindings exposing Rust to the plugin |
-| **astrape-comment-checker** | Tree-sitter based comment detection |
-| **astrape-core** | Shared types and utilities |
-| **astrape-config** | Configuration loading and management |
