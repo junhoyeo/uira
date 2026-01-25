@@ -8,11 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::agent::{AgentDefinitionEntry, AgentDefinitions};
-use crate::bridge::{
-    AgentDef, BridgeQueryOptions, McpServerDef, QueryParams, SdkBridge, StreamMessage,
-};
 use crate::config::PluginConfig;
-use crate::error::SdkResult;
 use crate::mcp::McpServerConfig;
 use crate::types::{AgentState, BackgroundTask};
 
@@ -602,69 +598,6 @@ continue working until everything is done."#
         }
 
         keywords
-    }
-
-    /// Convert session QueryOptions to BridgeQueryOptions
-    pub fn to_bridge_options(&self) -> BridgeQueryOptions {
-        let agents: HashMap<String, AgentDef> = self
-            .query_options
-            .agents
-            .iter()
-            .map(|(name, entry)| {
-                (
-                    name.clone(),
-                    AgentDef {
-                        description: entry.description.clone(),
-                        prompt: entry.prompt.clone(),
-                        tools: Some(entry.tools.clone()),
-                        model: entry.model.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        let mcp_servers: HashMap<String, McpServerDef> = self
-            .query_options
-            .mcp_servers
-            .iter()
-            .map(|(name, config)| {
-                (
-                    name.clone(),
-                    McpServerDef {
-                        command: config.command.clone(),
-                        args: config.args.clone(),
-                        env: config.env.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        BridgeQueryOptions {
-            system_prompt: Some(self.query_options.system_prompt.clone()),
-            agents: Some(agents),
-            mcp_servers: Some(mcp_servers),
-            allowed_tools: Some(self.query_options.allowed_tools.clone()),
-            permission_mode: Some(self.query_options.permission_mode.clone()),
-        }
-    }
-
-    /// Create query params for a prompt
-    pub fn create_query_params(&self, prompt: &str) -> QueryParams {
-        let processed = self.process_prompt(prompt);
-        QueryParams {
-            prompt: processed,
-            options: Some(self.to_bridge_options()),
-        }
-    }
-
-    /// Start a query using the TypeScript bridge
-    pub fn query(
-        &self,
-        bridge: &mut SdkBridge,
-        prompt: &str,
-    ) -> SdkResult<tokio::sync::mpsc::Receiver<SdkResult<StreamMessage>>> {
-        let params = self.create_query_params(prompt);
-        bridge.query(params)
     }
 }
 
