@@ -173,10 +173,12 @@ impl ProxyManager {
             }
         }
 
+        let pid = child_guard.as_ref().and_then(|c| c.id());
+        drop(child_guard);
+
         Err(format!(
             "Proxy started (pid={:?}) but not responding on port {} after 2s timeout",
-            self.child.read().await.as_ref().and_then(|c| c.id()),
-            self.port
+            pid, self.port
         ))
     }
 
