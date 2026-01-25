@@ -2,15 +2,16 @@
 
 <div align="center">
   <h1>Astrape</h1>
-  <p>Native Rust-powered multi-agent orchestration for Claude Code</p>
+  <p>Lightning-fast multi-agent orchestration with native Rust performance</p>
 </div>
 
-Astrape (Greek: "lightning") provides high-performance multi-agent orchestration, smart model routing, and AI-assisted development tools as a Claude Code plugin.
+> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection, HTTP proxy with agent-based routing, and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
 
 ## Features
 
 - **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Researcher, and more with tiered variants (Haiku/Sonnet/Opus)
 - **Smart Model Routing** - Automatically select the right model based on task complexity
+- **HTTP Proxy** - Agent-based routing proxy for using non-Anthropic models with Claude Code
 - **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
 - **MCP Server** - LSP and AST-grep tools exposed via Model Context Protocol
 - **OXC-Powered Tools** - Fast JavaScript/TypeScript linting, parsing, transformation, and minification
@@ -19,6 +20,139 @@ Astrape (Greek: "lightning") provides high-performance multi-agent orchestration
 - **Skill System** - Extensible skill templates (ultrawork, analyze, plan, search)
 - **Git Hooks** - Configurable pre/post commit hooks via `astrape.yml`
 - **Goal Verification** - Score-based verification for persistent work loops (ralph mode)
+
+## HTTP Proxy
+
+The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
+
+### Key Features
+
+- **Agent-based routing** - Route specific agents to alternative models via `astrape.yml`
+- **Transparent passthrough** - Requests without agent config go directly to Anthropic
+- **OpenCode authentication** - Uses OpenCode's auth for alternative providers
+- **Multi-provider support** - OpenAI, Google Gemini, OpenCode (via LiteLLM)
+- **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format conversion
+- **Streaming support** - Full SSE (Server-Sent Events) streaming
+
+### Agent-Based Model Routing
+
+Route different agents to different models based on purpose, not provider:
+
+```yaml
+# astrape.yml
+agents:
+  explore:
+    model: "opencode/gpt-5-nano"  # Fast, cheap model for exploration
+  architect:
+    model: "openai/gpt-4.1"       # Powerful model for architecture
+  executor:
+    model: "openai/gpt-4.1-mini"  # Balanced model for execution
+```
+
+### Configuration
+
+**Environment Variables:**
+
+```bash
+PORT=8787                                # Server port (default: 8787)
+LITELLM_BASE_URL=http://localhost:4000   # LiteLLM proxy URL
+REQUEST_TIMEOUT_SECS=120                 # Upstream timeout (default: 120)
+```
+
+**OpenCode Authentication:**
+
+The proxy uses OpenCode's authentication system. Ensure you've logged in:
+
+```bash
+opencode auth login openai
+opencode auth login google
+opencode auth login opencode
+```
+
+Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform equivalent).
+
+### Usage
+
+**Start the proxy:**
+
+```bash
+cargo run --release -p astrape-proxy
+# Output: astrape-proxy listening addr=0.0.0.0:8787
+```
+
+**Use with Claude Code:**
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8787 claude
+```
+
+**Test the proxy:**
+
+```bash
+# Health check
+curl http://localhost:8787/health
+# Output: OK
+
+# Test agent-based routing
+curl -X POST http://localhost:8787/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-sonnet",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hello"}],
+    "metadata": {"agent": "explore"}
+  }'
+```
+
+### How It Works
+
+The proxy routes requests based on the `metadata.agent` field:
+
+**Agent configured in `astrape.yml`:**
+```
+Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
+                   ↓
+            OpenCode auth
+```
+
+**Agent NOT configured (passthrough):**
+```
+Claude Code → astrape-proxy → Anthropic API
+                   ↓
+            Original auth header
+```
+
+### Request Flow
+
+1. Claude Code sends request with `metadata: {agent: "explore"}`
+2. Proxy checks if `explore` is configured in `astrape.yml`
+3. **If configured**: Routes to configured model via LiteLLM with OpenCode auth
+4. **If not configured**: Passes through to Anthropic with original Authorization header
+
+### Endpoints
+
+- `GET /health` - Health check (returns "OK")
+- `POST /v1/messages` - Chat completions (streaming & non-streaming)
+- `POST /v1/messages/count_tokens` - Token counting
+
+### Development
+
+**Run tests:**
+
+```bash
+cargo test -p astrape-proxy
+```
+
+**Build release binary:**
+
+```bash
+cargo build --release -p astrape-proxy
+# Binary: target/release/astrape-proxy
+```
+
+**End-to-end testing:**
+
+See [crates/astrape-proxy/E2E_TEST.md](crates/astrape-proxy/E2E_TEST.md) for comprehensive testing guide.
 
 ## Git Hooks
 
@@ -248,7 +382,7 @@ Just talk naturally - Astrape activates automatically:
 |----------|--------|
 | **Analysis** | architect, architect-medium, architect-low, analyst, critic |
 | **Execution** | executor, executor-high, executor-low |
-| **Search** | explore, explore-medium, explore-high |
+| **Search** | explore |
 | **Design** | designer, designer-high, designer-low |
 | **Testing** | qa-tester, qa-tester-high, tdd-guide, tdd-guide-low |
 | **Security** | security-reviewer, security-reviewer-low |
@@ -344,29 +478,28 @@ cargo build --release -p astrape-comment-checker
 │                              Claude Code                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
-          ┌──────────────────────────┼──────────────────────────┐
-          ▼                          ▼                          ▼
-┌───────────────────┐  ┌───────────────────────┐  ┌───────────────────────────┐
-│  astrape-napi     │  │   astrape-mcp-server  │  │  astrape-comment-checker  │
-│  (NAPI Bindings)  │  │     (MCP Server)      │  │    (Comment Detection)    │
-└───────────────────┘  └───────────────────────┘  └───────────────────────────┘
-          │                          │
-          │              ┌───────────┴───────────┐
-          │              ▼                       ▼
-          │    ┌─────────────────┐    ┌─────────────────┐
-          │    │  astrape-tools  │    │   astrape-oxc   │
-          │    │  (LSP Client)   │    │  (JS/TS Tools)  │
-          │    └─────────────────┘    └─────────────────┘
-          │
-          ├───────────────┬───────────────┬───────────────┬───────────────┐
-          ▼               ▼               ▼               ▼               ▼
-┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
-│ astrape-hooks │ │astrape-agents │ │astrape-features│ │ astrape-hook │ │ astrape-goals │
-│  (22 Hooks)   │ │  (32 Agents)  │ │(Skills/Router)│ │(Keyword Match)│ │  (Goal Verify)│
-└───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘
-        │                                                                       │
-        └───────────────────────── Ralph Hook ──────────────────────────────────┘
-                                (Stop event verification)
+          ┌──────────────────────────┼────────────────────────────┐
+          ▼                          ▼                            ▼
+┌───────────────────┐  ┌───────────────────────┐  ┌─────────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │  │   astrape-proxy         │
+│  (NAPI Bindings)  │  │     (MCP Server)      │  │ (HTTP Proxy / Routing)  │
+└───────────────────┘  └───────────────────────┘  └─────────────────────────┘
+          │                          │                            │
+          │              ┌───────────┴───────────┐                │
+          │              ▼                       ▼                │
+          │    ┌─────────────────┐    ┌─────────────────┐        │
+          │    │  astrape-tools  │    │   astrape-oxc   │        │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │        │
+          │    └─────────────────┘    └─────────────────┘        │
+          │                                                       │
+          └───────┬─────────────┬─────────────┬───────────────────┘
+                  ▼             ▼             ▼
+    ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
+    │   astrape-hooks   │ │  agents   │ │ astrape-features│
+    │ (Hooks + Goals)   │ │(32 Agents)│ │ (Skills/Router) │
+    └───────────────────┘ └───────────┘ └─────────────────┘
+              │
+              └── Ralph Hook (Stop event → goal verification)
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            astrape (CLI)                                    │
@@ -379,6 +512,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | Crate | Description |
 |-------|-------------|
 | **astrape** | Standalone CLI for git hooks and dev tools |
+| **astrape-proxy** | HTTP proxy for agent-based model routing with OpenCode auth |
 | **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
 | **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
 | **astrape-tools** | LSP client, tool registry, and orchestration utilities |
