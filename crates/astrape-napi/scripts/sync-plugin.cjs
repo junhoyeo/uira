@@ -17,14 +17,40 @@ function getPluginCachePath() {
 }
 
 function getPlatformBinary() {
-  const map = {
+  const platform = os.platform();
+  const arch = os.arch();
+  const key = `${platform}-${arch}`;
+
+  // Direct mappings for non-Linux platforms
+  const directMap = {
     'darwin-arm64': 'astrape.darwin-arm64.node',
     'darwin-x64': 'astrape.darwin-x64.node',
-    'linux-x64': 'astrape.linux-x64-gnu.node',
-    'linux-arm64': 'astrape.linux-arm64-gnu.node',
     'win32-x64': 'astrape.win32-x64-msvc.node',
   };
-  return map[`${os.platform()}-${os.arch()}`];
+
+  if (directMap[key]) {
+    return directMap[key];
+  }
+
+  // For Linux, check which binary exists (GNU vs MUSL)
+  if (platform === 'linux') {
+    const archMap = { 'x64': 'x64', 'arm64': 'arm64' };
+    const nodeArch = archMap[arch];
+    if (!nodeArch) return undefined;
+
+    const muslBinary = `astrape.linux-${nodeArch}-musl.node`;
+    const gnuBinary = `astrape.linux-${nodeArch}-gnu.node`;
+
+    // Prefer the binary that exists; check MUSL first (Alpine/Docker common case)
+    if (fs.existsSync(path.join(SOURCE_PATH, muslBinary))) {
+      return muslBinary;
+    }
+    if (fs.existsSync(path.join(SOURCE_PATH, gnuBinary))) {
+      return gnuBinary;
+    }
+  }
+
+  return undefined;
 }
 
 function syncTo(targetPath, label) {
