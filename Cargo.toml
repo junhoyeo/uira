@@ -3,13 +3,11 @@ resolver = "2"
 members = [
   "crates/astrape",
   "crates/astrape-core",
-  "crates/astrape-hook",
-  "crates/astrape-claude",
+  "crates/astrape-keywords",
   "crates/astrape-napi",
   "crates/astrape-sdk",
   "crates/astrape-comment-checker",
   "crates/astrape-hooks",
-  "crates/astrape-prompts",
   "crates/astrape-features",
   "crates/astrape-agents",
   "crates/astrape-tools",
@@ -30,8 +28,7 @@ repository = "https://github.com/junhoyeo/astrape"
 [workspace.dependencies]
 # Internal crates
 astrape-core = { path = "crates/astrape-core" }
-astrape-hook = { path = "crates/astrape-hook" }
-astrape-claude = { path = "crates/astrape-claude" }
+astrape-keywords = { path = "crates/astrape-keywords" }
 astrape-sdk = { path = "crates/astrape-sdk" }
 astrape-comment-checker = { path = "crates/astrape-comment-checker" }
 astrape-tools = { path = "crates/astrape-tools" }

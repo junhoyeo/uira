@@ -1,6 +1,6 @@
 [package]
-name = "astrape-claude"
-description = "Claude Code integration for Astrape AI harness"
+name = "astrape-keywords"
+description = "Keyword detection for triggering modes in Astrape"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,11 +9,11 @@ repository.workspace = true
 
 [dependencies]
 astrape-core = { workspace = true }
-astrape-hook = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+regex = { workspace = true }
 anyhow = { workspace = true }
-dirs = { workspace = true }
+rayon = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

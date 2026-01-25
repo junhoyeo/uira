@@ -1,33 +1,9 @@
-//! Astrape SDK - Rust bindings for Claude Agent SDK
+//! Astrape SDK - Types and utilities for multi-agent orchestration
 //!
-//! This crate provides Rust types and bindings to interact with
-//! @anthropic-ai/claude-agent-sdk from Rust code.
-//!
-//! # Architecture
-//!
-//! The SDK uses a TypeScript bridge subprocess to call the SDK from Rust.
-//! This allows Astrape to leverage the existing SDK without reimplementing it.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use astrape_sdk::{SdkBridge, QueryParams};
-//!
-//! let mut bridge = SdkBridge::new()?;
-//! assert!(bridge.ping()?);
-//!
-//! let params = QueryParams {
-//!     prompt: "Hello, Claude!".to_string(),
-//!     options: None,
-//! };
-//! let mut rx = bridge.query(params)?;
-//! while let Some(msg) = rx.recv().await {
-//!     println!("{:?}", msg);
-//! }
-//! ```
+//! This crate provides shared types for agent configuration, model routing,
+//! MCP server definitions, and session management.
 
 mod agent;
-mod bridge;
 mod config;
 mod error;
 mod mcp;
@@ -35,7 +11,6 @@ mod session;
 mod types;
 
 pub use agent::*;
-pub use bridge::*;
 pub use config::*;
 pub use error::*;
 pub use mcp::*;

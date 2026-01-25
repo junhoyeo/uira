@@ -132,7 +132,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
 | **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
 | **astrape-tools** | LSP client, tool registry, and orchestration utilities |
-| **astrape-hook** | Keyword detection and pattern matching |
+| **astrape-keywords** | Keyword detection for agent activation |
 | **astrape-hooks** | Hook implementations (22 hooks) |
 | **astrape-agents** | Agent definitions and prompt loading |
 | **astrape-features** | Model routing, skills, state management |

@@ -150,6 +150,7 @@ pub fn default_hooks() -> HookRegistry {
     registry.register(Arc::new(UltrapilotHook::new()));
     registry.register(Arc::new(UltraQAHook::new()));
     registry.register(Arc::new(UltraworkHook::new()));
+    registry.register(Arc::new(CommentCheckerHook::new()));
 
     registry
 }

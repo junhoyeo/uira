@@ -4,6 +4,7 @@ pub mod auto_slash_command;
 pub mod autopilot;
 pub mod background_notification;
 pub mod circuit_breaker;
+pub mod comment_checker;
 pub mod directory_readme_injector;
 pub mod empty_message_sanitizer;
 pub mod keyword_detector;
@@ -49,6 +50,7 @@ pub use background_notification::{
     TaskProgress, MANAGER,
 };
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
+pub use comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME};
 pub use directory_readme_injector::{
     clear_injected_paths, get_readmes_for_path, load_injected_paths, save_injected_paths,
     DirectoryReadmeInjectorHook, InjectedPathsData, README_FILENAME, TRACKED_TOOLS,

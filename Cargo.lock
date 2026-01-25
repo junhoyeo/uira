@@ -373,12 +373,11 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "astrape-agents",
- "astrape-claude",
  "astrape-config",
  "astrape-core",
  "astrape-features",
  "astrape-goals",
- "astrape-hook",
+ "astrape-keywords",
  "astrape-sdk",
  "clap",
  "colored",
@@ -405,19 +404,6 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-claude"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-core",
- "astrape-hook",
- "dirs",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -510,23 +496,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "astrape-hook"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-core",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "astrape-hooks"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "astrape-comment-checker",
  "astrape-config",
  "astrape-goals",
  "async-trait",
@@ -541,6 +515,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+]
+
+[[package]]
+name = "astrape-keywords"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "astrape-core",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -582,8 +569,8 @@ dependencies = [
  "astrape-core",
  "astrape-features",
  "astrape-goals",
- "astrape-hook",
  "astrape-hooks",
+ "astrape-keywords",
  "astrape-sdk",
  "chrono",
  "napi",
@@ -605,15 +592,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-prompts"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
