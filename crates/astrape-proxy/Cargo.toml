@@ -19,11 +19,10 @@ thiserror = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
 dirs = { workspace = true }
 
-# HTTP server
-axum = { workspace = true }
-tower = { workspace = true }
-tower-http = { workspace = true }
-hyper = { workspace = true }
+# HTTP server (Actix Web)
+actix-web = { workspace = true }
+actix-rt = { workspace = true }
+actix-cors = { workspace = true }
 
 # Async utilities
 futures = { workspace = true }

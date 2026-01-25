@@ -1,4 +1,4 @@
-//! Axum HTTP server.
+//! Actix Web HTTP server.
 //!
 //! Exposes Anthropic-compatible endpoints:
 //! - `POST /v1/messages`
@@ -11,52 +11,52 @@ use crate::{
     streaming, translation,
     types::{MessagesRequest, TokenCountRequest, TokenCountResponse},
 };
+use actix_cors::Cors;
+use actix_web::{http::StatusCode, web, App, HttpRequest, HttpResponse, HttpServer};
 use anyhow::{Context, Result};
-use axum::{
-    body::{Body, Bytes},
-    extract::State,
-    http::{header, HeaderMap, HeaderValue, Response, StatusCode},
-    response::IntoResponse,
-    routing::{get, post},
-    Json, Router,
-};
 use futures::StreamExt;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{debug, error, info};
 
 #[derive(Clone)]
-struct AppState {
-    config: ProxyConfig,
-    client: reqwest::Client,
+pub struct AppState {
+    pub config: ProxyConfig,
+    pub client: reqwest::Client,
 }
 
-/// Create an Axum router for the proxy.
-pub fn create_app(config: ProxyConfig) -> Router {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
-        .build()
-        .expect("failed to build reqwest client");
-
-    let state = AppState { config, client };
-
-    Router::new()
-        .route("/health", get(health_check))
-        .route("/v1/messages", post(handle_messages))
-        .route("/v1/messages/count_tokens", post(handle_count_tokens))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
-}
-
-/// Bind and serve the proxy.
 pub async fn serve(config: ProxyConfig) -> Result<()> {
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.port));
-    let app = create_app(config);
-    info!(%addr, "astrape-proxy listening");
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("failed to bind {}", addr))?;
-    axum::serve(listener, app).await.context("server error")?;
+    let addr = format!("0.0.0.0:{}", config.port);
+    info!(addr = %addr, "astrape-proxy listening");
+
+    let config_clone = config.clone();
+    HttpServer::new(move || {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(
+                config_clone.request_timeout_secs,
+            ))
+            .build()
+            .expect("failed to build reqwest client");
+
+        let state = web::Data::new(AppState {
+            config: config_clone.clone(),
+            client,
+        });
+
+        App::new()
+            .app_data(state)
+            .wrap(Cors::permissive())
+            .route("/health", web::get().to(health_check))
+            .route("/v1/messages", web::post().to(handle_messages))
+            .route(
+                "/v1/messages/count_tokens",
+                web::post().to(handle_count_tokens),
+            )
+    })
+    .bind(&addr)
+    .with_context(|| format!("failed to bind {}", addr))?
+    .run()
+    .await
+    .context("server error")?;
+
     Ok(())
 }
 
@@ -73,10 +73,11 @@ fn extract_agent_name(metadata: &Option<serde_json::Value>) -> Option<String> {
 }
 
 async fn handle_messages(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<MessagesRequest>,
-) -> impl IntoResponse {
+    state: web::Data<AppState>,
+    req_http: HttpRequest,
+    body: web::Json<MessagesRequest>,
+) -> HttpResponse {
+    let req = body.into_inner();
     let agent_name = extract_agent_name(&req.metadata);
     let agent_model = agent_name
         .as_ref()
@@ -91,16 +92,16 @@ async fn handle_messages(
     );
 
     match agent_model {
-        Some(model) => handle_litellm_path(state, req, model).await,
-        None => handle_anthropic_passthrough(state, headers, req).await,
+        Some(model) => handle_litellm_path(&state, req, model).await,
+        None => handle_anthropic_passthrough(&state, &req_http, req).await,
     }
 }
 
 async fn handle_litellm_path(
-    state: AppState,
+    state: &AppState,
     mut req: MessagesRequest,
     target_model: String,
-) -> axum::response::Response {
+) -> HttpResponse {
     req.model = target_model;
 
     let provider = auth::model_to_provider(&req.model);
@@ -111,7 +112,7 @@ async fn handle_litellm_path(
         Ok(t) => t,
         Err(e) => {
             error!(error = %e, provider, "OpenCode auth error");
-            return (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
+            return HttpResponse::Unauthorized().body(e.to_string());
         }
     };
 
@@ -119,7 +120,7 @@ async fn handle_litellm_path(
         Ok(v) => v,
         Err(e) => {
             error!(error = %e, "translation error");
-            return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            return HttpResponse::BadRequest().body(e.to_string());
         }
     };
 
@@ -136,7 +137,7 @@ async fn handle_litellm_path(
         Ok(r) => r,
         Err(e) => {
             error!(error = %e, "LiteLLM request failed");
-            return (StatusCode::BAD_GATEWAY, e.to_string()).into_response();
+            return HttpResponse::BadGateway().body(e.to_string());
         }
     };
 
@@ -144,123 +145,121 @@ async fn handle_litellm_path(
         let status = upstream.status();
         let text = upstream.text().await.unwrap_or_default();
         error!(%status, body = %text, "LiteLLM error");
-        return (StatusCode::BAD_GATEWAY, text).into_response();
+        return HttpResponse::BadGateway().body(text);
     }
 
     if req.stream.unwrap_or(false) {
-        let stream = streaming::handle_streaming(upstream, req).map(|r| r.map(Bytes::from));
-        let mut resp = Response::new(Body::from_stream(stream));
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream"),
-        );
-        resp.headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        return resp.into_response();
+        let stream = streaming::handle_streaming(upstream, req).map(|r| {
+            r.map(web::Bytes::from)
+                .map_err(|e| actix_web::error::ErrorInternalServerError(e.to_string()))
+        });
+
+        return HttpResponse::Ok()
+            .content_type("text/event-stream")
+            .insert_header(("cache-control", "no-cache"))
+            .streaming(stream);
     }
 
     let v: serde_json::Value = match upstream.json().await {
         Ok(v) => v,
         Err(e) => {
             error!(error = %e, "failed to decode LiteLLM response");
-            return (StatusCode::BAD_GATEWAY, e.to_string()).into_response();
+            return HttpResponse::BadGateway().body(e.to_string());
         }
     };
 
     match translation::convert_litellm_to_anthropic(v, &req) {
-        Ok(out) => Json(out).into_response(),
+        Ok(out) => HttpResponse::Ok().json(out),
         Err(e) => {
             error!(error = %e, "response translation error");
-            (StatusCode::BAD_GATEWAY, e.to_string()).into_response()
+            HttpResponse::BadGateway().body(e.to_string())
         }
     }
 }
 
 async fn handle_anthropic_passthrough(
-    state: AppState,
-    headers: HeaderMap,
+    state: &AppState,
+    req_http: &HttpRequest,
     req: MessagesRequest,
-) -> axum::response::Response {
-    let x_api_key = headers.get("x-api-key").cloned();
-    let auth_header = headers.get(header::AUTHORIZATION).cloned();
+) -> HttpResponse {
+    let headers = req_http.headers();
+    let x_api_key = headers.get("x-api-key").and_then(|v| v.to_str().ok());
+    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
 
     if x_api_key.is_none() && auth_header.is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            "Missing authentication: provide x-api-key or Authorization header",
-        )
-            .into_response();
+        return HttpResponse::Unauthorized()
+            .body("Missing authentication: provide x-api-key or Authorization header");
     }
 
     let url = "https://api.anthropic.com/v1/messages";
 
     let anthropic_version = headers
         .get("anthropic-version")
-        .cloned()
-        .unwrap_or_else(|| HeaderValue::from_static("2023-06-01"));
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("2023-06-01");
 
     let mut request_builder = state
         .client
         .post(url)
         .header("anthropic-version", anthropic_version)
-        .header(header::CONTENT_TYPE, "application/json");
+        .header("content-type", "application/json");
 
-    if let Some(key) = x_api_key {
-        request_builder = request_builder.header("x-api-key", key);
+    if let Some(key_str) = x_api_key {
+        request_builder = request_builder.header("x-api-key", key_str);
     }
-    if let Some(auth) = auth_header {
-        request_builder = request_builder.header(header::AUTHORIZATION, auth);
+    if let Some(auth_str) = auth_header {
+        request_builder = request_builder.header("authorization", auth_str);
     }
-    if let Some(beta) = headers.get("anthropic-beta") {
-        request_builder = request_builder.header("anthropic-beta", beta.clone());
+    if let Some(beta) = headers.get("anthropic-beta").and_then(|v| v.to_str().ok()) {
+        request_builder = request_builder.header("anthropic-beta", beta);
     }
 
     let upstream = match request_builder.json(&req).send().await {
         Ok(r) => r,
         Err(e) => {
             error!(error = %e, "Anthropic request failed");
-            return (StatusCode::BAD_GATEWAY, e.to_string()).into_response();
+            return HttpResponse::BadGateway().body(e.to_string());
         }
     };
 
     let status = upstream.status();
     let upstream_headers = upstream.headers().clone();
+    let content_type = upstream_headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json");
 
     if req.stream.unwrap_or(false) {
         let stream = upstream
             .bytes_stream()
-            .map(|r| r.map_err(std::io::Error::other));
-        let mut resp = Response::new(Body::from_stream(stream));
-        *resp.status_mut() = status;
-        if let Some(ct) = upstream_headers.get(header::CONTENT_TYPE) {
-            resp.headers_mut().insert(header::CONTENT_TYPE, ct.clone());
-        }
-        resp.headers_mut()
-            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        return resp.into_response();
+            .map(|r| r.map_err(|e| actix_web::error::ErrorInternalServerError(e.to_string())));
+
+        return HttpResponse::build(
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::OK),
+        )
+        .content_type(content_type)
+        .insert_header(("cache-control", "no-cache"))
+        .streaming(stream);
     }
 
     let body = match upstream.bytes().await {
         Ok(b) => b,
         Err(e) => {
             error!(error = %e, "failed to read Anthropic response");
-            return (StatusCode::BAD_GATEWAY, e.to_string()).into_response();
+            return HttpResponse::BadGateway().body(e.to_string());
         }
     };
 
-    let mut resp = Response::new(Body::from(body));
-    *resp.status_mut() = status;
-    if let Some(ct) = upstream_headers.get(header::CONTENT_TYPE) {
-        resp.headers_mut().insert(header::CONTENT_TYPE, ct.clone());
-    }
-    resp.into_response()
+    HttpResponse::build(StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::OK))
+        .content_type(content_type)
+        .body(body)
 }
 
 async fn handle_count_tokens(
-    State(state): State<AppState>,
-    Json(req): Json<TokenCountRequest>,
-) -> impl IntoResponse {
-    // For token counting, use the model as-is (no agent-based mapping needed)
+    state: web::Data<AppState>,
+    body: web::Json<TokenCountRequest>,
+) -> HttpResponse {
+    let req = body.into_inner();
     let model = req.model.clone();
 
     let provider = auth::model_to_provider(&req.model);
@@ -269,10 +268,9 @@ async fn handle_count_tokens(
         .and_then(|s| auth::get_access_token(&s, provider))
     {
         Ok(t) => t,
-        Err(e) => return (StatusCode::UNAUTHORIZED, e.to_string()).into_response(),
+        Err(e) => return HttpResponse::Unauthorized().body(e.to_string()),
     };
 
-    // Reuse the messages translation by building a MessagesRequest-like shape.
     let msgs_req = MessagesRequest {
         model,
         messages: req.messages,
@@ -288,9 +286,10 @@ async fn handle_count_tokens(
         thinking: None,
         metadata: None,
     };
+
     let mut outgoing = match translation::convert_anthropic_to_litellm(&msgs_req) {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+        Err(e) => return HttpResponse::BadRequest().body(e.to_string()),
     };
     if let Some(obj) = outgoing.as_object_mut() {
         obj.insert("api_key".to_string(), serde_json::Value::String(token));
@@ -302,18 +301,18 @@ async fn handle_count_tokens(
     );
     let upstream = match state.client.post(url).json(&outgoing).send().await {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        Err(e) => return HttpResponse::BadGateway().body(e.to_string()),
     };
     if !upstream.status().is_success() {
         let status = upstream.status();
-        let text = upstream.text().await.unwrap_or_else(|_| "".to_string());
+        let text = upstream.text().await.unwrap_or_default();
         error!(%status, body = %text, "upstream error");
-        return (StatusCode::BAD_GATEWAY, text).into_response();
+        return HttpResponse::BadGateway().body(text);
     }
 
     let v: serde_json::Value = match upstream.json().await {
         Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+        Err(e) => return HttpResponse::BadGateway().body(e.to_string()),
     };
 
     let tokens = v
@@ -329,8 +328,7 @@ async fn handle_count_tokens(
             0
         }) as u32;
 
-    Json(TokenCountResponse {
+    HttpResponse::Ok().json(TokenCountResponse {
         input_tokens: tokens,
     })
-    .into_response()
 }

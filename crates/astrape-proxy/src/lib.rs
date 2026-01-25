@@ -18,4 +18,4 @@ pub mod translation;
 pub mod types;
 
 pub use config::ProxyConfig;
-pub use server::{create_app, serve};
+pub use server::serve;
