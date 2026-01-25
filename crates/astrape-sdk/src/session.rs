@@ -197,8 +197,6 @@ impl AstrapeSession {
 
     /// Get the default system prompt
     fn get_default_system_prompt() -> String {
-        // Use a default orchestrator system prompt
-        // In the future, this can be loaded from astrape-prompts crate
         r#"You are Astrape, a multi-agent orchestration system.
 
 You are the orchestrator that coordinates specialized agents to accomplish complex tasks.
