@@ -110,6 +110,6 @@ fn strip_yaml_frontmatter_matches_ts_behavior() {
 fn apply_overrides_is_noop_without_overrides() {
     let tmp = tempfile::tempdir().unwrap();
     let loader = PromptLoader::from_fs(tmp.path());
-    let defs = astrape_agents::definitions::get_agent_definitions_with_loader(&loader, None);
+    let defs = astrape_agents::definitions::get_agent_definitions_with_loader(&loader, None, None);
     assert!(defs.contains_key("executor"));
 }

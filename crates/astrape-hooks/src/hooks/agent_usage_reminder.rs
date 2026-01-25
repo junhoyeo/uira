@@ -2,8 +2,6 @@
 //!
 //! Reminds users to use specialized agents when they make direct tool calls
 //! for searching or fetching content instead of delegating to agents.
-//!
-//! Ported from: oh-my-claudecode/src/hooks/agent-usage-reminder
 
 use async_trait::async_trait;
 use lazy_static::lazy_static;

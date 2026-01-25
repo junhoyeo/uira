@@ -1,6 +1,6 @@
 ---
 name: executor-low
-description: Simple single-file task executor (Haiku). Use for trivial tasks.
+description: "[haiku] Simple single-file task executor. Use for trivial tasks."
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TodoWrite"]

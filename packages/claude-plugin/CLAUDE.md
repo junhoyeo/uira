@@ -18,18 +18,36 @@ Just say what you want:
 | `search` / `find` | Search | Comprehensive codebase search |
 | `plan` | Planning | Strategic planning interview |
 
-## Agents (32 total)
+## Agents
 
-### Primary Agents
+### Standard Agents (use Task tool)
 
 | Agent | Model | Use For |
 |-------|-------|---------|
 | `architect` | Opus | Complex problems, architecture |
 | `executor` | Sonnet | Implementation tasks |
-| `explore` | Haiku | Fast codebase search |
 | `designer` | Sonnet | UI/UX work |
-| `researcher` | Sonnet | External docs, references |
 | `writer` | Haiku | Documentation |
+
+### Custom-Routed Agents (use spawn_agent MCP tool)
+
+These agents use non-Anthropic models and require the `spawn_agent` MCP tool:
+
+| Agent | Model | Use For |
+|-------|-------|---------|
+| `librarian` | opencode/big-pickle | Multi-repo analysis, external docs |
+| `explore` | opencode/gpt-5-nano | Fast codebase pattern matching |
+
+**Usage:**
+```
+mcp__plugin_astrape_astrape-tools__spawn_agent(
+  agent="librarian",
+  prompt="Find React hooks documentation"
+)
+```
+
+**Note:** The built-in Task tool is blocked for these agents. They require
+astrape-proxy running to route requests to the correct model provider.
 
 ### Tiered Variants
 
@@ -43,6 +61,7 @@ Astrape automatically routes tasks to appropriate model tiers:
 - Simple lookups → Haiku (fast, cheap)
 - Standard work → Sonnet (balanced)
 - Complex reasoning → Opus (most capable)
+- Custom models → Via astrape-proxy (librarian, explore)
 
 ## Performance
 

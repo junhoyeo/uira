@@ -3,7 +3,7 @@ use regex::Regex;
 
 pub static ALLOWED_PATH_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
     vec![
-        Regex::new(r"^\.omc/").unwrap(),
+        Regex::new(r"^\.astrape/").unwrap(),
         Regex::new(r"^\.claude/").unwrap(),
         Regex::new(r"^~?/\.claude/").unwrap(),
         Regex::new(r"/\.claude/").unwrap(),
@@ -25,7 +25,7 @@ pub const DIRECT_WORK_REMINDER: &str = r#"
 
 [SYSTEM REMINDER - DELEGATION REQUIRED]
 
-You just performed direct file modifications outside `.omc/`.
+You just performed direct file modifications outside `.astrape/`.
 
 **You are an ORCHESTRATOR, not an IMPLEMENTER.**
 
@@ -35,8 +35,8 @@ As an orchestrator, you should:
 - **COORDINATE** multiple tasks and ensure completion
 
 You should NOT:
-- Write code directly (except for `.omc/` files like plans and notepads)
-- Make direct file edits outside `.omc/`
+- Write code directly (except for `.astrape/` files like plans and notepads)
+- Make direct file edits outside `.astrape/`
 - Implement features yourself
 
 **If you need to make changes:**
@@ -56,7 +56,7 @@ pub fn orchestrator_delegation_required(file_path: &str) -> String {
 
 **STOP. YOU ARE VIOLATING ORCHESTRATOR PROTOCOL.**
 
-You (coordinator) are attempting to directly modify a file outside `.omc/`.
+You (coordinator) are attempting to directly modify a file outside `.astrape/`.
 
 **Path attempted:** {file_path}
 
@@ -70,7 +70,7 @@ As an ORCHESTRATOR, you MUST:
 3. **COORDINATE** - you orchestrate, you don't implement
 
 **ALLOWED direct file operations:**
-- Files inside `.omc/` (plans, notepads, drafts)
+- Files inside `.astrape/` (plans, notepads, drafts)
 - Files inside `~/.claude/` (global config)
 - `CLAUDE.md` and `AGENTS.md` files
 - Reading files for verification
@@ -78,7 +78,7 @@ As an ORCHESTRATOR, you MUST:
 
 **FORBIDDEN direct file operations:**
 - Writing/editing source code
-- Creating new files outside `.omc/`
+- Creating new files outside `.astrape/`
 - Any implementation work
 
 ---
@@ -109,7 +109,7 @@ You have an active work plan with incomplete tasks. Continue working.
 RULES:
 - Proceed without asking for permission
 - Mark each checkbox [x] in the plan file when done
-- Use the notepad at .omc/notepads/{plan_name}/ to record learnings
+- Use the notepad at .astrape/notepads/{plan_name}/ to record learnings
 - Do not stop until all tasks are complete
 - If blocked, document the blocker and move to the next task"#
     )
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_allowed_paths() {
-        assert!(is_allowed_path(".omc/plans/test.md"));
+        assert!(is_allowed_path(".astrape/plans/test.md"));
         assert!(is_allowed_path(".claude/config.json"));
         assert!(is_allowed_path("~/.claude/settings.json"));
         assert!(is_allowed_path("CLAUDE.md"));

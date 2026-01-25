@@ -154,10 +154,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pre_tool_allows_omc_paths() {
+    async fn test_pre_tool_allows_astrape_paths() {
         let hook = AstrapeOrchestratorHook;
         let context = create_test_context();
-        let input = create_test_input("Write", json!({"filePath": ".omc/plans/test.md"}));
+        let input = create_test_input("Write", json!({"filePath": ".astrape/plans/test.md"}));
 
         let result = hook
             .execute(HookEvent::PreToolUse, &input, &context)

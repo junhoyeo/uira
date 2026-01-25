@@ -12,8 +12,6 @@ use crate::types::{HookEvent, HookInput, HookOutput};
 pub const README_FILENAME: &str = "README.md";
 
 /// Tools that trigger README injection.
-///
-/// Matches oh-my-claudecode/src/hooks/directory-readme-injector/constants.ts
 pub const TRACKED_TOOLS: [&str; 4] = ["read", "write", "edit", "multiedit"];
 
 const CHARS_PER_TOKEN: usize = 4;

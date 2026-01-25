@@ -1,8 +1,6 @@
 //! Background Notification Hook
 //!
 //! Handles notifications for background tasks completing.
-//!
-//! Ported from: oh-my-claudecode/src/hooks/background-notification
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

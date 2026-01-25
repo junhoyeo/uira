@@ -4,6 +4,13 @@
 //! - `POST /v1/messages`
 //! - `POST /v1/messages/count_tokens`
 //! - `GET /health`
+//!
+//! Also supports path-based agent routing:
+//! - `POST /agent/{agent_name}/v1/messages`
+//! - `POST /agent/{agent_name}/v1/messages/count_tokens`
+//!
+//! This allows setting ANTHROPIC_BASE_URL=http://localhost:8787/agent/librarian
+//! to route all requests from that session through the librarian agent's model.
 
 use crate::{
     auth,
@@ -39,10 +46,21 @@ pub async fn serve(config: ProxyConfig) -> Result<()> {
             .app_data(state.clone())
             .wrap(Cors::permissive())
             .route("/health", web::get().to(health_check))
+            // Standard routes (no agent in path)
             .route("/v1/messages", web::post().to(handle_messages))
             .route(
                 "/v1/messages/count_tokens",
                 web::post().to(handle_count_tokens),
+            )
+            // Path-based agent routing: /agent/{agent_name}/v1/messages
+            // This allows ANTHROPIC_BASE_URL=http://localhost:8787/agent/librarian
+            .route(
+                "/agent/{agent_name}/v1/messages",
+                web::post().to(handle_messages_with_path_agent),
+            )
+            .route(
+                "/agent/{agent_name}/v1/messages/count_tokens",
+                web::post().to(handle_count_tokens_with_path_agent),
             )
     })
     .bind(&addr)
@@ -66,13 +84,37 @@ fn extract_agent_name(metadata: &Option<serde_json::Value>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Handle messages with agent from path parameter (e.g., /agent/librarian/v1/messages)
+async fn handle_messages_with_path_agent(
+    state: web::Data<AppState>,
+    req_http: HttpRequest,
+    path: web::Path<String>,
+    body: web::Json<MessagesRequest>,
+) -> HttpResponse {
+    let agent_name = path.into_inner();
+    handle_messages_inner(state, req_http, body, Some(agent_name)).await
+}
+
+/// Handle messages without path-based agent (standard /v1/messages)
 async fn handle_messages(
     state: web::Data<AppState>,
     req_http: HttpRequest,
     body: web::Json<MessagesRequest>,
 ) -> HttpResponse {
+    handle_messages_inner(state, req_http, body, None).await
+}
+
+/// Inner handler that accepts optional path-based agent name
+async fn handle_messages_inner(
+    state: web::Data<AppState>,
+    req_http: HttpRequest,
+    body: web::Json<MessagesRequest>,
+    path_agent: Option<String>,
+) -> HttpResponse {
     let req = body.into_inner();
-    let agent_name = extract_agent_name(&req.metadata);
+
+    // Path-based agent takes priority over metadata.agent
+    let agent_name = path_agent.or_else(|| extract_agent_name(&req.metadata));
     let agent_model = agent_name
         .as_ref()
         .and_then(|name| state.config.get_model_for_agent(name))
@@ -249,7 +291,25 @@ async fn handle_anthropic_passthrough(
         .body(body)
 }
 
+/// Handle count_tokens with agent from path parameter
+/// Note: Agent routing doesn't affect token counting, but we accept the path for API consistency
+async fn handle_count_tokens_with_path_agent(
+    state: web::Data<AppState>,
+    _path: web::Path<String>,
+    body: web::Json<TokenCountRequest>,
+) -> HttpResponse {
+    // Agent doesn't affect token counting, just forward to standard handler
+    handle_count_tokens_inner(state, body).await
+}
+
 async fn handle_count_tokens(
+    state: web::Data<AppState>,
+    body: web::Json<TokenCountRequest>,
+) -> HttpResponse {
+    handle_count_tokens_inner(state, body).await
+}
+
+async fn handle_count_tokens_inner(
     state: web::Data<AppState>,
     body: web::Json<TokenCountRequest>,
 ) -> HttpResponse {

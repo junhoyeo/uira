@@ -1,6 +1,4 @@
 //! Agent configuration types for Astrape SDK
-//!
-//! Mirrors oh-my-claudecode/src/agents/types.ts
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

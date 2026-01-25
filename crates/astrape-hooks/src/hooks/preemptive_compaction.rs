@@ -114,8 +114,6 @@ pub struct PreemptiveCompactionConfig {
 }
 
 /// Estimate tokens from text content.
-///
-/// Matches oh-my-claudecode/src/hooks/preemptive-compaction/index.ts
 pub fn estimate_tokens(text: &str) -> u64 {
     text.len().div_ceil(CHARS_PER_TOKEN) as u64
 }

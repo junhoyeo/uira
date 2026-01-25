@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 
-use astrape_agents::get_agent_definitions;
+use astrape_agents::{get_agent_definitions_with_config, AgentModelConfig};
 use astrape_core::HookOutput;
 use astrape_features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
 use astrape_features::model_routing::{
     analyze_task_complexity, route_task, RoutingConfigOverrides, RoutingContext,
 };
-use astrape_keywords::KeywordDetector;
 use astrape_hooks::{default_hooks, HookContext, HookEvent, HookInput};
+use astrape_keywords::KeywordDetector;
 use napi_derive::napi;
 
 // ============================================================================
@@ -231,6 +231,65 @@ pub fn get_hook_count() -> u32 {
 // Agent System Bindings
 // ============================================================================
 
+/// YAML config structure for loading agent models from astrape.yml
+#[derive(Debug, serde::Deserialize)]
+struct AstrapeYamlConfig {
+    #[serde(default)]
+    agents: HashMap<String, YamlAgentConfig>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct YamlAgentConfig {
+    model: Option<String>,
+}
+
+/// Load agent model configuration from astrape.yml
+///
+/// Searches for astrape.yml in current directory and parent directories.
+/// Returns a HashMap mapping agent names to their configured model IDs.
+fn load_agent_model_config() -> AgentModelConfig {
+    let mut model_config = AgentModelConfig::new();
+
+    // Default model for librarian agent
+    model_config.insert("librarian".to_string(), "opencode/big-pickle".to_string());
+
+    // Try to find and load astrape.yml
+    let config_path = find_astrape_yml();
+    if let Some(path) = config_path {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(yaml_config) = serde_yaml::from_str::<AstrapeYamlConfig>(&content) {
+                for (agent_name, agent_config) in yaml_config.agents {
+                    if let Some(model) = agent_config.model {
+                        model_config.insert(agent_name, model);
+                    }
+                }
+            }
+        }
+    }
+
+    model_config
+}
+
+/// Find astrape.yml by searching current directory and parents
+fn find_astrape_yml() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let mut dir = cwd.as_path();
+
+    loop {
+        let config_path = dir.join("astrape.yml");
+        if config_path.exists() {
+            return Some(config_path);
+        }
+
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => break,
+        }
+    }
+
+    None
+}
+
 /// Agent definition exposed to JavaScript
 #[napi(object)]
 pub struct JsAgentDefinition {
@@ -248,9 +307,12 @@ pub struct JsAgentDefinition {
 /// - Primary agents (architect, executor, explore, etc.)
 /// - Tiered variants (architect-low, architect-medium, executor-high, etc.)
 /// - Specialized agents (security-reviewer, build-fixer, etc.)
+///
+/// Agent descriptions include the actual configured model from astrape.yml.
 #[napi]
 pub fn list_agents() -> Vec<JsAgentDefinition> {
-    let agents = get_agent_definitions(None);
+    let model_config = load_agent_model_config();
+    let agents = get_agent_definitions_with_config(None, Some(&model_config));
 
     agents
         .into_iter()
@@ -283,9 +345,12 @@ pub fn list_agents() -> Vec<JsAgentDefinition> {
 ///
 /// # Returns
 /// Agent definition if found, None otherwise
+///
+/// Agent description includes the actual configured model from astrape.yml.
 #[napi]
 pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
-    let agents = get_agent_definitions(None);
+    let model_config = load_agent_model_config();
+    let agents = get_agent_definitions_with_config(None, Some(&model_config));
 
     agents.get(&name).map(|config| {
         let tier = match config.model {
@@ -311,7 +376,8 @@ pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
 /// Get list of agent names only (lighter weight than full definitions)
 #[napi]
 pub fn list_agent_names() -> Vec<String> {
-    let agents = get_agent_definitions(None);
+    // Don't load model config - we only need agent names, not full definitions
+    let agents = get_agent_definitions_with_config(None, None);
     agents.keys().cloned().collect()
 }
 

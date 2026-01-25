@@ -1,6 +1,6 @@
 ---
 name: security-reviewer-low
-description: Quick security scan specialist (Haiku). Use for fast security checks on small code changes.
+description: "[haiku] Quick security scan specialist. Use for fast security checks on small code changes."
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Bash"]

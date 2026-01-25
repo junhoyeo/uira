@@ -167,6 +167,47 @@ impl McpServer {
                     "required": ["pattern", "rewrite", "lang"]
                 }
             }),
+            // Agent Spawning Tool - routes through astrape-proxy for model routing
+            json!({
+                "name": "spawn_agent",
+                "description": "Spawn a specialized agent with automatic model routing through astrape-proxy. \
+                    The agent will run with ANTHROPIC_BASE_URL pointing to the proxy, which routes requests \
+                    to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
+                    Returns the agent's response.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Agent name (e.g., 'librarian', 'explore', 'architect'). Must match an agent configured in astrape.yml"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "The task/prompt for the agent to execute"
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Override model (sonnet, opus, haiku). If not specified, uses the agent's configured default"
+                        },
+                        "allowedTools": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of tools to allow (e.g., ['Read', 'Glob', 'Grep']). Defaults to agent's configured tools"
+                        },
+                        "maxTurns": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Maximum number of turns before stopping. Default: 10"
+                        },
+                        "proxyPort": {
+                            "type": "integer",
+                            "default": 8787,
+                            "description": "Port where astrape-proxy is running. Default: 8787"
+                        }
+                    },
+                    "required": ["agent", "prompt"]
+                }
+            }),
         ]
     }
 

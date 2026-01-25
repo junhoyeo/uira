@@ -47,7 +47,7 @@ npm-debug.log*
 # Reference materials (external repos)
 references/
 
-# Astrape and Sisyphus state
-.omc/
+# Astrape and legacy state directories
 .astrape/
+.omc/
 .sisyphus/

@@ -1,9 +1,6 @@
 //! Auto Slash Command Hook
 //!
 //! Detects and expands `/astrape:*` slash commands in user prompts.
-//!
-//! Ported from:
-//! - oh-my-claudecode/src/hooks/auto-slash-command/{index,detector,executor,constants,types}.ts
 
 use async_trait::async_trait;
 use lazy_static::lazy_static;

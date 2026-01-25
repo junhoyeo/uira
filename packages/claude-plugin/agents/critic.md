@@ -1,6 +1,6 @@
 ---
 name: critic
-description: Plan/work reviewer (Opus).
+description: "[opus] Plan/work reviewer."
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep"]

@@ -9,9 +9,7 @@ use crate::types::{HookEvent, HookInput, HookOutput};
 
 pub const HOOK_NAME: &str = "non-interactive-env";
 
-/// Matches oh-my-claudecode/src/hooks/non-interactive-env/constants.ts
-///
-/// Order matters for `build_env_prefix` to match TypeScript output.
+/// Order matters for `build_env_prefix`.
 pub const NON_INTERACTIVE_ENV: [(&str, &str); 15] = [
     ("CI", "true"),
     ("DEBIAN_FRONTEND", "noninteractive"),

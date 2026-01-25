@@ -1,7 +1,5 @@
 //! Recovery Hook
 //!
-//! Port of oh-my-claudecode's `src/hooks/recovery/*`.
-//!
 //! Provides a unified recovery system:
 //! - Context window limit detection + retry state
 //! - Edit tool error reminder injection

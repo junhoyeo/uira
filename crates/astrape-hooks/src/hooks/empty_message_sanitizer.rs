@@ -1,7 +1,5 @@
 //! Empty Message Sanitizer Hook
 //!
-//! Port of oh-my-claudecode's `src/hooks/empty-message-sanitizer/*`.
-//!
 //! Ensures every message (except the optional final assistant message) has
 //! non-empty content to avoid Anthropic API validation errors.
 

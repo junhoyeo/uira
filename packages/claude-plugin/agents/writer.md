@@ -1,6 +1,6 @@
 ---
 name: writer
-description: Technical writing specialist (Haiku).
+description: "[haiku] Technical writing specialist."
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Write"]

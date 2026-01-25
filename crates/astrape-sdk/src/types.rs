@@ -1,7 +1,4 @@
 //! Core types for Astrape SDK
-//!
-//! These types mirror the TypeScript types from oh-my-claudecode/src/shared/types.ts
-//! and oh-my-claudecode/src/agents/types.ts
 
 use serde::{Deserialize, Serialize};
 

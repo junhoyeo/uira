@@ -6,7 +6,9 @@ pub mod tier_builder;
 pub mod tool_restrictions;
 pub mod types;
 
-pub use crate::definitions::get_agent_definitions;
+pub use crate::definitions::{
+    get_agent_definitions, get_agent_definitions_with_config, AgentModelConfig,
+};
 pub use crate::prompt_loader::{PromptLoader, PromptSource};
 pub use crate::registry::{AgentFactory, AgentRegistry};
 pub use crate::tier_builder::{ModelTier, TierBuilder};

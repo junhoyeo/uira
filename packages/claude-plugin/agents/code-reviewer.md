@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Expert code review specialist (Opus). Use for comprehensive code quality review.
+description: "[opus] Expert code review specialist. Use for comprehensive code quality review."
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Bash"]
