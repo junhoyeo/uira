@@ -41,8 +41,6 @@ const DEFAULT_MODELS = {
   'tdd-guide-low': 'haiku',
   'code-reviewer': 'opus',
   'code-reviewer-low': 'haiku',
-  'researcher': 'sonnet',
-  'researcher-low': 'haiku',
 };
 
 // Base descriptions without model suffix
@@ -76,8 +74,6 @@ const BASE_DESCRIPTIONS = {
   'tdd-guide-low': 'Quick test suggestion specialist. Use for simple test case ideas.',
   'code-reviewer': 'Expert code review specialist. Use for comprehensive code quality review.',
   'code-reviewer-low': 'Quick code quality checker. Use for fast review of small changes.',
-  'researcher': 'Documentation and external reference finder.',
-  'researcher-low': 'Quick documentation lookups. Use for simple documentation queries.',
 };
 
 function findAstrapeYml() {
