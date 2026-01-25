@@ -23,17 +23,16 @@
 
 ## HTTP Proxy
 
-The `astrape-proxy` crate is a Rust-based HTTP proxy that enables Claude Code to work with OpenAI, Google Gemini, and other LLM providers by translating between Anthropic's API format and provider-specific formats.
+The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
 
 ### Key Features
 
-- **Agent-based routing** - Maps by agent type from request metadata, not model names
-- **OpenCode authentication** - Reuses OpenCode's auth system (`~/.local/share/opencode/auth.json`)
-- **Multi-provider support** - OpenAI, Google Gemini, OpenCode
+- **Agent-based routing** - Route specific agents to alternative models via `astrape.yml`
+- **Transparent passthrough** - Requests without agent config go directly to Anthropic
+- **OpenCode authentication** - Uses OpenCode's auth for alternative providers
+- **Multi-provider support** - OpenAI, Google Gemini, OpenCode (via LiteLLM)
 - **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format conversion
 - **Streaming support** - Full SSE (Server-Sent Events) streaming
-- **Token counting** - `/v1/messages/count_tokens` endpoint
-- **Type-safe** - Built with Rust for reliability and performance
 
 ### Agent-Based Model Routing
 
@@ -55,18 +54,9 @@ agents:
 **Environment Variables:**
 
 ```bash
-# Provider preference (default: openai)
-# Options: openai, google (anthropic not yet implemented)
-PREFERRED_PROVIDER=openai
-
-# Model mapping for legacy mode
-BIG_MODEL=gpt-4.1              # Maps Claude Sonnet
-SMALL_MODEL=gpt-4.1-mini       # Maps Claude Haiku
-
-# Server configuration
-PORT=8787                      # Server port (default: 8787)
-LITELLM_BASE_URL=http://localhost:4000  # LiteLLM proxy URL
-REQUEST_TIMEOUT_SECS=120       # Upstream timeout (default: 120)
+PORT=8787                                # Server port (default: 8787)
+LITELLM_BASE_URL=http://localhost:4000   # LiteLLM proxy URL
+REQUEST_TIMEOUT_SECS=120                 # Upstream timeout (default: 120)
 ```
 
 **OpenCode Authentication:**
@@ -114,41 +104,30 @@ curl -X POST http://localhost:8787/v1/messages \
   }'
 ```
 
-### Model Mapping
+### How It Works
 
-The proxy automatically maps Claude model names to configured targets:
+The proxy routes requests based on the `metadata.agent` field:
 
-| Claude Model | Default (OpenAI) | Google Mapping |
-|--------------|------------------|----------------|
-| `claude-3-haiku` | `openai/gpt-4.1-mini` | `gemini/gemini-2.5-flash` |
-| `claude-3-sonnet` | `openai/gpt-4.1` | `gemini/gemini-2.5-pro` |
-
-Configure via `PREFERRED_PROVIDER`, `BIG_MODEL`, and `SMALL_MODEL` environment variables.
-
-### Architecture
-
+**Agent configured in `astrape.yml`:**
 ```
-┌─────────────┐         ┌──────────────────┐         ┌─────────────┐
-│ Claude Code │ ──────> │ astrape-proxy    │ ──────> │  OpenAI /   │
-│             │ Anthropic│                  │ Provider│  Gemini     │
-│             │  Format  │  Axum Server     │ Format  │             │
-└─────────────┘         └──────────────────┘         └─────────────┘
-                              │
-                              │ OpenCode Auth
-                              v
-                        ~/.local/share/opencode/auth.json
+Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
+                   ↓
+            OpenCode auth
 ```
 
-**Request Flow:**
+**Agent NOT configured (passthrough):**
+```
+Claude Code → astrape-proxy → Anthropic API
+                   ↓
+            Original auth header
+```
+
+### Request Flow
 
 1. Claude Code sends request with `metadata: {agent: "explore"}`
-2. Proxy extracts agent name from metadata
-3. Looks up `agents.explore.model` in `astrape.yml` → `"opencode/gpt-5-nano"`
-4. Translates Anthropic format to LiteLLM/OpenAI format
-5. Gets OpenCode auth token for the provider
-6. Forwards to LiteLLM proxy → actual model provider
-7. Translates response back to Anthropic format
-8. Returns to Claude Code
+2. Proxy checks if `explore` is configured in `astrape.yml`
+3. **If configured**: Routes to configured model via LiteLLM with OpenCode auth
+4. **If not configured**: Passes through to Anthropic with original Authorization header
 
 ### Endpoints
 
