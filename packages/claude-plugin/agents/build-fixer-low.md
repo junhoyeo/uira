@@ -1,6 +1,6 @@
 ---
 name: build-fixer-low
-description: Simple build error fixer. Use for trivial type errors and single-line fixes. (haiku)
+description: [haiku] Simple build error fixer. Use for trivial type errors and single-line fixes.
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

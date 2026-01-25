@@ -1,6 +1,6 @@
 ---
 name: librarian
-description: Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation. (opencode/big-pickle)
+description: [opencode/big-pickle] Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation.
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Bash"]

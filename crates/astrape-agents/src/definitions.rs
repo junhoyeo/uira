@@ -209,7 +209,7 @@ pub fn get_agent_definitions_with_loader(
     apply_overrides(agents, overrides)
 }
 
-/// Build description with actual model appended.
+/// Build description with actual model as prefix (so it doesn't get truncated in UI).
 /// If model_config has an override for this agent, use that; otherwise use the default model.
 fn build_description_with_model(
     agent_name: &str,
@@ -221,7 +221,7 @@ fn build_description_with_model(
         Some(configured_model) => configured_model.clone(),
         None => default_model.as_str().to_string(),
     };
-    format!("{} ({})", base_description, model_str)
+    format!("[{}] {}", model_str, base_description)
 }
 
 fn insert(

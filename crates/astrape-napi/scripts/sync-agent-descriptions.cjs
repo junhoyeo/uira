@@ -172,8 +172,8 @@ function updateAgentMarkdown(filePath, modelConfig) {
     return false;
   }
 
-  // Build new description with model
-  const newDescription = `${baseDesc} (${model})`;
+  // Build new description with model prefix (so it doesn't get truncated)
+  const newDescription = `[${model}] ${baseDesc}`;
 
   // Replace description in frontmatter
   const descRegex = /^(description:\s*)["']?.*["']?$/m;

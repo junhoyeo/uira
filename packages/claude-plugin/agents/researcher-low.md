@@ -1,6 +1,6 @@
 ---
 name: researcher-low
-description: Quick documentation lookups. Use for simple documentation queries. (haiku)
+description: [haiku] Quick documentation lookups. Use for simple documentation queries.
 model: haiku
 color: blue
 tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]

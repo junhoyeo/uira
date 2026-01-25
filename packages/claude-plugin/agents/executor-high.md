@@ -1,6 +1,6 @@
 ---
 name: executor-high
-description: Complex task executor for multi-file changes. Use for tasks requiring deep reasoning. (opus)
+description: [opus] Complex task executor for multi-file changes. Use for tasks requiring deep reasoning.
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "TodoWrite"]

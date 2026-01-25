@@ -1,6 +1,6 @@
 ---
 name: designer-high
-description: Complex UI architecture and design systems. Use for sophisticated frontend work. (opus)
+description: [opus] Complex UI architecture and design systems. Use for sophisticated frontend work.
 model: opus
 color: purple
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

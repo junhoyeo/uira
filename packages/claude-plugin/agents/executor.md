@@ -1,6 +1,6 @@
 ---
 name: executor
-description: Focused executor for implementation tasks. (sonnet)
+description: [sonnet] Focused executor for implementation tasks.
 model: 
 color: green
 tools: [""]
