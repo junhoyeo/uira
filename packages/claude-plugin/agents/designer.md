@@ -1,6 +1,6 @@
 ---
 name: designer
-description: [sonnet] UI/UX specialist.
+description: "[sonnet] UI/UX specialist."
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

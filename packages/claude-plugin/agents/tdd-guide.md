@@ -1,6 +1,6 @@
 ---
 name: tdd-guide
-description: [sonnet] Test-Driven Development specialist. Use for TDD workflows and test coverage.
+description: "[sonnet] Test-Driven Development specialist. Use for TDD workflows and test coverage."
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]

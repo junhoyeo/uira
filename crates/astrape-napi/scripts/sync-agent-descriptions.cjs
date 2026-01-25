@@ -179,7 +179,9 @@ function updateAgentMarkdown(filePath, modelConfig) {
   }
 
   const currentDesc = match[0];
-  const newDescLine = `description: ${newDescription}`;
+  // Quote the description value to handle YAML special characters like [brackets]
+  // Without quotes, "[model] text" would be parsed as a YAML array
+  const newDescLine = `description: "${newDescription}"`;
 
   if (currentDesc === newDescLine) {
     return false; // No change needed

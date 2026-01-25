@@ -8,8 +8,8 @@ use astrape_features::builtin_skills::{get_builtin_skill, list_builtin_skill_nam
 use astrape_features::model_routing::{
     analyze_task_complexity, route_task, RoutingConfigOverrides, RoutingContext,
 };
-use astrape_keywords::KeywordDetector;
 use astrape_hooks::{default_hooks, HookContext, HookEvent, HookInput};
+use astrape_keywords::KeywordDetector;
 use napi_derive::napi;
 
 // ============================================================================
@@ -376,8 +376,8 @@ pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
 /// Get list of agent names only (lighter weight than full definitions)
 #[napi]
 pub fn list_agent_names() -> Vec<String> {
-    let model_config = load_agent_model_config();
-    let agents = get_agent_definitions_with_config(None, Some(&model_config));
+    // Don't load model config - we only need agent names, not full definitions
+    let agents = get_agent_definitions_with_config(None, None);
     agents.keys().cloned().collect()
 }
 

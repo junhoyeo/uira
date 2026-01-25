@@ -453,12 +453,24 @@ impl ToolExecutor {
     /// the configured model for that agent (e.g., librarian -> opencode/big-pickle).
     async fn spawn_agent(&self, args: Value) -> Result<String, String> {
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
+
+        // Validate agent name to prevent URL path manipulation
+        // Only allow alphanumeric, hyphens, and underscores
+        if !agent
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(format!(
+                "Invalid agent name '{}': only alphanumeric, hyphens, and underscores allowed",
+                agent
+            ));
+        }
+
         let prompt = args["prompt"]
             .as_str()
             .ok_or("Missing 'prompt' parameter")?;
 
         let proxy_port = args["proxyPort"].as_u64().unwrap_or(8787);
-        let max_turns = args["maxTurns"].as_u64().unwrap_or(10);
 
         // Build ANTHROPIC_BASE_URL with agent in path for proxy routing
         let base_url = format!("http://localhost:{}/agent/{}", proxy_port, agent);
@@ -484,9 +496,9 @@ impl ToolExecutor {
             }
         }
 
-        // Set max turns
-        // Note: claude CLI may not support this directly, but we pass it anyway
-        // The proxy will handle this via turn counting in the future
+        // Note: maxTurns is accepted but not currently passed to claude CLI
+        // as there's no direct CLI flag for it. Could be implemented via proxy
+        // turn counting in the future.
 
         // Set environment with proxy URL
         cmd.env("ANTHROPIC_BASE_URL", &base_url);
@@ -497,7 +509,6 @@ impl ToolExecutor {
         tracing::info!(
             agent = %agent,
             base_url = %base_url,
-            max_turns = %max_turns,
             "Spawning agent with proxy routing"
         );
 

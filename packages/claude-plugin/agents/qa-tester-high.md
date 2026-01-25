@@ -1,6 +1,6 @@
 ---
 name: qa-tester-high
-description: [opus] Comprehensive production-ready QA testing.
+description: "[opus] Comprehensive production-ready QA testing."
 model: opus
 color: purple
 tools: [""]

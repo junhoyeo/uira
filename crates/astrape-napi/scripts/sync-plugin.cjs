@@ -75,7 +75,8 @@ require('./sync-agent-descriptions.cjs');
 
 // Also sync agents directory to cache (with cleanup of stale files)
 const AGENTS_SRC = path.resolve(__dirname, '../../../packages/claude-plugin/agents');
-const AGENTS_CACHE = getPluginCachePath().replace('/native', '/agents');
+// Use path.join for cross-platform compatibility instead of string replace
+const AGENTS_CACHE = path.join(path.dirname(getPluginCachePath()), 'agents');
 if (fs.existsSync(AGENTS_SRC) && fs.existsSync(path.dirname(AGENTS_CACHE))) {
   const srcFiles = new Set(fs.readdirSync(AGENTS_SRC).filter(f => f.endsWith('.md')));
   if (!fs.existsSync(AGENTS_CACHE)) {

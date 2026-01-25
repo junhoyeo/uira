@@ -1,6 +1,6 @@
 ---
 name: architect-medium
-description: [sonnet] Architecture & Debugging Advisor - Medium complexity. Use for moderate analysis.
+description: "[sonnet] Architecture & Debugging Advisor - Medium complexity. Use for moderate analysis."
 model: sonnet
 color: green
 tools: ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
