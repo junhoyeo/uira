@@ -1,0 +1,320 @@
+name: Publish Astrape Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.2.0)'
+        required: true
+        type: string
+
+env:
+  DEBUG: napi:*
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
+
+jobs:
+  build-napi:
+    name: Build NAPI - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            build: |
+              cd crates/astrape-napi
+              bun run build --target x86_64-apple-darwin
+              strip -x *.node
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: |
+              cd crates/astrape-napi
+              bun run build --target aarch64-apple-darwin
+              strip -x *.node
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: |
+              cd crates/astrape-napi
+              bun run build --target x86_64-unknown-linux-gnu --use-napi-cross
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: |
+              cd crates/astrape-napi
+              bun run build --target x86_64-unknown-linux-musl -x
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            build: |
+              cd crates/astrape-napi
+              bun run build --target aarch64-unknown-linux-gnu --use-napi-cross
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            build: |
+              cd crates/astrape-napi
+              bun run build --target aarch64-unknown-linux-musl -x
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            build: |
+              cd crates/astrape-napi
+              bun run build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - uses: mlugg/setup-zig@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        if: ${{ contains(matrix.settings.target, 'musl') }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        run: bun install
+        working-directory: crates/astrape-napi
+
+      - name: Build
+        run: ${{ matrix.settings.build }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: napi-${{ matrix.settings.target }}
+          path: crates/astrape-napi/*.node
+          if-no-files-found: error
+
+      - name: Upload generated NAPI files
+        if: matrix.settings.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: napi-generated
+          path: |
+            crates/astrape-napi/index.js
+            crates/astrape-napi/index.d.ts
+          if-no-files-found: error
+
+  build-cli:
+    name: Build CLI - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: astrape-darwin-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: astrape-darwin-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: astrape-linux-x64-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: astrape-linux-arm64-gnu
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: astrape-win32-x64-msvc.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cli-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: cargo build --release -p astrape --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release -p astrape --target ${{ matrix.target }}
+
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/astrape ${{ matrix.binary }}
+          strip ${{ matrix.binary }} || true
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: cp target/${{ matrix.target }}/release/astrape.exe ${{ matrix.binary }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  assemble-package:
+    name: Assemble Package
+    needs: [build-napi, build-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all NAPI binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: napi-*
+
+      - name: Download generated files
+        uses: actions/download-artifact@v4
+        with:
+          name: napi-generated
+          path: artifacts/napi-generated
+
+      - name: Assemble astrape package
+        run: |
+          mkdir -p packages/astrape/native
+          
+          for dir in artifacts/napi-*/; do
+            if [[ "$dir" != *"napi-generated"* ]]; then
+              cp "$dir"*.node packages/astrape/native/ 2>/dev/null || true
+            fi
+          done
+          
+          cp artifacts/napi-generated/index.js packages/astrape/native/
+          cp artifacts/napi-generated/index.d.ts packages/astrape/native/
+          
+          cd packages/astrape
+          jq --arg v "${{ inputs.version }}" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          
+          echo "Package assembled:"
+          ls -la native/
+          cat package.json
+
+      - name: Upload assembled package
+        uses: actions/upload-artifact@v4
+        with:
+          name: astrape-package
+          path: packages/astrape/
+
+  publish-npm:
+    name: Publish to NPM
+    needs: assemble-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: astrape-package
+          path: astrape
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish
+        run: |
+          cd astrape
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-cli, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: cli-artifacts
+          pattern: cli-*
+
+      - name: Prepare release files
+        run: |
+          mkdir release-files
+          for dir in cli-artifacts/cli-*/; do
+            cp "$dir"* release-files/ 2>/dev/null || true
+          done
+          ls -la release-files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Astrape v${{ inputs.version }}
+          body: |
+            ## Astrape v${{ inputs.version }}
+            
+            ### Installation
+            ```bash
+            npm install astrape
+            ```
+            
+            ### Subpath Exports
+            - `astrape` - Native NAPI bindings
+            - `astrape/hook` - Git hooks API
+            - `astrape/claude-plugin` - Claude Code plugin
+            
+            ### CLI Binaries
+            Download the appropriate binary for your platform from the assets below.
+            
+            ### Platforms
+            - macOS (x64, ARM64)
+            - Linux (x64 GNU, ARM64 GNU)
+            - Windows (x64)
+          files: release-files/*
+          draft: false
+          prerelease: false

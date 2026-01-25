@@ -1,0 +1,72 @@
+{
+  "name": "astrape",
+  "version": "0.2.0",
+  "description": "Lightning-fast Rust-native multi-agent orchestration for Claude Code",
+  "type": "module",
+  "main": "./native/index.js",
+  "module": "./native/index.js",
+  "types": "./native/index.d.ts",
+  "sideEffects": false,
+  "bin": {
+    "astrape": "./bin/astrape.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./native/index.d.ts",
+      "import": "./native/index.js",
+      "require": "./native/index.cjs",
+      "default": "./native/index.js"
+    },
+    "./hook": {
+      "types": "./hook/index.d.ts",
+      "import": "./hook/index.js",
+      "default": "./hook/index.js"
+    },
+    "./claude-plugin": {
+      "types": "./claude-plugin/index.d.ts",
+      "import": "./claude-plugin/index.js",
+      "default": "./claude-plugin/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "native",
+    "bin",
+    "hook",
+    "claude-plugin",
+    "scripts"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js || true"
+  },
+  "optionalDependencies": {
+    "@astrape/native-darwin-arm64": "0.2.0",
+    "@astrape/native-darwin-x64": "0.2.0",
+    "@astrape/native-linux-x64-gnu": "0.2.0",
+    "@astrape/native-linux-x64-musl": "0.2.0",
+    "@astrape/native-linux-arm64-gnu": "0.2.0",
+    "@astrape/native-linux-arm64-musl": "0.2.0",
+    "@astrape/native-win32-x64-msvc": "0.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junhoyeo/astrape"
+  },
+  "keywords": [
+    "astrape",
+    "claude",
+    "claude-code",
+    "multi-agent",
+    "orchestration",
+    "rust",
+    "napi",
+    "native",
+    "git-hooks",
+    "ai"
+  ],
+  "author": "Junho Yeo <i@junho.io>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
