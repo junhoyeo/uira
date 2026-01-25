@@ -159,7 +159,7 @@ impl CommentCheckerHook {
             return None;
         }
 
-        // Apply filters
+        // Apply filters (FilterChain is created per-call as it contains non-Send types)
         let filter_chain = FilterChain::new();
         let filtered: Vec<CommentInfo> = comments
             .into_iter()
