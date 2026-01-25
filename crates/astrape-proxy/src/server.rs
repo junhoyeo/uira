@@ -194,10 +194,15 @@ async fn handle_anthropic_passthrough(
 
     let url = "https://api.anthropic.com/v1/messages";
 
+    let anthropic_version = headers
+        .get("anthropic-version")
+        .cloned()
+        .unwrap_or_else(|| HeaderValue::from_static("2023-06-01"));
+
     let mut request_builder = state
         .client
         .post(url)
-        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-version", anthropic_version)
         .header(header::CONTENT_TYPE, "application/json");
 
     if let Some(key) = x_api_key {
@@ -205,6 +210,9 @@ async fn handle_anthropic_passthrough(
     }
     if let Some(auth) = auth_header {
         request_builder = request_builder.header(header::AUTHORIZATION, auth);
+    }
+    if let Some(beta) = headers.get("anthropic-beta") {
+        request_builder = request_builder.header("anthropic-beta", beta.clone());
     }
 
     let upstream = match request_builder.json(&req).send().await {
