@@ -4,14 +4,8 @@ mod linter;
 mod typos;
 
 use astrape_agents::get_agent_definitions;
-use astrape_claude::{
-    extract_prompt, install_hooks as install_claude_hooks, list_installed_hooks, read_input,
-    write_output,
-};
-use astrape_core::HookEvent;
 use astrape_features::astrape_state::has_astrape_state;
 use astrape_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
-use astrape_keywords::KeywordDetector;
 use astrape_sdk::{create_astrape_session, SessionOptions};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -63,11 +57,6 @@ enum Commands {
         check: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
-    },
-    /// Manage AI harness hooks (Claude Code)
-    Hook {
-        #[command(subcommand)]
-        action: HookCommands,
     },
     /// Manage agents
     Agent {
@@ -147,19 +136,7 @@ enum GoalsCommands {
     List,
 }
 
-#[derive(Subcommand)]
-enum HookCommands {
-    /// Install AI harness hooks for Claude Code
-    Install,
-    /// List installed AI harness hooks
-    List,
-    /// Detect keywords from stdin (used by shell scripts)
-    DetectKeywords {
-        /// Optional agent name for context-aware messages
-        #[arg(long)]
-        agent: Option<String>,
-    },
-}
+
 
 fn main() {
     let cli = Cli::parse();
@@ -171,7 +148,6 @@ fn main() {
         Commands::Lint { files } => lint_command(&files),
         Commands::Typos { ai, stage, files } => typos_command(ai, stage, &files),
         Commands::Format { check, files } => format_command(check, &files),
-        Commands::Hook { action } => hook_command(action),
         Commands::Agent { action } => agent_command(action),
         Commands::Session { action } => session_command(action),
         Commands::Skill { action } => skill_command(action),
@@ -502,59 +478,6 @@ fn collect_files_recursive(dir: &Path, files: &mut Vec<String>) -> anyhow::Resul
     }
 
     Ok(())
-}
-
-fn hook_command(action: HookCommands) -> anyhow::Result<()> {
-    match action {
-        HookCommands::Install => {
-            println!("⚡ Installing Claude Code hooks...\n");
-            let events = vec![HookEvent::UserPromptSubmit, HookEvent::Stop];
-            let installed = install_claude_hooks(&events)?;
-            if installed.is_empty() {
-                println!("ℹ️  No hooks installed");
-            } else {
-                println!("✅ Installed Claude Code hooks:");
-                for hook in &installed {
-                    println!("   • {}", hook);
-                }
-            }
-            println!("\n🎉 Done! Claude Code hooks are now active.");
-            println!("\nFor OpenCode: Use @astrape/native npm package instead.");
-            Ok(())
-        }
-        HookCommands::List => {
-            println!("⚡ Installed AI harness hooks:\n");
-
-            let claude_hooks = list_installed_hooks()?;
-            if claude_hooks.is_empty() {
-                println!("Claude Code: (none)");
-            } else {
-                println!("Claude Code:");
-                for hook in &claude_hooks {
-                    println!("   • {}", hook);
-                }
-            }
-
-            Ok(())
-        }
-        HookCommands::DetectKeywords { agent } => {
-            let input = read_input()?;
-            let prompt = extract_prompt(&input);
-
-            if let Some(prompt_text) = prompt {
-                let detector = KeywordDetector::new();
-                if let Some(output) = detector.detect(&prompt_text, agent.as_deref()) {
-                    write_output(&output)?;
-                } else {
-                    write_output(&astrape_core::HookOutput::default())?;
-                }
-            } else {
-                write_output(&astrape_core::HookOutput::default())?;
-            }
-
-            Ok(())
-        }
-    }
 }
 
 fn agent_command(action: AgentCommands) -> anyhow::Result<()> {

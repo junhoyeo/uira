@@ -373,7 +373,6 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "astrape-agents",
- "astrape-claude",
  "astrape-config",
  "astrape-core",
  "astrape-features",
@@ -405,18 +404,6 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-claude"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-core",
- "dirs",
- "serde",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

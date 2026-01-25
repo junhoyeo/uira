@@ -4,7 +4,6 @@ members = [
   "crates/astrape",
   "crates/astrape-core",
   "crates/astrape-keywords",
-  "crates/astrape-claude",
   "crates/astrape-napi",
   "crates/astrape-sdk",
   "crates/astrape-comment-checker",
@@ -31,7 +30,6 @@ repository = "https://github.com/junhoyeo/astrape"
 # Internal crates
 astrape-core = { path = "crates/astrape-core" }
 astrape-keywords = { path = "crates/astrape-keywords" }
-astrape-claude = { path = "crates/astrape-claude" }
 astrape-sdk = { path = "crates/astrape-sdk" }
 astrape-comment-checker = { path = "crates/astrape-comment-checker" }
 astrape-tools = { path = "crates/astrape-tools" }
