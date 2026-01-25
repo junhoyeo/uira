@@ -26,5 +26,7 @@ ast-grep-core = "0.40"
 ast-grep-language = "0.40"
 glob = "0.3"
 walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+which = "7"
 
 

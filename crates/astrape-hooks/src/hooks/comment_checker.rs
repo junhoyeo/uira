@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use astrape_comment_checker::{
-    CommentDetector, CommentInfo, FilterChain, LanguageRegistry, format_hook_message,
+    format_hook_message, CommentDetector, CommentInfo, FilterChain, LanguageRegistry,
 };
 
 use crate::hook::{Hook, HookContext, HookResult};
@@ -81,15 +81,16 @@ impl CommentCheckerHook {
 
     fn check_comments(&self, input: &HookInput) -> Option<String> {
         let tool_name = input.tool_name.as_deref()?;
-        
+
         if !CHECKABLE_TOOLS.contains(&tool_name) {
             return None;
         }
 
         let tool_input = input.tool_input.as_ref()?;
-        
+
         // Extract file_path
-        let file_path = tool_input.get("file_path")
+        let file_path = tool_input
+            .get("file_path")
             .or_else(|| tool_input.get("filePath"))
             .and_then(|v| v.as_str())?;
 
@@ -105,12 +106,14 @@ impl CommentCheckerHook {
 
         let comments = match tool_name {
             "Edit" => {
-                let new_string = tool_input.get("new_string")
+                let new_string = tool_input
+                    .get("new_string")
                     .or_else(|| tool_input.get("newString"))
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())?;
-                
-                let old_string = tool_input.get("old_string")
+
+                let old_string = tool_input
+                    .get("old_string")
                     .or_else(|| tool_input.get("oldString"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -118,35 +121,36 @@ impl CommentCheckerHook {
                 self.detect_new_comments_for_edit(old_string, new_string, file_path)
             }
             "MultiEdit" => {
-                let edits = tool_input.get("edits")
+                let edits = tool_input
+                    .get("edits")
                     .and_then(|v| v.as_array())
                     .filter(|arr| !arr.is_empty())?;
 
                 let mut all_comments = Vec::new();
                 for edit in edits {
-                    let new_string = edit.get("new_string")
+                    let new_string = edit
+                        .get("new_string")
                         .or_else(|| edit.get("newString"))
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty());
-                    
+
                     if let Some(new_str) = new_string {
-                        let old_string = edit.get("old_string")
+                        let old_string = edit
+                            .get("old_string")
                             .or_else(|| edit.get("oldString"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
 
-                        let edit_comments = self.detect_new_comments_for_edit(
-                            old_string,
-                            new_str,
-                            file_path,
-                        );
+                        let edit_comments =
+                            self.detect_new_comments_for_edit(old_string, new_str, file_path);
                         all_comments.extend(edit_comments);
                     }
                 }
                 all_comments
             }
             "Write" | "NotebookEdit" => {
-                let content = tool_input.get("content")
+                let content = tool_input
+                    .get("content")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())?;
 
@@ -236,7 +240,12 @@ mod tests {
         }
     }
 
-    fn make_edit_input(tool_name: &str, file_path: &str, old_string: &str, new_string: &str) -> HookInput {
+    fn make_edit_input(
+        tool_name: &str,
+        file_path: &str,
+        old_string: &str,
+        new_string: &str,
+    ) -> HookInput {
         let mut tool_input = serde_json::Map::new();
         tool_input.insert("file_path".to_string(), serde_json::json!(file_path));
         tool_input.insert("old_string".to_string(), serde_json::json!(old_string));
@@ -262,7 +271,7 @@ mod tests {
     fn test_ignores_non_checkable_tools() {
         let hook = CommentCheckerHook::new();
         let input = make_input("Read", "test.py", "# comment");
-        
+
         assert!(hook.check_comments(&input).is_none());
     }
 
@@ -270,7 +279,7 @@ mod tests {
     fn test_ignores_non_code_files() {
         let hook = CommentCheckerHook::new();
         let input = make_input("Write", "README.md", "# This is markdown");
-        
+
         assert!(hook.check_comments(&input).is_none());
     }
 
@@ -278,7 +287,7 @@ mod tests {
     fn test_detects_comments_in_python() {
         let hook = CommentCheckerHook::new();
         let input = make_input("Write", "test.py", "# This is a comment\nx = 1");
-        
+
         let result = hook.check_comments(&input);
         assert!(result.is_some());
         assert!(result.unwrap().contains("COMMENT"));
@@ -287,13 +296,8 @@ mod tests {
     #[test]
     fn test_detects_new_comments_in_edit() {
         let hook = CommentCheckerHook::new();
-        let input = make_edit_input(
-            "Edit",
-            "test.py",
-            "x = 1",
-            "# New comment\nx = 1",
-        );
-        
+        let input = make_edit_input("Edit", "test.py", "x = 1", "# New comment\nx = 1");
+
         let result = hook.check_comments(&input);
         assert!(result.is_some());
     }
@@ -307,7 +311,7 @@ mod tests {
             "# Existing comment\nx = 1",
             "# Existing comment\nx = 2",
         );
-        
+
         // Should not trigger since the comment already existed
         let result = hook.check_comments(&input);
         assert!(result.is_none());
@@ -317,7 +321,7 @@ mod tests {
     fn test_no_comments_no_warning() {
         let hook = CommentCheckerHook::new();
         let input = make_input("Write", "test.py", "x = 1\ny = 2");
-        
+
         assert!(hook.check_comments(&input).is_none());
     }
 }

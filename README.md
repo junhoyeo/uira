@@ -11,7 +11,7 @@
 
 - **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Librarian, and more with tiered variants (Haiku/Sonnet/Opus)
 - **Smart Model Routing** - Automatically select the right model based on task complexity
-- **HTTP Proxy** - Agent-based routing proxy for using non-Anthropic models with Claude Code
+- **HTTP Proxy** - Agent-based routing proxy with auto-start (starts automatically when Claude Code boots)
 - **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
 - **MCP Server** - LSP and AST-grep tools exposed via Model Context Protocol
 - **OXC-Powered Tools** - Fast JavaScript/TypeScript linting, parsing, transformation, and minification
@@ -208,14 +208,25 @@ Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform 
 
 ### Usage
 
-**Start the proxy:**
+**Automatic startup (recommended):**
+
+When using the Astrape Claude Code plugin, the proxy starts automatically. The MCP server manages the entire proxy lifecycle:
+
+1. **On boot**: Proxy starts when MCP server receives `initialize` from Claude Code
+2. **Health check**: Before each `spawn_agent`, ensures proxy is running
+3. **Auto-restart**: If proxy crashes, it restarts on next agent spawn
+4. **Clean shutdown**: Proxy stops automatically when Claude Code exits
+
+Binary discovery order: `CLAUDE_PLUGIN_ROOT` → `target/release` → `target/debug` → PATH
+
+**Manual startup (for development/testing):**
 
 ```bash
 cargo run --release -p astrape-proxy
 # Output: astrape-proxy listening addr=0.0.0.0:8787
 ```
 
-**Use with Claude Code:**
+**Use with Claude Code (without plugin):**
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:8787 claude

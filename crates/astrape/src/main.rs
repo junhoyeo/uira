@@ -136,8 +136,6 @@ enum GoalsCommands {
     List,
 }
 
-
-
 fn main() {
     let cli = Cli::parse();
 
