@@ -173,8 +173,11 @@ impl ProxyManager {
             }
         }
 
-        tracing::warn!("Proxy started but not responding on port yet");
-        Ok(true)
+        Err(format!(
+            "Proxy started (pid={:?}) but not responding on port {} after 2s timeout",
+            self.child.read().await.as_ref().and_then(|c| c.id()),
+            self.port
+        ))
     }
 
     #[allow(dead_code)]
