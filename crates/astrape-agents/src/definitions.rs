@@ -6,122 +6,89 @@ use crate::config::apply_overrides;
 use crate::prompt_loader::{default_agents_dir, PromptLoader};
 use crate::tool_restrictions::ToolRestrictionsRegistry;
 
+/// Model configuration for agents (maps agent name to model ID string)
+pub type AgentModelConfig = HashMap<String, String>;
+
 /// Returns all agent definitions with their configurations.
 ///
 /// This builds the full agent config map. Prompts are loaded from
 /// `packages/claude-plugin/agents/{name}.md` by default.
 pub fn get_agent_definitions(overrides: Option<&AgentOverrides>) -> HashMap<String, AgentConfig> {
     let loader = PromptLoader::from_fs(default_agents_dir());
-    get_agent_definitions_with_loader(&loader, overrides)
+    get_agent_definitions_with_loader(&loader, overrides, None)
+}
+
+/// Returns agent definitions with model config for dynamic model display.
+///
+/// When `model_config` is provided, the actual configured model will be
+/// appended to each agent's description.
+pub fn get_agent_definitions_with_config(
+    overrides: Option<&AgentOverrides>,
+    model_config: Option<&AgentModelConfig>,
+) -> HashMap<String, AgentConfig> {
+    let loader = PromptLoader::from_fs(default_agents_dir());
+    get_agent_definitions_with_loader(&loader, overrides, model_config)
 }
 
 pub fn get_agent_definitions_with_loader(
     prompt_loader: &PromptLoader,
     overrides: Option<&AgentOverrides>,
+    model_config: Option<&AgentModelConfig>,
 ) -> HashMap<String, AgentConfig> {
     let tools = ToolRestrictionsRegistry::with_default_allowlists();
     let mut agents = HashMap::<String, AgentConfig>::new();
 
-    // Primary agents
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "architect",
-        "Architecture & Debugging Advisor. Use for complex problems.",
-        Some(ModelType::Opus),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "librarian",
-        "Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation. Model: opencode/big-pickle",
-        Some(ModelType::Sonnet),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "explore",
-        "Fast codebase pattern matching. Model: Haiku",
-        Some(ModelType::Haiku),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "designer",
-        "UI/UX specialist.",
-        Some(ModelType::Sonnet),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "writer",
-        "Technical writing specialist.",
-        Some(ModelType::Haiku),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "vision",
-        "Visual analysis specialist.",
-        Some(ModelType::Sonnet),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "critic",
-        "Plan/work reviewer.",
-        Some(ModelType::Opus),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "analyst",
-        "Pre-planning consultant.",
-        Some(ModelType::Sonnet),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "executor",
-        "Focused executor for implementation tasks.",
-        Some(ModelType::Sonnet),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "planner",
-        "Strategic planner for comprehensive implementation plans.",
-        Some(ModelType::Opus),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "qa-tester",
-        "CLI testing specialist.",
-        Some(ModelType::Opus),
-    );
-    insert(
-        &mut agents,
-        prompt_loader,
-        &tools,
-        "scientist",
-        "Data/ML specialist.",
-        Some(ModelType::Sonnet),
-    );
+    // Primary agents (name, base_description, default_model)
+    let primary_agents: Vec<(&str, &str, ModelType)> = vec![
+        (
+            "architect",
+            "Architecture & Debugging Advisor. Use for complex problems.",
+            ModelType::Opus,
+        ),
+        (
+            "librarian",
+            "Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation.",
+            ModelType::Sonnet,
+        ),
+        (
+            "explore",
+            "Fast codebase pattern matching.",
+            ModelType::Haiku,
+        ),
+        ("designer", "UI/UX specialist.", ModelType::Sonnet),
+        ("writer", "Technical writing specialist.", ModelType::Haiku),
+        ("vision", "Visual analysis specialist.", ModelType::Sonnet),
+        ("critic", "Plan/work reviewer.", ModelType::Opus),
+        ("analyst", "Pre-planning consultant.", ModelType::Sonnet),
+        (
+            "executor",
+            "Focused executor for implementation tasks.",
+            ModelType::Sonnet,
+        ),
+        (
+            "planner",
+            "Strategic planner for comprehensive implementation plans.",
+            ModelType::Opus,
+        ),
+        ("qa-tester", "CLI testing specialist.", ModelType::Opus),
+        ("scientist", "Data/ML specialist.", ModelType::Sonnet),
+    ];
 
-    // Tiered variants (in TS these are separate .md prompts)
-    for (name, model, desc) in [
+    for (name, base_desc, default_model) in primary_agents {
+        let description =
+            build_description_with_model(name, base_desc, default_model, model_config);
+        insert(
+            &mut agents,
+            prompt_loader,
+            &tools,
+            name,
+            &description,
+            Some(default_model),
+        );
+    }
+
+    // Tiered variants
+    let tiered_variants: Vec<(&str, ModelType, &str)> = vec![
         (
             "architect-medium",
             ModelType::Sonnet,
@@ -167,19 +134,23 @@ pub fn get_agent_definitions_with_loader(
             ModelType::Opus,
             "Complex research, hypothesis testing, and ML specialist. Use for deep analysis.",
         ),
-    ] {
+    ];
+
+    for (name, default_model, base_desc) in tiered_variants {
+        let description =
+            build_description_with_model(name, base_desc, default_model, model_config);
         insert(
             &mut agents,
             prompt_loader,
             &tools,
             name,
-            desc,
-            Some(model),
+            &description,
+            Some(default_model),
         );
     }
 
     // Specialized agents
-    for (name, model, desc) in [
+    let specialized_agents: Vec<(&str, ModelType, &str)> = vec![
         (
             "security-reviewer",
             ModelType::Opus,
@@ -220,11 +191,37 @@ pub fn get_agent_definitions_with_loader(
             ModelType::Haiku,
             "Quick code quality checker. Use for fast review of small changes.",
         ),
-    ] {
-        insert(&mut agents, prompt_loader, &tools, name, desc, Some(model));
+    ];
+
+    for (name, default_model, base_desc) in specialized_agents {
+        let description =
+            build_description_with_model(name, base_desc, default_model, model_config);
+        insert(
+            &mut agents,
+            prompt_loader,
+            &tools,
+            name,
+            &description,
+            Some(default_model),
+        );
     }
 
     apply_overrides(agents, overrides)
+}
+
+/// Build description with actual model appended.
+/// If model_config has an override for this agent, use that; otherwise use the default model.
+fn build_description_with_model(
+    agent_name: &str,
+    base_description: &str,
+    default_model: ModelType,
+    model_config: Option<&AgentModelConfig>,
+) -> String {
+    let model_str = match model_config.and_then(|cfg| cfg.get(agent_name)) {
+        Some(configured_model) => configured_model.clone(),
+        None => default_model.as_str().to_string(),
+    };
+    format!("{} ({})", base_description, model_str)
 }
 
 fn insert(
@@ -290,12 +287,36 @@ mod tests {
     fn returns_all_known_agents() {
         let tmp = tempdir().unwrap();
         let loader = PromptLoader::from_fs(tmp.path());
-        let defs = get_agent_definitions_with_loader(&loader, None);
+        let defs = get_agent_definitions_with_loader(&loader, None, None);
 
         // Spot-check a few keys.
         assert!(defs.contains_key("architect"));
         assert!(defs.contains_key("executor"));
         assert!(defs.contains_key("executor-high"));
         assert!(defs.contains_key("code-reviewer-low"));
+    }
+
+    #[test]
+    fn model_config_overrides_description() {
+        let tmp = tempdir().unwrap();
+        let loader = PromptLoader::from_fs(tmp.path());
+
+        let mut model_config = AgentModelConfig::new();
+        model_config.insert("explore".to_string(), "opencode/gpt-5-nano".to_string());
+        model_config.insert("librarian".to_string(), "opencode/big-pickle".to_string());
+
+        let defs = get_agent_definitions_with_loader(&loader, None, Some(&model_config));
+
+        // explore should show the configured model
+        let explore = defs.get("explore").unwrap();
+        assert!(explore.description.contains("opencode/gpt-5-nano"));
+
+        // librarian should show its configured model
+        let librarian = defs.get("librarian").unwrap();
+        assert!(librarian.description.contains("opencode/big-pickle"));
+
+        // architect has no override, should show default (opus)
+        let architect = defs.get("architect").unwrap();
+        assert!(architect.description.contains("opus"));
     }
 }

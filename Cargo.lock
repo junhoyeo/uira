@@ -591,6 +591,7 @@ dependencies = [
  "napi-derive",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 
