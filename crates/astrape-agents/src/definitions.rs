@@ -36,7 +36,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "librarian",
-        "Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation.",
+        "Open-source codebase understanding agent for multi-repository analysis, searching remote codebases, and retrieving official documentation. Model: opencode/big-pickle",
         Some(ModelType::Sonnet),
     );
     insert(
@@ -44,7 +44,7 @@ pub fn get_agent_definitions_with_loader(
         prompt_loader,
         &tools,
         "explore",
-        "Fast codebase pattern matching.",
+        "Fast codebase pattern matching. Model: Haiku",
         Some(ModelType::Haiku),
     );
     insert(
