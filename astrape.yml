@@ -4,6 +4,8 @@ ai:
 agents:
   explore:
     model: "opencode/gpt-5-nano"
+  librarian:
+    model: "opencode/big-pickle"
 
 pre-commit:
   parallel: false  # fmt must run first to auto-fix before clippy checks
