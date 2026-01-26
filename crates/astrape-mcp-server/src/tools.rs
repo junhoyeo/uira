@@ -12,6 +12,7 @@ use tokio::process::Command;
 use walkdir::WalkDir;
 
 use crate::anthropic_client;
+use crate::opencode_client;
 use crate::proxy_manager::ProxyManager;
 use crate::router::{route_model, ModelPath};
 
@@ -483,11 +484,9 @@ impl ToolExecutor {
                 anthropic_client::query(prompt, model).await
             }
             ModelPath::DirectProvider => {
-                // Phase 2 - not implemented yet
-                Err(format!(
-                    "External models not yet supported. Model '{}' requires DirectProvider path (coming in phase 2)",
-                    model
-                ))
+                tracing::info!(agent = %agent, model = %model, "Spawning agent via OpenCode client");
+                let opencode_port = 8787;
+                opencode_client::query(prompt, model, opencode_port).await
             }
         }
     }

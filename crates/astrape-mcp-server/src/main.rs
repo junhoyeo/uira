@@ -6,6 +6,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 mod anthropic_client;
+mod auth;
+mod opencode_client;
+mod providers;
 mod proxy_manager;
 mod router;
 mod tools;
