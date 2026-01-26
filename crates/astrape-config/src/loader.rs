@@ -131,6 +131,7 @@ fn expand_env_vars(config: AstrapeConfig) -> AstrapeConfig {
     AstrapeConfig {
         ai: expand_ai_settings(config.ai),
         proxy: expand_proxy_settings(config.proxy),
+        opencode: config.opencode,
         mcp: expand_mcp_settings(config.mcp),
         agents: config.agents,
         hooks: config.hooks,

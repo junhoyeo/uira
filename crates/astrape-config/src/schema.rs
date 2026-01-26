@@ -19,6 +19,10 @@ pub struct AstrapeConfig {
     #[serde(default)]
     pub proxy: ProxySettings,
 
+    /// OpenCode server settings
+    #[serde(default)]
+    pub opencode: OpencodeSettings,
+
     /// MCP (Model Context Protocol) settings
     #[serde(default)]
     pub mcp: McpSettings,
@@ -125,6 +129,69 @@ fn default_health_endpoint() -> String {
 
 fn default_max_connections() -> u32 {
     100
+}
+
+// ============================================================================
+// OpenCode Configuration
+// ============================================================================
+
+/// OpenCode server settings
+///
+/// Configuration for connecting to OpenCode server for agent-based model routing.
+///
+/// # Example
+///
+/// ```yaml
+/// opencode:
+///   host: 127.0.0.1
+///   port: 4096
+///   timeout_secs: 120
+///   auto_start: true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpencodeSettings {
+    /// Server host (default: 127.0.0.1)
+    #[serde(default = "default_opencode_host")]
+    pub host: String,
+
+    /// Server port (default: 4096)
+    #[serde(default = "default_opencode_port")]
+    pub port: u16,
+
+    /// Request timeout in seconds (default: 120)
+    #[serde(default = "default_opencode_timeout")]
+    pub timeout_secs: u64,
+
+    /// Auto-start OpenCode server (default: true)
+    #[serde(default = "default_opencode_auto_start")]
+    pub auto_start: bool,
+}
+
+impl Default for OpencodeSettings {
+    fn default() -> Self {
+        Self {
+            host: default_opencode_host(),
+            port: default_opencode_port(),
+            timeout_secs: default_opencode_timeout(),
+            auto_start: default_opencode_auto_start(),
+        }
+    }
+}
+
+fn default_opencode_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_opencode_port() -> u16 {
+    4096
+}
+
+fn default_opencode_timeout() -> u64 {
+    120
+}
+
+fn default_opencode_auto_start() -> bool {
+    true
 }
 
 /// HUD configuration
