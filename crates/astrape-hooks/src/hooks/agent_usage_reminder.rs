@@ -23,13 +23,13 @@ pub const REMINDER_MESSAGE: &str = r#"
 
 You called a search/fetch tool directly without leveraging specialized agents.
 
-RECOMMENDED: Use Task tool with explore/researcher agents for better results:
+RECOMMENDED: Use delegate_task with explore/librarian agents for better results:
 
 ```
 // Parallel exploration - fire multiple agents simultaneously
-Task(agent=\"explore\", prompt=\"Find all files matching pattern X\")
-Task(agent=\"explore\", prompt=\"Search for implementation of Y\")
-Task(agent=\"researcher\", prompt=\"Lookup documentation for Z\")
+delegate_task(agent="explore", prompt="Find all files matching pattern X")
+delegate_task(agent="explore", prompt="Search for implementation of Y") 
+delegate_task(agent="librarian", prompt="Lookup documentation for Z")
 
 // Then continue your work while they run in background
 // System will notify you when each completes
@@ -41,7 +41,7 @@ WHY:
 - Specialized agents have domain expertise
 - Reduces context window usage in main session
 
-ALWAYS prefer: Multiple parallel Task calls > Direct tool calls
+ALWAYS prefer: Multiple parallel delegate_task calls > Direct tool calls
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

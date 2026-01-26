@@ -16,7 +16,7 @@ Comprehensive codebase search mode.
 
 Maximize search effort with parallel agents:
 - explore agents (codebase patterns, file structures)
-- researcher agents (remote repos, official docs)
+- librarian agents (remote repos, official docs)
 - Direct tools: Grep, Glob
 
 NEVER stop at first result - be exhaustive.

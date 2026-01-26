@@ -22,7 +22,7 @@ When activated:
 ## Context Gathering
 
 - 1-2 explore agents for codebase patterns
-- researcher agents for external library docs
+- librarian agents for external library docs
 - Direct tools: Grep, Glob, LSP
 
 ## Complex Analysis

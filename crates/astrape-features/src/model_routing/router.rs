@@ -216,7 +216,7 @@ pub fn quick_tier_for_agent(agent_type: &str) -> Option<ModelTier> {
     let tier = match agent_type {
         "architect" | "planner" | "critic" | "analyst" => ModelTier::High,
         "explore" | "writer" => ModelTier::Low,
-        "researcher" | "executor" | "designer" | "vision" => ModelTier::Medium,
+        "librarian" | "executor" | "designer" | "vision" => ModelTier::Medium,
         "coordinator" => ModelTier::Medium,
         _ => return None,
     };
