@@ -330,6 +330,7 @@ dependencies = [
  "claude-agent-sdk-rs",
  "dirs",
  "glob",
+ "once_cell",
  "regex",
  "reqwest",
  "serde",
