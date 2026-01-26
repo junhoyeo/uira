@@ -1,8 +1,22 @@
-use claude_agent_sdk_rs::{query as claude_query, ContentBlock, Message};
+use claude_agent_sdk_rs::{query as claude_query, ClaudeAgentOptions, ContentBlock, Message};
 use serde_json::json;
 
-pub async fn query(prompt: &str, _model: &str) -> Result<String, String> {
-    let messages = claude_query(prompt, None)
+pub async fn query(
+    prompt: &str,
+    model: &str,
+    allowed_tools: Option<Vec<String>>,
+) -> Result<String, String> {
+    let options = match allowed_tools {
+        Some(tools) if !tools.is_empty() => ClaudeAgentOptions::builder()
+            .model(model.to_string())
+            .allowed_tools(tools)
+            .build(),
+        _ => ClaudeAgentOptions::builder()
+            .model(model.to_string())
+            .build(),
+    };
+
+    let messages = claude_query(prompt, Some(options))
         .await
         .map_err(|e| format!("API request failed: {}", e))?;
 
