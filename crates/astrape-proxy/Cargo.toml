@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 # Workspace dependencies
 astrape-core = { workspace = true }
+astrape-config = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

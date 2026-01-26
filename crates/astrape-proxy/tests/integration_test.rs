@@ -1,12 +1,14 @@
 use astrape_proxy::{auth, config::ProxyConfig};
-use std::io::Write;
-use tempfile::NamedTempFile;
+use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn test_proxy_config_defaults() {
     let config = ProxyConfig::default();
     assert_eq!(config.port, 8787);
-    // Librarian has a default model configured
+    assert_eq!(config.litellm_base_url, "http://localhost:4000");
+    assert_eq!(config.request_timeout_secs, 120);
+    assert!(config.auto_start);
     assert_eq!(
         config.get_model_for_agent("librarian"),
         Some("opencode/big-pickle")
@@ -15,20 +17,25 @@ fn test_proxy_config_defaults() {
 
 #[test]
 fn test_agent_based_routing() {
-    let mut temp_file = NamedTempFile::new().unwrap();
-    writeln!(
-        temp_file,
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("astrape.yml");
+
+    fs::write(
+        &config_path,
         r#"
 agents:
   explore:
     model: "opencode/gpt-5-nano"
   architect:
     model: "openai/gpt-4.1"
-"#
+
+proxy:
+  port: 9000
+"#,
     )
     .unwrap();
 
-    let config = ProxyConfig::from_yaml_file(temp_file.path()).unwrap();
+    let config = ProxyConfig::from_astrape_config(Some(&config_path)).unwrap();
 
     assert_eq!(
         config.get_model_for_agent("explore"),
@@ -38,12 +45,12 @@ agents:
         config.get_model_for_agent("architect"),
         Some("openai/gpt-4.1")
     );
-    // Librarian keeps default even when loading from YAML
     assert_eq!(
         config.get_model_for_agent("librarian"),
         Some("opencode/big-pickle")
     );
     assert_eq!(config.get_model_for_agent("nonexistent"), None);
+    assert_eq!(config.port, 9000);
 
     assert_eq!(
         config.resolve_model_for_agent("explore", "fallback"),
