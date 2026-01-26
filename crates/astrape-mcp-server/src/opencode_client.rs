@@ -5,9 +5,12 @@
 //! retry logic, timeouts, and authentication.
 
 use crate::auth::{get_access_token, load_opencode_auth};
+use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::time::Duration;
 
 // ============================================================================
 // Request structures (matching OpenCode API)
@@ -24,7 +27,7 @@ struct ChatBody {
     parts: Vec<ChatPart>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<serde_json::Value>,
+    tools: Option<HashMap<String, bool>>,
 }
 
 #[derive(Serialize)]
@@ -64,6 +67,22 @@ struct MessagePart {
 }
 
 // ============================================================================
+// Static HTTP Client (lazy initialization for connection pooling)
+// ============================================================================
+
+static HTTP_CLIENT: Lazy<Result<Client, String>> = Lazy::new(|| {
+    let timeout_secs = std::env::var("OPENCODE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(120);
+
+    Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
+});
+
+// ============================================================================
 // Main API
 // ============================================================================
 
@@ -72,7 +91,18 @@ struct MessagePart {
 /// OpenCode handles all provider routing, retry logic, and authentication.
 /// The model string can be in the format "provider/model-name" or just "model-name"
 /// (defaults to openai provider).
-pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<String, String> {
+///
+/// # Arguments
+/// * `prompt` - The prompt to send to the model
+/// * `model` - The model identifier (e.g., "gpt-4" or "openai/gpt-4")
+/// * `opencode_port` - The port OpenCode is running on
+/// * `allowed_tools` - Optional list of tool names to enable. None = all tools allowed
+pub async fn query(
+    prompt: &str,
+    model: &str,
+    opencode_port: u16,
+    allowed_tools: Option<Vec<String>>,
+) -> Result<String, String> {
     // 1. Load auth store (for validation - OpenCode handles actual auth)
     let auth_store = load_opencode_auth()
         .await
@@ -85,16 +115,8 @@ pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<Stri
     let _ = get_access_token(&auth_store, &provider_id)
         .map_err(|e| format!("No auth for provider '{}': {}", provider_id, e))?;
 
-    // 4. Create OpenCode session with timeout
-    let timeout_secs = std::env::var("OPENCODE_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(120);
-
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+    // 4. Get lazily-initialized HTTP client (reuses connection pool)
+    let client = HTTP_CLIENT.as_ref().map_err(|e| e.clone())?;
 
     let session: Session = client
         .post(format!("http://localhost:{}/session", opencode_port))
@@ -105,7 +127,15 @@ pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<Stri
         .await
         .map_err(|e| format!("Failed to parse session response: {}", e))?;
 
-    // 5. Send message via session API (OpenCode routes to provider)
+    // 5. Convert allowed_tools to HashMap
+    let tools = allowed_tools.map(|tool_names| {
+        tool_names
+            .into_iter()
+            .map(|name| (name, true))
+            .collect::<HashMap<String, bool>>()
+    });
+
+    // 6. Send message via session API (OpenCode routes to provider)
     let body = ChatBody {
         model_id,
         provider_id,
@@ -113,7 +143,7 @@ pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<Stri
             part_type: "text".to_string(),
             text: prompt.to_string(),
         }],
-        tools: None,
+        tools,
     };
 
     let response = client
