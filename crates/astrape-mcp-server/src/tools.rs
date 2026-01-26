@@ -480,7 +480,10 @@ impl ToolExecutor {
             }
             ModelPath::DirectProvider => {
                 tracing::info!(agent = %agent, model = %model, "Spawning agent via OpenCode client");
-                let opencode_port = 8787;
+                let opencode_port = std::env::var("OPENCODE_PORT")
+                    .ok()
+                    .and_then(|p| p.parse::<u16>().ok())
+                    .unwrap_or(8787);
                 opencode_client::query(prompt, model, opencode_port).await
             }
         }
