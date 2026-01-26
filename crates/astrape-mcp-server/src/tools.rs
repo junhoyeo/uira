@@ -11,7 +11,9 @@ use std::sync::Arc;
 use tokio::process::Command;
 use walkdir::WalkDir;
 
+use crate::anthropic_client;
 use crate::proxy_manager::ProxyManager;
+use crate::router::{route_model, ModelPath};
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
     match lang {
@@ -49,6 +51,7 @@ fn extract_text(output: ToolOutput) -> String {
 pub struct ToolExecutor {
     root_path: PathBuf,
     lsp_client: LspClientImpl,
+    #[allow(dead_code)]
     proxy_manager: Arc<ProxyManager>,
 }
 
@@ -452,6 +455,7 @@ impl ToolExecutor {
     async fn spawn_agent(&self, args: Value) -> Result<String, String> {
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
 
+        // Validate agent name (keep existing validation)
         if !agent
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
@@ -466,61 +470,25 @@ impl ToolExecutor {
             .as_str()
             .ok_or("Missing 'prompt' parameter")?;
 
-        self.proxy_manager.ensure_running().await?;
+        // Get model (default to sonnet if not specified)
+        let model = args["model"]
+            .as_str()
+            .unwrap_or("claude-3-5-sonnet-20241022");
 
-        let base_url = self.proxy_manager.get_agent_url(agent);
-
-        let mut cmd = Command::new("claude");
-        cmd.arg("-p")
-            .arg(prompt)
-            .arg("--output-format")
-            .arg("json")
-            .arg("--no-session-persistence");
-
-        if let Some(model) = args["model"].as_str() {
-            cmd.arg("--model").arg(model);
-        }
-
-        if let Some(tools) = args["allowedTools"].as_array() {
-            let tools_str: Vec<&str> = tools.iter().filter_map(|t| t.as_str()).collect();
-            if !tools_str.is_empty() {
-                cmd.arg("--allowedTools").arg(tools_str.join(","));
+        // Route based on model
+        match route_model(model) {
+            ModelPath::Anthropic => {
+                // Use anthropic_client for Anthropic models
+                tracing::info!(agent = %agent, model = %model, "Spawning agent via Claude Agent SDK");
+                anthropic_client::query(prompt, model).await
             }
-        }
-
-        cmd.env("ANTHROPIC_BASE_URL", &base_url);
-        cmd.current_dir(&self.root_path);
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-
-        tracing::info!(agent = %agent, base_url = %base_url, "Spawning agent with proxy routing");
-
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| format!("Failed to spawn agent '{}': {}", agent, e))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        if !output.status.success() {
-            return Err(format!(
-                "Agent '{}' failed with status {:?}\nstderr: {}\nstdout: {}",
-                agent,
-                output.status.code(),
-                stderr,
-                stdout
-            ));
-        }
-
-        if let Ok(json_output) = serde_json::from_str::<Value>(&stdout) {
-            if let Some(result) = json_output.get("result").and_then(|r| r.as_str()) {
-                Ok(result.to_string())
-            } else {
-                Ok(stdout.to_string())
+            ModelPath::DirectProvider => {
+                // Phase 2 - not implemented yet
+                Err(format!(
+                    "External models not yet supported. Model '{}' requires DirectProvider path (coming in phase 2)",
+                    model
+                ))
             }
-        } else {
-            Ok(stdout.to_string())
         }
     }
 }

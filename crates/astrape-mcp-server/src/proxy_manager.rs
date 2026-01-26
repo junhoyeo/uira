@@ -200,6 +200,7 @@ impl ProxyManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_agent_url(&self, agent: &str) -> String {
         format!("http://localhost:{}/agent/{}", self.port, agent)
     }

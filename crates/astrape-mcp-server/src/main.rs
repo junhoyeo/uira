@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+mod anthropic_client;
 mod proxy_manager;
+mod router;
 mod tools;
 
 use proxy_manager::{ProxyManager, DEFAULT_PROXY_PORT};
