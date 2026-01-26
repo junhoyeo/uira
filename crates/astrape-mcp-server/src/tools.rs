@@ -172,7 +172,7 @@ impl ToolExecutor {
             "ast_search" => self.ast_search(args).await,
             "ast_replace" => self.ast_replace(args).await,
 
-            // Agent spawning with proxy routing
+            // Agent spawning with model routing
             "spawn_agent" => self.spawn_agent(args).await,
 
             _ => Err(format!("Unknown tool: {}", tool_name)),
@@ -476,7 +476,7 @@ impl ToolExecutor {
     }
 
     // =========================================================================
-    // Agent Spawning with Proxy Routing
+    // Agent Spawning with Model Routing
     // =========================================================================
 
     async fn spawn_agent(&self, args: Value) -> Result<String, String> {

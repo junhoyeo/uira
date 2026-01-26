@@ -5,13 +5,12 @@
   <p>Lightning-fast multi-agent orchestration with native Rust performance</p>
 </div>
 
-> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection, HTTP proxy with agent-based routing, and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
+> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
 
 ## Features
 
 - **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Librarian, and more with tiered variants (Haiku/Sonnet/Opus)
 - **Smart Model Routing** - Automatically select the right model based on task complexity
-- **HTTP Proxy** - Agent-based routing proxy with auto-start (starts automatically when Claude Code boots)
 - **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
 - **MCP Server** - LSP and AST-grep tools exposed via Model Context Protocol
 - **OXC-Powered Tools** - Fast JavaScript/TypeScript linting, parsing, transformation, and minification
@@ -108,21 +107,21 @@ agents:
 │                              Claude Code                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
-          ┌──────────────────────────┼────────────────────────────┐
-          ▼                          ▼                            ▼
-┌───────────────────┐  ┌───────────────────────┐  ┌─────────────────────────┐
-│  astrape-napi     │  │   astrape-mcp-server  │  │   astrape-proxy         │
-│  (NAPI Bindings)  │  │     (MCP Server)      │  │ (HTTP Proxy / Routing)  │
-└───────────────────┘  └───────────────────────┘  └─────────────────────────┘
-          │                          │                            │
-          │              ┌───────────┴───────────┐                │
-          │              ▼                       ▼                │
-          │    ┌─────────────────┐    ┌─────────────────┐        │
-          │    │  astrape-tools  │    │   astrape-oxc   │        │
-          │    │  (LSP Client)   │    │  (JS/TS Tools)  │        │
-          │    └─────────────────┘    └─────────────────┘        │
-          │                                                       │
-          └───────┬─────────────┬─────────────┬───────────────────┘
+                   ┌────────────────┐
+                   ▼                ▼
+┌───────────────────┐  ┌───────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │
+│  (NAPI Bindings)  │  │     (MCP Server)      │
+└───────────────────┘  └───────────────────────┘
+          │                          │
+          │              ┌───────────┴───────────┐
+          │              ▼                       ▼
+          │    ┌─────────────────┐    ┌─────────────────┐
+          │    │  astrape-tools  │    │   astrape-oxc   │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │
+          │    └─────────────────┘    └─────────────────┘
+          │
+          └───────┬─────────────┬─────────────┬
                   ▼             ▼             ▼
     ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
     │   astrape-hooks   │ │  agents   │ │ astrape-features│
@@ -142,7 +141,6 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | Crate | Description |
 |-------|-------------|
 | **astrape** | Standalone CLI for git hooks and dev tools |
-| **astrape-proxy** | HTTP proxy for agent-based model routing with OpenCode auth |
 | **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
 | **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
 | **astrape-tools** | LSP client, tool registry, and orchestration utilities |
@@ -156,15 +154,9 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-core** | Shared types and utilities |
 | **astrape-config** | Configuration loading and management |
 
-## HTTP Proxy (DEPRECATED - v0.1.x only)
+## Model Routing Architecture
 
-> **⚠️ DEPRECATED**: The HTTP proxy (`astrape-proxy`) is deprecated as of v0.2.0. The MCP server now makes direct API calls to providers via `spawn_agent`. See [spawn_agent Tool](#spawn_agent) below for current implementation.
-
-The `astrape-proxy` crate was used for agent-based model routing in v0.1.x. It has been replaced by direct provider integrations.
-
-### Current Architecture (v0.2.0+)
-
-`spawn_agent` now supports multi-provider routing without a proxy:
+`spawn_agent` provides multi-provider model routing:
 
 - **Anthropic models** (`claude-*`, `anthropic/*`) → Direct via `claude-agent-sdk-rs`
 - **External models** (OpenAI, Google, etc.) → OpenCode session API (`POST /session/{id}/message`)
@@ -435,11 +427,11 @@ The `astrape-mcp` binary exposes development tools via the Model Context Protoco
 ### Agent Tools
 | Tool | Description |
 |------|-------------|
-| `spawn_agent` | Spawn agent with automatic model routing via astrape-proxy |
+| `spawn_agent` | Spawn agent with automatic model routing via OpenCode |
 
 #### spawn_agent
 
-Spawns a specialized agent with automatic model routing through astrape-proxy. The agent runs with `ANTHROPIC_BASE_URL` pointing to the proxy, which routes requests to the configured model.
+Spawns a specialized agent with automatic model routing via OpenCode. Routes requests to the configured model for that agent.
 
 **Parameters:**
 - `agent` (required): Agent name (e.g., `librarian`, `explore`, `architect`)
@@ -447,7 +439,6 @@ Spawns a specialized agent with automatic model routing through astrape-proxy. T
 - `model` (optional): Override model (sonnet, opus, haiku)
 - `allowedTools` (optional): List of tools to allow
 - `maxTurns` (optional): Maximum turns before stopping (default: 10)
-- `proxyPort` (optional): Proxy port (default: 4096)
 
 **Example:**
 ```json
@@ -457,7 +448,7 @@ Spawns a specialized agent with automatic model routing through astrape-proxy. T
 }
 ```
 
-The proxy extracts the agent name and routes to the configured model (e.g., `librarian` → `opencode/big-pickle`).
+Routes to the configured model for that agent (e.g., `librarian` → `opencode/big-pickle`).
 
 ## OXC Tools
 

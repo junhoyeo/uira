@@ -1,6 +1,8 @@
+# AI model configuration for typos command
+# Used by: `astrape typos --ai`
+# NOT used by MCP server (MCP uses opencode.* settings)
 ai:
   model: anthropic/claude-sonnet-4-20250514
-  # TODO: MOVE THIS TO `TYPOS` CONFIG
 
 agents:
   explore:

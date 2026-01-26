@@ -170,9 +170,8 @@ impl McpServer {
             // Agent Spawning Tool - multi-provider model routing
             json!({
                 "name": "spawn_agent",
-                "description": "Spawn a specialized agent with multi-provider model routing. \
-                    The agent will run with ANTHROPIC_BASE_URL pointing to the proxy, which routes requests \
-                    to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
+                "description": "Spawn a specialized agent with multi-provider model routing via OpenCode. \
+                    Routes to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
                     Returns the agent's response.",
                 "inputSchema": {
                     "type": "object",
@@ -198,11 +197,6 @@ impl McpServer {
                             "type": "integer",
                             "minimum": 1,
                             "description": "Maximum number of turns before stopping. Default: 10"
-                        },
-                        "proxyPort": {
-                            "type": "integer",
-                            "default": 8787,
-                            "description": "Port where OpenCode server is running. Default: 8787"
                         }
                     },
                     "required": ["agent", "prompt"]
