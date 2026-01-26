@@ -88,7 +88,19 @@ impl ProxyConfig {
         let config = if let Some(p) = path {
             astrape_config::load_config_from_file(&p.into())?.config
         } else {
-            load_config(None).unwrap_or_default()
+            // Only use defaults when no config file exists.
+            // Propagate parse errors to avoid hiding malformed configs.
+            match load_config(None) {
+                Ok(c) => c,
+                Err(e) => {
+                    let err_str = e.to_string();
+                    if err_str.contains("No configuration file found") {
+                        AstrapeConfig::default()
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         };
 
         Ok(Self::from(&config))
@@ -116,6 +128,40 @@ impl ProxyConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ENV_VARS: &[&str] = &[
+        "ASTRAPE_PROXY_PORT",
+        "ASTRAPE_PROXY_LITELLM_BASE_URL",
+        "ASTRAPE_PROXY_TIMEOUT_SECS",
+    ];
+
+    struct EnvGuard {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            let saved = ENV_VARS
+                .iter()
+                .map(|&var| (var.to_string(), env::var(var).ok()))
+                .collect();
+            for var in ENV_VARS {
+                env::remove_var(var);
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (var, value) in &self.saved {
+                match value {
+                    Some(v) => env::set_var(var, v),
+                    None => env::remove_var(var),
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_agent_based_routing() {
@@ -170,6 +216,7 @@ mod tests {
 
     #[test]
     fn test_default_proxy_settings() {
+        let _guard = EnvGuard::new();
         let config = ProxyConfig::default();
         assert_eq!(config.port, 8787);
         assert_eq!(config.litellm_base_url, "http://localhost:4000");
@@ -182,6 +229,7 @@ mod tests {
 
     #[test]
     fn test_from_astrape_config() {
+        let _guard = EnvGuard::new();
         use astrape_config::schema::{AgentConfig, AgentSettings};
 
         let mut agents = HashMap::new();

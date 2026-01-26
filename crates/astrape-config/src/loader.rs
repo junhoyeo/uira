@@ -14,13 +14,9 @@ pub enum ConfigFormat {
 impl ConfigFormat {
     pub fn from_path(path: &Path) -> Option<Self> {
         let ext = path.extension()?.to_str()?;
-        let stem = path.file_stem()?.to_str()?;
-
-        if ext == "jsonc" || (ext == "json" && stem.ends_with("c")) {
-            return Some(Self::Jsonc);
-        }
 
         match ext {
+            "jsonc" => Some(Self::Jsonc),
             "json" => Some(Self::Json),
             "yml" | "yaml" => Some(Self::Yaml),
             _ => None,
@@ -315,6 +311,22 @@ pre-commit:
             Some(ConfigFormat::Yaml)
         );
         assert_eq!(ConfigFormat::from_path(Path::new("astrape.txt")), None);
+    }
+
+    #[test]
+    fn test_json_files_ending_with_c_are_not_jsonc() {
+        assert_eq!(
+            ConfigFormat::from_path(Path::new("music.json")),
+            Some(ConfigFormat::Json)
+        );
+        assert_eq!(
+            ConfigFormat::from_path(Path::new("epic.json")),
+            Some(ConfigFormat::Json)
+        );
+        assert_eq!(
+            ConfigFormat::from_path(Path::new("basic.json")),
+            Some(ConfigFormat::Json)
+        );
     }
 
     #[test]
