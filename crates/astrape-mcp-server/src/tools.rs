@@ -20,29 +20,28 @@ use crate::opencode_client;
 use crate::opencode_server::OpencodeServerManager;
 use crate::router::{route_model, ModelPath};
 
-/// Lazy-initialized OpenCode server manager for auto-starting the server.
-///
-/// Configuration priority: ENV > CONFIG > DEFAULT
-/// - OPENCODE_HOST env var overrides config file host
-/// - OPENCODE_PORT env var overrides config file port
-/// - Config file values override defaults (127.0.0.1:4096)
-static OPENCODE_MANAGER: Lazy<Arc<Mutex<OpencodeServerManager>>> = Lazy::new(|| {
-    // Load config from file (if exists)
-    let config = load_config(None).ok();
-
-    // Get values with priority: ENV > CONFIG > DEFAULT
-    let host = std::env::var("OPENCODE_HOST")
-        .ok()
-        .or_else(|| config.as_ref().map(|c| c.opencode.host.clone()))
-        .unwrap_or_else(|| "127.0.0.1".to_string());
-
-    let port = std::env::var("OPENCODE_PORT")
+/// Get OpenCode port with priority: ENV > CONFIG > DEFAULT
+fn get_opencode_port() -> u16 {
+    std::env::var("OPENCODE_PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
-        .or_else(|| config.as_ref().map(|c| c.opencode.port))
-        .unwrap_or(4096);
+        .or_else(|| load_config(None).ok().map(|c| c.opencode.port))
+        .unwrap_or(4096)
+}
 
-    Arc::new(Mutex::new(OpencodeServerManager::new(host, port)))
+/// Get OpenCode host with priority: ENV > CONFIG > DEFAULT
+fn get_opencode_host() -> String {
+    std::env::var("OPENCODE_HOST")
+        .ok()
+        .or_else(|| load_config(None).ok().map(|c| c.opencode.host))
+        .unwrap_or_else(|| "127.0.0.1".to_string())
+}
+
+static OPENCODE_MANAGER: Lazy<Arc<Mutex<OpencodeServerManager>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(OpencodeServerManager::new(
+        get_opencode_host(),
+        get_opencode_port(),
+    )))
 });
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
@@ -521,11 +520,7 @@ impl ToolExecutor {
             }
             ModelPath::DirectProvider => {
                 tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via OpenCode client");
-                let opencode_port = std::env::var("OPENCODE_PORT")
-                    .ok()
-                    .and_then(|p| p.parse::<u16>().ok())
-                    .unwrap_or(4096);
-                opencode_client::query(prompt, model, opencode_port, allowed_tools).await
+                opencode_client::query(prompt, model, get_opencode_port(), allowed_tools).await
             }
         }
     }

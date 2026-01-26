@@ -130,13 +130,20 @@ pub fn find_all_config_files() -> Vec<PathBuf> {
 fn expand_env_vars(config: AstrapeConfig) -> AstrapeConfig {
     AstrapeConfig {
         typos: expand_typos_settings(config.typos),
-        opencode: config.opencode,
+        opencode: expand_opencode_settings(config.opencode),
         mcp: expand_mcp_settings(config.mcp),
         agents: config.agents,
         hooks: config.hooks,
         ai_hooks: config.ai_hooks,
         goals: expand_goals_settings(config.goals),
     }
+}
+
+fn expand_opencode_settings(
+    mut opencode: crate::schema::OpencodeSettings,
+) -> crate::schema::OpencodeSettings {
+    opencode.host = expand_env_string(&opencode.host);
+    opencode
 }
 
 fn expand_typos_settings(mut typos: crate::schema::TyposSettings) -> crate::schema::TyposSettings {

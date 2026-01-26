@@ -156,7 +156,7 @@ pub async fn query(
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
 
-    // 6. Check status
+    // 7. Check status
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response
@@ -166,7 +166,7 @@ pub async fn query(
         return Err(format!("OpenCode API error {}: {}", status, error_text));
     }
 
-    // 7. Parse response
+    // 8. Parse response
     let message: MessageInfo = response
         .json()
         .await
