@@ -437,9 +437,13 @@ Spawns a specialized agent with automatic model routing via OpenCode. Routes req
 **Parameters:**
 - `agent` (required): Agent name (e.g., `librarian`, `explore`, `architect`)
 - `prompt` (required): The task for the agent to execute
-- `model` (optional): Override model (sonnet, opus, haiku)
+- `model` (optional): Override model - full model ID (e.g., `anthropic/claude-sonnet-4-20250514`, `openai/gpt-4`)
 - `allowedTools` (optional): List of tools to allow
 - `maxTurns` (optional): Maximum turns before stopping (default: 10)
+
+**Model Routing:**
+- `claude-*` or `anthropic/*` → Direct Anthropic API
+- All other models → OpenCode session API
 
 **Example:**
 ```json
@@ -449,7 +453,7 @@ Spawns a specialized agent with automatic model routing via OpenCode. Routes req
 }
 ```
 
-Routes to the configured model for that agent (e.g., `librarian` → `opencode/big-pickle`).
+Routes to the configured model for that agent (e.g., `librarian` → `opencode/big-pickle` via OpenCode).
 
 ## OXC Tools
 
