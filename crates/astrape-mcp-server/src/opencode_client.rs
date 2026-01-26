@@ -85,8 +85,17 @@ pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<Stri
     let _ = get_access_token(&auth_store, &provider_id)
         .map_err(|e| format!("No auth for provider '{}': {}", provider_id, e))?;
 
-    // 4. Create OpenCode session
-    let client = Client::new();
+    // 4. Create OpenCode session with timeout
+    let timeout_secs = std::env::var("OPENCODE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(120);
+
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
     let session: Session = client
         .post(format!("http://localhost:{}/session", opencode_port))
         .send()
