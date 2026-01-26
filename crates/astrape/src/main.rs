@@ -320,11 +320,13 @@ fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> 
     if ai {
         println!("🔍 Checking for typos with AI assistance...\n");
 
-        let config = Config::from_file("astrape.yml").ok();
-        let ai_config = config.as_ref().and_then(|c| c.ai.clone());
-        let ai_hooks = config.and_then(|c| c.ai_hooks);
+        let unified_config = astrape_config::load_config(None).ok();
+        let typos_config = unified_config.map(|c| c.typos);
 
-        let mut checker = TyposChecker::with_hooks(ai_config, ai_hooks).with_auto_stage(stage);
+        let local_config = Config::from_file("astrape.yml").ok();
+        let ai_hooks = local_config.and_then(|c| c.ai_hooks);
+
+        let mut checker = TyposChecker::with_hooks(typos_config, ai_hooks).with_auto_stage(stage);
         let success = checker.run(files)?;
         if !success {
             process::exit(1);

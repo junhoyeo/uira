@@ -11,9 +11,9 @@ use std::collections::HashMap;
 /// Also checks hidden variants (`.astrape.*`) and `~/.config/astrape/` for global config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AstrapeConfig {
-    /// AI model settings
+    /// Typos command settings (AI-assisted typo checking)
     #[serde(default)]
-    pub ai: AiSettings,
+    pub typos: TyposSettings,
 
     /// OpenCode server settings
     #[serde(default)]
@@ -100,6 +100,90 @@ fn default_opencode_timeout() -> u64 {
 }
 
 fn default_opencode_auto_start() -> bool {
+    true
+}
+
+// ============================================================================
+// Typos Configuration
+// ============================================================================
+
+/// Typos command settings for AI-assisted typo checking
+///
+/// Configuration for the `astrape typos --ai` command.
+///
+/// # Example
+///
+/// ```yaml
+/// typos:
+///   model: "anthropic/claude-sonnet-4-20250514"
+///   host: "127.0.0.1"
+///   port: 4096
+///   disable_tools: true
+///   disable_mcp: true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyposSettings {
+    /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
+    #[serde(default = "default_typos_model")]
+    pub model: String,
+
+    /// OpenCode server host (default: 127.0.0.1)
+    #[serde(default = "default_typos_host")]
+    pub host: String,
+
+    /// OpenCode server port (default: 4096)
+    #[serde(default = "default_typos_port")]
+    pub port: u16,
+
+    /// Disable built-in tools (default: true)
+    #[serde(default = "default_typos_disable_tools")]
+    pub disable_tools: bool,
+
+    /// Disable MCP servers (default: true)
+    #[serde(default = "default_typos_disable_mcp")]
+    pub disable_mcp: bool,
+}
+
+impl Default for TyposSettings {
+    fn default() -> Self {
+        Self {
+            model: default_typos_model(),
+            host: default_typos_host(),
+            port: default_typos_port(),
+            disable_tools: default_typos_disable_tools(),
+            disable_mcp: default_typos_disable_mcp(),
+        }
+    }
+}
+
+impl TyposSettings {
+    /// Parse model string into (provider, model) tuple
+    pub fn parse_model(&self) -> (String, String) {
+        if let Some((provider, model)) = self.model.split_once('/') {
+            (provider.to_string(), model.to_string())
+        } else {
+            ("anthropic".to_string(), self.model.clone())
+        }
+    }
+}
+
+fn default_typos_model() -> String {
+    "anthropic/claude-sonnet-4-20250514".to_string()
+}
+
+fn default_typos_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_typos_port() -> u16 {
+    4096
+}
+
+fn default_typos_disable_tools() -> bool {
+    true
+}
+
+fn default_typos_disable_mcp() -> bool {
     true
 }
 
@@ -196,47 +280,6 @@ pub struct PluginSettings {
     /// Plugin-specific configuration
     #[serde(default)]
     pub config: HashMap<String, serde_json::Value>,
-}
-
-/// AI model configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiSettings {
-    /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
-    #[serde(default = "default_model")]
-    pub model: String,
-
-    /// Temperature for model responses (0.0 - 1.0)
-    #[serde(default = "default_temperature")]
-    pub temperature: f32,
-
-    /// Opencode server host
-    #[serde(default = "default_host")]
-    pub host: String,
-
-    /// Opencode server port
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    /// Disable built-in tools
-    #[serde(default = "default_disable_tools")]
-    pub disable_tools: bool,
-
-    /// Disable MCP servers
-    #[serde(default = "default_disable_mcp")]
-    pub disable_mcp: bool,
-}
-
-impl Default for AiSettings {
-    fn default() -> Self {
-        Self {
-            model: default_model(),
-            temperature: default_temperature(),
-            host: default_host(),
-            port: default_port(),
-            disable_tools: default_disable_tools(),
-            disable_mcp: default_disable_mcp(),
-        }
-    }
 }
 
 /// MCP (Model Context Protocol) settings
@@ -517,63 +560,9 @@ fn default_tier() -> String {
     "medium".to_string()
 }
 
-fn default_model() -> String {
-    "anthropic/claude-sonnet-4-20250514".to_string()
-}
-
-fn default_temperature() -> f32 {
-    0.7
-}
-
-fn default_host() -> String {
-    "127.0.0.1".to_string()
-}
-
-fn default_port() -> u16 {
-    4096
-}
-
-fn default_disable_tools() -> bool {
-    true
-}
-
-fn default_disable_mcp() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_default_ai_settings() {
-        let ai = AiSettings::default();
-        assert_eq!(ai.model, "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(ai.temperature, 0.7);
-        assert_eq!(ai.host, "127.0.0.1");
-        assert_eq!(ai.port, 4096);
-        assert!(ai.disable_tools);
-        assert!(ai.disable_mcp);
-    }
-
-    #[test]
-    fn test_deserialize_ai_settings() {
-        let yaml = r#"
-model: anthropic/claude-opus-4-1
-temperature: 0.5
-host: localhost
-port: 8080
-disable_tools: false
-disable_mcp: false
-"#;
-        let ai: AiSettings = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(ai.model, "anthropic/claude-opus-4-1");
-        assert_eq!(ai.temperature, 0.5);
-        assert_eq!(ai.host, "localhost");
-        assert_eq!(ai.port, 8080);
-        assert!(!ai.disable_tools);
-        assert!(!ai.disable_mcp);
-    }
 
     #[test]
     fn test_deserialize_hook_config() {
@@ -596,10 +585,6 @@ commands:
     #[test]
     fn test_deserialize_full_config() {
         let yaml = r#"
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
-
 hooks:
   pre_commit:
     parallel: true
@@ -613,7 +598,6 @@ hooks:
         run: git push origin HEAD
 "#;
         let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-sonnet-4-20250514");
         assert!(config.hooks.pre_commit.is_some());
         assert!(config.hooks.post_commit.is_some());
     }

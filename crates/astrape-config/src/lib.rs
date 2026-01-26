@@ -6,6 +6,6 @@ pub use loader::{
     ResolvedConfig,
 };
 pub use schema::{
-    AgentConfig, AgentSettings, AiHookCommand, AiHooksConfig, AiSettings, AstrapeConfig,
-    HookCommand, HookConfig, HooksConfig, McpServerConfig, McpSettings,
+    AgentConfig, AgentSettings, AiHookCommand, AiHooksConfig, AstrapeConfig, HookCommand,
+    HookConfig, HooksConfig, McpServerConfig, McpSettings, TyposSettings,
 };
