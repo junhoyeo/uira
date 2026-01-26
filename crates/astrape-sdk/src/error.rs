@@ -17,9 +17,6 @@ pub enum SdkError {
     #[error("SDK integration error: {0}")]
     Integration(String),
 
-    #[error("Bridge error: {0}")]
-    Bridge(String),
-
     #[error("Serialization error: {0}")]
     Serialization(String),
 
