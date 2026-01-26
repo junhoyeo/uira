@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 mod anthropic_client;
 mod auth;
 mod opencode_client;
+mod opencode_server;
 mod router;
 mod tools;
 
