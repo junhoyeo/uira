@@ -649,7 +649,7 @@ max_iterations: 50
     #[test]
     fn test_deserialize_config_with_goals() {
         let yaml = r#"
-ai:
+typos:
   model: anthropic/claude-sonnet-4-20250514
 
 goals:

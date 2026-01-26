@@ -218,7 +218,7 @@ agents:
 Astrape provides a standalone CLI for git hook management. Configure hooks in `astrape.yml`:
 
 ```yaml
-ai:
+typos:
   model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
