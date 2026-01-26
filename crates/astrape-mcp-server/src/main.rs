@@ -166,10 +166,10 @@ impl McpServer {
                     "required": ["pattern", "rewrite", "lang"]
                 }
             }),
-            // Agent Spawning Tool - routes through astrape-proxy for model routing
+            // Agent Spawning Tool - multi-provider model routing
             json!({
                 "name": "spawn_agent",
-                "description": "Spawn a specialized agent with automatic model routing through astrape-proxy. \
+                "description": "Spawn a specialized agent with multi-provider model routing. \
                     The agent will run with ANTHROPIC_BASE_URL pointing to the proxy, which routes requests \
                     to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
                     Returns the agent's response.",
@@ -201,7 +201,7 @@ impl McpServer {
                         "proxyPort": {
                             "type": "integer",
                             "default": 8787,
-                            "description": "Port where astrape-proxy is running. Default: 8787"
+                            "description": "Port where OpenCode server is running. Default: 8787"
                         }
                     },
                     "required": ["agent", "prompt"]

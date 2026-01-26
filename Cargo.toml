@@ -15,7 +15,6 @@ members = [
   "crates/astrape-mcp-server",
   "crates/astrape-oxc",
   "crates/astrape-goals",
-  "crates/astrape-proxy",
 ]
 [workspace.package]
 version = "0.1.0"

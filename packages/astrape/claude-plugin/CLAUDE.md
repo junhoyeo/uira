@@ -46,8 +46,8 @@ mcp__plugin_astrape_astrape-tools__spawn_agent(
 )
 ```
 
-**Note:** The built-in Task tool is blocked for these agents. They require
-astrape-proxy running to route requests to the correct model provider.
+**Note:** The built-in Task tool is blocked for these agents. They use
+spawn_agent with OpenCode session API for model routing.
 
 ### Tiered Variants
 
@@ -61,7 +61,7 @@ Astrape automatically routes tasks to appropriate model tiers:
 - Simple lookups → Haiku (fast, cheap)
 - Standard work → Sonnet (balanced)
 - Complex reasoning → Opus (most capable)
-- Custom models → Via astrape-proxy (librarian, explore)
+- Custom models → Via spawn_agent with OpenCode (librarian, explore)
 
 ## Performance
 

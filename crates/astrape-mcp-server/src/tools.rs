@@ -466,17 +466,20 @@ impl ToolExecutor {
             .as_str()
             .ok_or("Missing 'prompt' parameter")?;
 
-        // Get model (default to sonnet if not specified)
         let model = args["model"]
             .as_str()
             .unwrap_or("claude-3-5-sonnet-20241022");
 
-        // Route based on model
+        let allowed_tools: Option<Vec<String>> = args["allowedTools"].as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        });
+
         match route_model(model) {
             ModelPath::Anthropic => {
-                // Use anthropic_client for Anthropic models
-                tracing::info!(agent = %agent, model = %model, "Spawning agent via Claude Agent SDK");
-                anthropic_client::query(prompt, model).await
+                tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via Claude Agent SDK");
+                anthropic_client::query(prompt, model, allowed_tools).await
             }
             ModelPath::DirectProvider => {
                 tracing::info!(agent = %agent, model = %model, "Spawning agent via OpenCode client");
