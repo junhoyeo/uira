@@ -4,8 +4,7 @@
 //! (typically `~/.local/share/opencode/auth.json` on Linux and
 //! `~/Library/Application Support/opencode/auth.json` on macOS).
 //!
-//! This module loads that store and provides access tokens that can be passed to
-//! and provides access tokens for direct provider API calls.
+//! This module loads that store and provides access tokens for OpenCode session API calls.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

@@ -205,15 +205,15 @@ spawn_agent → route_model(model)
 
 Because we use OpenCode's session API, we automatically support **ALL** providers that OpenCode supports:
 
-| Provider | Model Format | Example |
-|----------|--------------|---------|
-| OpenAI | `openai/model` | `openai/gpt-4` |
-| Google | `google/model` | `google/gemini-pro` |
-| OpenCode | `opencode/model` | `opencode/big-pickle` |
-| Anthropic | `anthropic/model` | `anthropic/claude-3-sonnet` (via session API) |
-| Cohere | `cohere/model` | `cohere/command-r-plus` |
-| Mistral | `mistral/model` | `mistral/mistral-large` |
-| **Any future provider** | `provider/model` | Automatically works! |
+| Provider | Model Format | Example | Route |
+|----------|--------------|---------|-------|
+| OpenAI | `openai/model` | `openai/gpt-4` | Session API |
+| Google | `google/model` | `google/gemini-pro` | Session API |
+| OpenCode | `opencode/model` | `opencode/big-pickle` | Session API |
+| Anthropic | `claude-*` or `anthropic/*` | `claude-3-5-sonnet-20241022` | **Direct SDK** (not session API) |
+| Cohere | `cohere/model` | `cohere/command-r-plus` | Session API |
+| Mistral | `mistral/model` | `mistral/mistral-large` | Session API |
+| **Any future provider** | `provider/model` | Automatically works! | Session API |
 
 **No code changes needed** - OpenCode handles routing.
 
