@@ -1,5 +1,5 @@
 use crate::auth::{get_access_token, load_opencode_auth, model_to_provider};
-use crate::providers::{OpenAIProvider, Provider};
+use crate::providers::{GeminiProvider, OpenAIProvider, Provider};
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -31,6 +31,10 @@ pub async fn query(prompt: &str, model: &str, opencode_port: u16) -> Result<Stri
     match provider_name {
         "openai" => {
             let provider = OpenAIProvider::new(token);
+            provider.query(prompt, model).await
+        }
+        "google" => {
+            let provider = GeminiProvider::new(token);
             provider.query(prompt, model).await
         }
         _ => Err(format!("Provider '{}' not yet implemented", provider_name)),
