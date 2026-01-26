@@ -156,99 +156,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-core** | Shared types and utilities |
 | **astrape-config** | Configuration loading and management |
 
-<<<<<<< HEAD
-## Configuration
-
-Astrape uses a unified configuration system supporting multiple formats with priority-based resolution.
-
-### Config File Priority
-
-Files are loaded in this order (first found wins):
-
-| Priority | File | Format |
-|----------|------|--------|
-| 1 | `astrape.jsonc` | JSON with comments |
-| 2 | `astrape.json` | Standard JSON |
-| 3 | `astrape.yml` | YAML |
-| 4 | `astrape.yaml` | YAML (alternate) |
-| 5 | `.astrape.*` | Hidden variants |
-| 6 | `~/.config/astrape/*` | Global config |
-
-### Config File Structure
-
-```yaml
-# astrape.yml - Full example
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
-
-proxy:
-  port: 8787
-  litellm_base_url: "http://localhost:4000"
-  request_timeout_secs: 120
-  auto_start: true
-
-agents:
-  explore:
-    model: "opencode/gpt-5-nano"
-  librarian:
-    model: "opencode/big-pickle"
-  architect:
-    model: "openai/gpt-4.1"
-
-goals:
-  auto_verify: true
-  goals:
-    - name: test-coverage
-      command: ./scripts/coverage.sh
-      target: 80.0
-
-pre-commit:
-  parallel: false
-  commands:
-    - name: fmt
-      run: cargo fmt
-    - name: clippy
-      run: cargo clippy -- -D warnings
-```
-
-### JSONC Support
-
-Use `astrape.jsonc` for JSON with comments:
-
-```jsonc
-{
-  // AI model settings
-  "ai": {
-    "model": "anthropic/claude-sonnet-4-20250514"
-  },
-  
-  /* Proxy configuration */
-  "proxy": {
-    "port": 8787,
-    "auto_start": true
-  },
-  
-  "agents": {
-    "explore": { "model": "opencode/gpt-5-nano" }
-  }
-}
-```
-
-### Environment Variables
-
-Environment variables override config file values for key settings:
-
-| Variable | Overrides | Default |
-|----------|-----------|---------|
-| `ASTRAPE_PROXY_PORT` | `proxy.port` | 8787 |
-| `ASTRAPE_PROXY_LITELLM_BASE_URL` | `proxy.litellm_base_url` | http://localhost:4000 |
-| `ASTRAPE_PROXY_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
-
-## HTTP Proxy
-=======
 ## HTTP Proxy (DEPRECATED - v0.1.x only)
->>>>>>> bec9a83 (docs: update README to reflect new spawn_agent architecture)
 
 > **⚠️ DEPRECATED**: The HTTP proxy (`astrape-proxy`) is deprecated as of v0.2.0. The MCP server now makes direct API calls to providers via `spawn_agent`. See [spawn_agent Tool](#spawn_agent) below for current implementation.
 
@@ -263,8 +171,40 @@ The `astrape-proxy` crate was used for agent-based model routing in v0.1.x. It h
 - **OpenCode routing** - Automatically routes to ANY configured provider
 - **Streaming support** - Full SSE streaming via OpenCode
 
-**Environment variables**:
-- `OPENCODE_PORT` - OpenCode server port (default: 8787)
+### OpenCode Configuration
+
+Configure OpenCode server settings in `astrape.yml`:
+
+```yaml
+opencode:
+  host: "127.0.0.1"      # Server host (default: 127.0.0.1)
+  port: 4096             # Server port (default: 4096)
+  timeout_secs: 120      # Request timeout (default: 120)
+  auto_start: true       # Auto-start server (default: true)
+```
+
+**Auto-Start Behavior:**
+
+The OpenCode server automatically starts before the first `spawn_agent` call when `auto_start: true`. The MCP server:
+1. Checks if OpenCode is running via health check (`GET /health`)
+2. If not running, spawns `opencode serve` in the background
+3. Waits up to 15 seconds for the server to become ready
+4. Proceeds with agent spawning once healthy
+
+**Environment Variable Overrides:**
+
+Environment variables take precedence over config file values:
+
+| Variable | Overrides | Default |
+|----------|-----------|---------|
+| `OPENCODE_HOST` | `opencode.host` | 127.0.0.1 |
+| `OPENCODE_PORT` | `opencode.port` | 4096 |
+| `OPENCODE_TIMEOUT_SECS` | `opencode.timeout_secs` | 120 |
+
+**Example:**
+```bash
+OPENCODE_PORT=8080 astrape-mcp  # Use port 8080 instead of 4096
+```
 
 ### Agent-Based Model Routing
 
@@ -280,155 +220,6 @@ agents:
   executor:
     model: "openai/gpt-4.1-mini"  # Balanced model for execution
 ```
-
-### Configuration
-
-Proxy settings can be configured in `astrape.yml` (or `astrape.jsonc`/`astrape.json`):
-
-```yaml
-proxy:
-  port: 8787                              # Server port
-  litellm_base_url: "http://localhost:4000"  # LiteLLM proxy URL
-  request_timeout_secs: 120               # Upstream timeout
-  auto_start: true                        # Auto-start with MCP server
-  enable_logging: false                   # Request logging
-  max_connections: 100                    # Max concurrent connections
-```
-
-**Environment Variable Overrides:**
-
-Environment variables take precedence over config file values:
-
-```bash
-ASTRAPE_PROXY_PORT=8787                              # Overrides proxy.port
-ASTRAPE_PROXY_LITELLM_BASE_URL=http://localhost:4000 # Overrides proxy.litellm_base_url
-ASTRAPE_PROXY_TIMEOUT_SECS=120                       # Overrides proxy.request_timeout_secs
-```
-
-**OpenCode Authentication:**
-
-The proxy uses OpenCode's authentication system. Ensure you've logged in:
-
-```bash
-opencode auth login openai
-opencode auth login google
-opencode auth login opencode
-```
-
-Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform equivalent).
-
-### Usage
-
-**Automatic startup (recommended):**
-
-When using the Astrape Claude Code plugin, the proxy starts automatically. The MCP server manages the entire proxy lifecycle:
-
-1. **On boot**: Proxy starts when MCP server receives `initialize` from Claude Code
-2. **Health check**: Before each `spawn_agent`, ensures proxy is running
-3. **Auto-restart**: If proxy crashes, it restarts on next agent spawn
-4. **Clean shutdown**: Proxy stops automatically when Claude Code exits
-
-Binary discovery order: `CLAUDE_PLUGIN_ROOT` → `target/release` → `target/debug` → PATH
-
-**Manual startup (for development/testing):**
-
-```bash
-cargo run --release -p astrape-proxy
-# Output: astrape-proxy listening addr=0.0.0.0:8787
-```
-
-**Use with Claude Code (without plugin):**
-
-```bash
-ANTHROPIC_BASE_URL=http://localhost:8787 claude
-```
-
-**Test the proxy:**
-
-```bash
-# Health check
-curl http://localhost:8787/health
-# Output: OK
-
-# Test agent-based routing
-curl -X POST http://localhost:8787/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-sonnet",
-    "max_tokens": 100,
-    "messages": [{"role": "user", "content": "Hello"}],
-    "metadata": {"agent": "explore"}
-  }'
-```
-
-### How It Works
-
-The proxy routes requests based on the `metadata.agent` field:
-
-**Current architecture (v0.2.0+)**:
-```
-spawn_agent → route_model(model)
-    ├─ Anthropic → claude-agent-sdk-rs (direct)
-    └─ External → opencode_client
-                      ↓
-                  POST /session/{id}/message
-                      ↓
-                  OpenCode routes to ANY provider
-```
-
-**Old proxy architecture (v0.1.x - deprecated)**:
-```
-Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
-```
-
-### Migration from v0.1.x
-
-If upgrading from v0.1.x:
-- Remove `LITELLM_BASE_URL` environment variable
-- Set `OPENCODE_PORT` if using non-default (default: 8787)
-- No code changes required - `spawn_agent` API is unchanged
-
-### Endpoints
-
-- `GET /health` - Health check (returns "OK")
-- `POST /v1/messages` - Chat completions (streaming & non-streaming)
-- `POST /v1/messages/count_tokens` - Token counting
-- `POST /agent/{name}/v1/messages` - Path-based agent routing
-
-### Path-Based Agent Routing
-
-For agents requiring custom model routing (like `librarian` and `explore`), the proxy supports path-based routing:
-
-```
-POST /agent/librarian/v1/messages
-POST /agent/explore/v1/messages
-```
-
-This is used by the `spawn_agent` MCP tool, which sets:
-```bash
-ANTHROPIC_BASE_URL=http://localhost:8787/agent/librarian
-```
-
-The proxy extracts the agent name from the URL path and routes to the configured model in `astrape.yml`.
-
-### Development
-
-**Run tests:**
-
-```bash
-cargo test -p astrape-proxy
-```
-
-**Build release binary:**
-
-```bash
-cargo build --release -p astrape-proxy
-# Binary: target/release/astrape-proxy
-```
-
-**End-to-end testing:**
-
-See [crates/astrape-proxy/E2E_TEST.md](crates/astrape-proxy/E2E_TEST.md) for comprehensive testing guide.
 
 ## Git Hooks
 
@@ -656,7 +447,7 @@ Spawns a specialized agent with automatic model routing through astrape-proxy. T
 - `model` (optional): Override model (sonnet, opus, haiku)
 - `allowedTools` (optional): List of tools to allow
 - `maxTurns` (optional): Maximum turns before stopping (default: 10)
-- `proxyPort` (optional): Proxy port (default: 8787)
+- `proxyPort` (optional): Proxy port (default: 4096)
 
 **Example:**
 ```json

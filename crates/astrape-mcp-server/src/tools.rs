@@ -2,17 +2,48 @@ use ast_grep_language::{LanguageExt, SupportLang};
 use astrape_oxc::{LintRule, Linter, Severity};
 use astrape_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use glob::glob;
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 use walkdir::WalkDir;
+
+use astrape_config::load_config;
 
 use crate::anthropic_client;
 use crate::opencode_client;
+use crate::opencode_server::OpencodeServerManager;
 use crate::router::{route_model, ModelPath};
+
+/// Lazy-initialized OpenCode server manager for auto-starting the server.
+///
+/// Configuration priority: ENV > CONFIG > DEFAULT
+/// - OPENCODE_HOST env var overrides config file host
+/// - OPENCODE_PORT env var overrides config file port
+/// - Config file values override defaults (127.0.0.1:4096)
+static OPENCODE_MANAGER: Lazy<Arc<Mutex<OpencodeServerManager>>> = Lazy::new(|| {
+    // Load config from file (if exists)
+    let config = load_config(None).ok();
+
+    // Get values with priority: ENV > CONFIG > DEFAULT
+    let host = std::env::var("OPENCODE_HOST")
+        .ok()
+        .or_else(|| config.as_ref().map(|c| c.opencode.host.clone()))
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let port = std::env::var("OPENCODE_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .or_else(|| config.as_ref().map(|c| c.opencode.port))
+        .unwrap_or(4096);
+
+    Arc::new(Mutex::new(OpencodeServerManager::new(host, port)))
+});
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
     match lang {
@@ -449,6 +480,13 @@ impl ToolExecutor {
     // =========================================================================
 
     async fn spawn_agent(&self, args: Value) -> Result<String, String> {
+        {
+            let mut manager = OPENCODE_MANAGER.lock().await;
+            if let Err(e) = manager.ensure_opencode_server().await {
+                return Err(format!("Failed to start OpenCode server: {}", e));
+            }
+        }
+
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
 
         // Validate agent name (keep existing validation)
@@ -486,7 +524,7 @@ impl ToolExecutor {
                 let opencode_port = std::env::var("OPENCODE_PORT")
                     .ok()
                     .and_then(|p| p.parse::<u16>().ok())
-                    .unwrap_or(8787);
+                    .unwrap_or(4096);
                 opencode_client::query(prompt, model, opencode_port, allowed_tools).await
             }
         }
