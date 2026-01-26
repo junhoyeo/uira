@@ -240,9 +240,9 @@ Environment variables override config file values for key settings:
 
 | Variable | Overrides | Default |
 |----------|-----------|---------|
-| `PORT` | `proxy.port` | 8787 |
-| `LITELLM_BASE_URL` | `proxy.litellm_base_url` | http://localhost:4000 |
-| `REQUEST_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
+| `ASTRAPE_PROXY_PORT` | `proxy.port` | 8787 |
+| `ASTRAPE_PROXY_LITELLM_BASE_URL` | `proxy.litellm_base_url` | http://localhost:4000 |
+| `ASTRAPE_PROXY_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
 
 ## HTTP Proxy
 
@@ -291,9 +291,9 @@ proxy:
 Environment variables take precedence over config file values:
 
 ```bash
-PORT=8787                                # Overrides proxy.port
-LITELLM_BASE_URL=http://localhost:4000   # Overrides proxy.litellm_base_url
-REQUEST_TIMEOUT_SECS=120                 # Overrides proxy.request_timeout_secs
+ASTRAPE_PROXY_PORT=8787                              # Overrides proxy.port
+ASTRAPE_PROXY_LITELLM_BASE_URL=http://localhost:4000 # Overrides proxy.litellm_base_url
+ASTRAPE_PROXY_TIMEOUT_SECS=120                       # Overrides proxy.request_timeout_secs
 ```
 
 **OpenCode Authentication:**

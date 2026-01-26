@@ -3,7 +3,7 @@ ai:
 
 # HTTP proxy settings for agent-based model routing
 # Environment variables override these values:
-#   PORT, LITELLM_BASE_URL, REQUEST_TIMEOUT_SECS
+#   ASTRAPE_PROXY_PORT, ASTRAPE_PROXY_LITELLM_BASE_URL, ASTRAPE_PROXY_TIMEOUT_SECS
 proxy:
   port: 8787
   litellm_base_url: "http://localhost:4000"

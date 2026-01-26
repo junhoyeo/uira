@@ -29,13 +29,13 @@ impl From<&AstrapeConfig> for ProxyConfig {
         }
 
         Self {
-            port: env_override("PORT", config.proxy.port),
+            port: env_override("ASTRAPE_PROXY_PORT", config.proxy.port),
             litellm_base_url: env_override_str(
-                "LITELLM_BASE_URL",
+                "ASTRAPE_PROXY_LITELLM_BASE_URL",
                 config.proxy.litellm_base_url.clone(),
             ),
             request_timeout_secs: env_override(
-                "REQUEST_TIMEOUT_SECS",
+                "ASTRAPE_PROXY_TIMEOUT_SECS",
                 config.proxy.request_timeout_secs,
             ),
             auto_start: config.proxy.auto_start,
@@ -65,10 +65,13 @@ impl Default for ProxyConfig {
         agent_models.insert("librarian".to_string(), "opencode/big-pickle".to_string());
 
         Self {
-            port: env_override("PORT", proxy_settings.port),
-            litellm_base_url: env_override_str("LITELLM_BASE_URL", proxy_settings.litellm_base_url),
+            port: env_override("ASTRAPE_PROXY_PORT", proxy_settings.port),
+            litellm_base_url: env_override_str(
+                "ASTRAPE_PROXY_LITELLM_BASE_URL",
+                proxy_settings.litellm_base_url,
+            ),
             request_timeout_secs: env_override(
-                "REQUEST_TIMEOUT_SECS",
+                "ASTRAPE_PROXY_TIMEOUT_SECS",
                 proxy_settings.request_timeout_secs,
             ),
             auto_start: proxy_settings.auto_start,
