@@ -52,27 +52,6 @@ Astrape automatically routes tasks to appropriate model tiers:
 | `analyze`, `debug` | Deep analysis mode |
 | `plan` | Planning mode |
 
-## Project Structure
-
-```
-crates/
-├── astrape/          # Main CLI binary
-├── astrape-napi/     # Node.js native bindings
-├── astrape-hooks/    # Hook implementations
-├── astrape-agents/   # Agent definitions
-├── astrape-features/ # Skills, model routing
-└── astrape-core/     # Shared types
-
-packages/
-├── claude-plugin/    # Claude Code plugin package
-│   ├── .claude-plugin/   # Plugin manifest
-│   ├── agents/           # 32 agent definitions
-│   ├── commands/         # Skill definitions
-│   ├── hooks/            # Bun-powered hooks
-│   └── native/           # NAPI bindings
-└── bridge/           # TypeScript bridge to Claude Agent SDK
-```
-
 ## Development
 
 ```bash
@@ -81,12 +60,6 @@ cargo build --release
 
 # Build NAPI module
 cd crates/astrape-napi && bun run build
-
-# Copy native module to plugin
-cp crates/astrape-napi/astrape.darwin-arm64.node packages/astrape/native/
-
-# Build bridge (for SDK integration)
-cd packages/bridge && npm run build
 
 # Run tests
 cargo test
