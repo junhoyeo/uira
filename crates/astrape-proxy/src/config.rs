@@ -1,5 +1,5 @@
 use anyhow::Result;
-use astrape_config::{load_config, AstrapeConfig, ProxySettings};
+use astrape_config::{find_all_config_files, load_config, AstrapeConfig, ProxySettings};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -87,20 +87,10 @@ impl ProxyConfig {
     pub fn from_astrape_config(path: Option<impl Into<PathBuf>>) -> Result<Self> {
         let config = if let Some(p) = path {
             astrape_config::load_config_from_file(&p.into())?.config
+        } else if find_all_config_files().is_empty() {
+            AstrapeConfig::default()
         } else {
-            // Only use defaults when no config file exists.
-            // Propagate parse errors to avoid hiding malformed configs.
-            match load_config(None) {
-                Ok(c) => c,
-                Err(e) => {
-                    let err_str = e.to_string();
-                    if err_str.contains("No configuration file found") {
-                        AstrapeConfig::default()
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
+            load_config(None)?
         };
 
         Ok(Self::from(&config))
