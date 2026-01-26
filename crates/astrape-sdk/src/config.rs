@@ -41,7 +41,7 @@ pub struct AgentsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub architect: Option<AgentModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub researcher: Option<AgentModelConfig>,
+    pub librarian: Option<AgentModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub explore: Option<AgentModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]

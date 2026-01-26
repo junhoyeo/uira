@@ -33,4 +33,4 @@ When activated:
 - **explore**: Codebase patterns, file structures
 - **architect**: Complex decisions, debugging
 - **executor**: Implementation tasks
-- **researcher**: External docs, references
+- **librarian**: External docs, references
