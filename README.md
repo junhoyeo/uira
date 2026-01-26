@@ -156,6 +156,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-core** | Shared types and utilities |
 | **astrape-config** | Configuration loading and management |
 
+<<<<<<< HEAD
 ## Configuration
 
 Astrape uses a unified configuration system supporting multiple formats with priority-based resolution.
@@ -245,17 +246,28 @@ Environment variables override config file values for key settings:
 | `ASTRAPE_PROXY_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
 
 ## HTTP Proxy
+=======
+## HTTP Proxy (DEPRECATED - v0.1.x only)
+>>>>>>> bec9a83 (docs: update README to reflect new spawn_agent architecture)
 
-The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
+> **⚠️ DEPRECATED**: The HTTP proxy (`astrape-proxy`) is deprecated as of v0.2.0. The MCP server now makes direct API calls to providers via `spawn_agent`. See [spawn_agent Tool](#spawn_agent) below for current implementation.
 
-### Key Features
+The `astrape-proxy` crate was used for agent-based model routing in v0.1.x. It has been replaced by direct provider integrations.
 
-- **Agent-based routing** - Route specific agents to alternative models via `astrape.yml`
-- **Transparent passthrough** - Requests without agent config go directly to Anthropic
-- **OpenCode authentication** - Uses OpenCode's auth for alternative providers
-- **Multi-provider support** - OpenAI, Google Gemini, OpenCode (via LiteLLM)
-- **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format conversion
-- **Streaming support** - Full SSE (Server-Sent Events) streaming
+### Current Architecture (v0.2.0+)
+
+`spawn_agent` now supports multi-provider routing without a proxy:
+
+- **Anthropic models** (`claude-*`, `anthropic/*`) → Direct via `claude-agent-sdk-rs`
+- **OpenAI models** (`openai/*`, `gpt-*`) → Direct HTTP to `api.openai.com`
+- **Google Gemini** (`google/*`, `gemini/*`) → Direct HTTP to `generativelanguage.googleapis.com`
+- **Retry logic** - Exponential backoff (3 attempts: 1s, 2s, 4s)
+- **Timeout handling** - Configurable via `PROVIDER_TIMEOUT_SECS` (default: 120s)
+- **Streaming support** - Full SSE for all providers
+
+**Environment variables**:
+- `OPENCODE_PORT` - OpenCode server port (default: 8787)
+- `PROVIDER_TIMEOUT_SECS` - HTTP timeout for providers (default: 120)
 
 ### Agent-Based Model Routing
 
@@ -356,26 +368,27 @@ curl -X POST http://localhost:8787/v1/messages \
 
 The proxy routes requests based on the `metadata.agent` field:
 
-**Agent configured in `astrape.yml`:**
+**Current architecture (v0.2.0+)**:
+```
+spawn_agent → route_model(model)
+    ├─ Anthropic → claude-agent-sdk-rs (direct)
+    └─ External → opencode_client
+                      ├─ OpenAI → Direct HTTP API
+                      └─ Gemini → Direct HTTP API
+```
+
+**Old proxy architecture (v0.1.x - deprecated)**:
 ```
 Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
-                   ↓
-            OpenCode auth
 ```
 
-**Agent NOT configured (passthrough):**
-```
-Claude Code → astrape-proxy → Anthropic API
-                   ↓
-            Original auth header
-```
+### Migration from v0.1.x
 
-### Request Flow
-
-1. Claude Code sends request with `metadata: {agent: "explore"}`
-2. Proxy checks if `explore` is configured in `astrape.yml`
-3. **If configured**: Routes to configured model via LiteLLM with OpenCode auth
-4. **If not configured**: Passes through to Anthropic with original Authorization header
+If upgrading from v0.1.x:
+- Remove `LITELLM_BASE_URL` environment variable
+- Set `OPENCODE_PORT` if using non-default (default: 8787)
+- Set `PROVIDER_TIMEOUT_SECS` if needed (default: 120)
+- No code changes required - `spawn_agent` API is unchanged
 
 ### Endpoints
 
