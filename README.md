@@ -156,6 +156,94 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-core** | Shared types and utilities |
 | **astrape-config** | Configuration loading and management |
 
+## Configuration
+
+Astrape uses a unified configuration system supporting multiple formats with priority-based resolution.
+
+### Config File Priority
+
+Files are loaded in this order (first found wins):
+
+| Priority | File | Format |
+|----------|------|--------|
+| 1 | `astrape.jsonc` | JSON with comments |
+| 2 | `astrape.json` | Standard JSON |
+| 3 | `astrape.yml` | YAML |
+| 4 | `astrape.yaml` | YAML (alternate) |
+| 5 | `.astrape.*` | Hidden variants |
+| 6 | `~/.config/astrape/*` | Global config |
+
+### Config File Structure
+
+```yaml
+# astrape.yml - Full example
+ai:
+  model: anthropic/claude-sonnet-4-20250514
+  temperature: 0.7
+
+proxy:
+  port: 8787
+  litellm_base_url: "http://localhost:4000"
+  request_timeout_secs: 120
+  auto_start: true
+
+agents:
+  explore:
+    model: "opencode/gpt-5-nano"
+  librarian:
+    model: "opencode/big-pickle"
+  architect:
+    model: "openai/gpt-4.1"
+
+goals:
+  auto_verify: true
+  goals:
+    - name: test-coverage
+      command: ./scripts/coverage.sh
+      target: 80.0
+
+pre-commit:
+  parallel: false
+  commands:
+    - name: fmt
+      run: cargo fmt
+    - name: clippy
+      run: cargo clippy -- -D warnings
+```
+
+### JSONC Support
+
+Use `astrape.jsonc` for JSON with comments:
+
+```jsonc
+{
+  // AI model settings
+  "ai": {
+    "model": "anthropic/claude-sonnet-4-20250514"
+  },
+  
+  /* Proxy configuration */
+  "proxy": {
+    "port": 8787,
+    "auto_start": true
+  },
+  
+  "agents": {
+    "explore": { "model": "opencode/gpt-5-nano" }
+  }
+}
+```
+
+### Environment Variables
+
+Environment variables override config file values for key settings:
+
+| Variable | Overrides | Default |
+|----------|-----------|---------|
+| `PORT` | `proxy.port` | 8787 |
+| `LITELLM_BASE_URL` | `proxy.litellm_base_url` | http://localhost:4000 |
+| `REQUEST_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
+
 ## HTTP Proxy
 
 The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
@@ -186,12 +274,26 @@ agents:
 
 ### Configuration
 
-**Environment Variables:**
+Proxy settings can be configured in `astrape.yml` (or `astrape.jsonc`/`astrape.json`):
+
+```yaml
+proxy:
+  port: 8787                              # Server port
+  litellm_base_url: "http://localhost:4000"  # LiteLLM proxy URL
+  request_timeout_secs: 120               # Upstream timeout
+  auto_start: true                        # Auto-start with MCP server
+  enable_logging: false                   # Request logging
+  max_connections: 100                    # Max concurrent connections
+```
+
+**Environment Variable Overrides:**
+
+Environment variables take precedence over config file values:
 
 ```bash
-PORT=8787                                # Server port (default: 8787)
-LITELLM_BASE_URL=http://localhost:4000   # LiteLLM proxy URL
-REQUEST_TIMEOUT_SECS=120                 # Upstream timeout (default: 120)
+PORT=8787                                # Overrides proxy.port
+LITELLM_BASE_URL=http://localhost:4000   # Overrides proxy.litellm_base_url
+REQUEST_TIMEOUT_SECS=120                 # Overrides proxy.request_timeout_secs
 ```
 
 **OpenCode Authentication:**
