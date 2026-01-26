@@ -7,10 +7,6 @@ use anyhow::{Context, Result};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-/// Default OpenCode server port
-#[allow(dead_code)]
-pub const DEFAULT_OPENCODE_PORT: u16 = 4096;
-
 /// Manager for OpenCode server lifecycle.
 ///
 /// Handles health checks and auto-starting the OpenCode server when needed.
@@ -36,12 +32,6 @@ impl OpencodeServerManager {
             server_was_started: false,
             client,
         }
-    }
-
-    /// Create a new server manager with default settings (localhost:4096).
-    #[allow(dead_code)]
-    pub fn with_defaults() -> Self {
-        Self::new("127.0.0.1".to_string(), DEFAULT_OPENCODE_PORT)
     }
 
     /// Check if the OpenCode server is running by hitting the health endpoint.
@@ -101,53 +91,5 @@ impl OpencodeServerManager {
             "OpenCode server failed to start within 15 seconds. \
              Please check if opencode is installed and working correctly."
         )
-    }
-
-    /// Returns whether this manager started the server.
-    #[allow(dead_code)]
-    pub fn server_was_started(&self) -> bool {
-        self.server_was_started
-    }
-
-    /// Get the server URL.
-    #[allow(dead_code)]
-    pub fn server_url(&self) -> String {
-        format!("http://{}:{}", self.host, self.port)
-    }
-
-    /// Get the configured port.
-    #[allow(dead_code)]
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-
-    /// Get the configured host.
-    #[allow(dead_code)]
-    pub fn host(&self) -> &str {
-        &self.host
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_server_url() {
-        let manager = OpencodeServerManager::new("localhost".to_string(), 8080);
-        assert_eq!(manager.server_url(), "http://localhost:8080");
-    }
-
-    #[test]
-    fn test_default_port() {
-        let manager = OpencodeServerManager::with_defaults();
-        assert_eq!(manager.port(), DEFAULT_OPENCODE_PORT);
-        assert_eq!(manager.host(), "127.0.0.1");
-    }
-
-    #[test]
-    fn test_server_was_started_initially_false() {
-        let manager = OpencodeServerManager::with_defaults();
-        assert!(!manager.server_was_started());
     }
 }
