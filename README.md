@@ -259,15 +259,12 @@ The `astrape-proxy` crate was used for agent-based model routing in v0.1.x. It h
 `spawn_agent` now supports multi-provider routing without a proxy:
 
 - **Anthropic models** (`claude-*`, `anthropic/*`) → Direct via `claude-agent-sdk-rs`
-- **OpenAI models** (`openai/*`, `gpt-*`) → Direct HTTP to `api.openai.com`
-- **Google Gemini** (`google/*`, `gemini/*`) → Direct HTTP to `generativelanguage.googleapis.com`
-- **Retry logic** - Exponential backoff (3 attempts: 1s, 2s, 4s)
-- **Timeout handling** - Configurable via `PROVIDER_TIMEOUT_SECS` (default: 120s)
-- **Streaming support** - Full SSE for all providers
+- **External models** (OpenAI, Google, etc.) → OpenCode session API (`POST /session/{id}/message`)
+- **OpenCode routing** - Automatically routes to ANY configured provider
+- **Streaming support** - Full SSE streaming via OpenCode
 
 **Environment variables**:
 - `OPENCODE_PORT` - OpenCode server port (default: 8787)
-- `PROVIDER_TIMEOUT_SECS` - HTTP timeout for providers (default: 120)
 
 ### Agent-Based Model Routing
 
@@ -373,8 +370,10 @@ The proxy routes requests based on the `metadata.agent` field:
 spawn_agent → route_model(model)
     ├─ Anthropic → claude-agent-sdk-rs (direct)
     └─ External → opencode_client
-                      ├─ OpenAI → Direct HTTP API
-                      └─ Gemini → Direct HTTP API
+                      ↓
+                  POST /session/{id}/message
+                      ↓
+                  OpenCode routes to ANY provider
 ```
 
 **Old proxy architecture (v0.1.x - deprecated)**:
@@ -387,7 +386,6 @@ Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
 If upgrading from v0.1.x:
 - Remove `LITELLM_BASE_URL` environment variable
 - Set `OPENCODE_PORT` if using non-default (default: 8787)
-- Set `PROVIDER_TIMEOUT_SECS` if needed (default: 120)
 - No code changes required - `spawn_agent` API is unchanged
 
 ### Endpoints
