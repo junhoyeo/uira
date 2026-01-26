@@ -1,5 +1,6 @@
 typos:
-  model: anthropic/claude-sonnet-4-20250514
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 agents:
   explore:

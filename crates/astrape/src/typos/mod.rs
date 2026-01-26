@@ -97,8 +97,8 @@ impl TyposChecker {
 
     pub fn with_hooks(config: Option<TyposSettings>, hooks_config: Option<HooksConfig>) -> Self {
         let config = config.unwrap_or_default();
-        let host = config.host.clone();
-        let port = config.port;
+        let host = config.ai.host.clone();
+        let port = config.ai.port;
 
         let hook_executor = hooks_config.map(AiHookExecutor::new);
 
@@ -132,13 +132,13 @@ impl TyposChecker {
     }
 
     fn build_tools_config(&self) -> Option<HashMap<String, bool>> {
-        if !self.config.disable_tools && !self.config.disable_mcp {
+        if !self.config.ai.disable_tools && !self.config.ai.disable_mcp {
             return None;
         }
 
         let mut tools = HashMap::new();
 
-        if self.config.disable_tools {
+        if self.config.ai.disable_tools {
             tools.insert("bash".to_string(), false);
             tools.insert("edit".to_string(), false);
             tools.insert("write".to_string(), false);
@@ -149,7 +149,7 @@ impl TyposChecker {
             tools.insert("webfetch".to_string(), false);
         }
 
-        if self.config.disable_mcp {
+        if self.config.ai.disable_mcp {
             tools.insert("mcp_*".to_string(), false);
         }
 
@@ -452,7 +452,7 @@ Your response (one word per line, {} lines total):"#,
             typos.len()
         );
 
-        let (provider_id, model_id) = self.config.parse_model();
+        let (provider_id, model_id) = self.config.ai.parse_model();
 
         let body = ChatBody {
             model_id,
@@ -692,41 +692,46 @@ struct TyposDefaultConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astrape_config::TyposAiSettings;
 
     #[test]
     fn test_typos_checker_creation() {
         let checker = TyposChecker::new(None);
         assert!(checker.session_id.is_none());
         assert!(!checker.server_was_started);
-        assert!(checker.config.disable_tools);
-        assert!(checker.config.disable_mcp);
+        assert!(checker.config.ai.disable_tools);
+        assert!(checker.config.ai.disable_mcp);
 
         let config = TyposSettings {
-            model: "openai/gpt-4o".to_string(),
-            disable_tools: false,
-            disable_mcp: true,
-            ..Default::default()
+            ai: TyposAiSettings {
+                model: "openai/gpt-4o".to_string(),
+                disable_tools: false,
+                disable_mcp: true,
+                ..Default::default()
+            },
         };
         let checker_with_config = TyposChecker::new(Some(config));
-        let (provider, model) = checker_with_config.config.parse_model();
+        let (provider, model) = checker_with_config.config.ai.parse_model();
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o");
-        assert!(!checker_with_config.config.disable_tools);
-        assert!(checker_with_config.config.disable_mcp);
+        assert!(!checker_with_config.config.ai.disable_tools);
+        assert!(checker_with_config.config.ai.disable_mcp);
     }
 
     #[test]
     fn test_parse_model() {
         let config = TyposSettings::default();
-        let (provider, model) = config.parse_model();
+        let (provider, model) = config.ai.parse_model();
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "claude-sonnet-4-20250514");
 
         let config = TyposSettings {
-            model: "anthropic/claude-opus-4-5-high".to_string(),
-            ..Default::default()
+            ai: TyposAiSettings {
+                model: "anthropic/claude-opus-4-5-high".to_string(),
+                ..Default::default()
+            },
         };
-        let (provider, model) = config.parse_model();
+        let (provider, model) = config.ai.parse_model();
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "claude-opus-4-5-high");
     }
@@ -739,9 +744,11 @@ mod tests {
         assert_eq!(tools.get("mcp_*"), Some(&false));
 
         let config = TyposSettings {
-            disable_tools: false,
-            disable_mcp: false,
-            ..Default::default()
+            ai: TyposAiSettings {
+                disable_tools: false,
+                disable_mcp: false,
+                ..Default::default()
+            },
         };
         let checker_no_disable = TyposChecker::new(Some(config));
         assert!(checker_no_disable.build_tools_config().is_none());

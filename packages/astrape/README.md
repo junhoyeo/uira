@@ -87,7 +87,8 @@ Create an `astrape.yml` file in your project root:
 
 ```yaml
 typos:
-  model: anthropic/claude-sonnet-4-20250514
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
   parallel: false

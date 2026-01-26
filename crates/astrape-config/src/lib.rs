@@ -7,5 +7,5 @@ pub use loader::{
 };
 pub use schema::{
     AgentConfig, AgentSettings, AiHookCommand, AiHooksConfig, AstrapeConfig, HookCommand,
-    HookConfig, HooksConfig, McpServerConfig, McpSettings, TyposSettings,
+    HookConfig, HooksConfig, McpServerConfig, McpSettings, TyposAiSettings, TyposSettings,
 };

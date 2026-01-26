@@ -140,8 +140,8 @@ fn expand_env_vars(config: AstrapeConfig) -> AstrapeConfig {
 }
 
 fn expand_typos_settings(mut typos: crate::schema::TyposSettings) -> crate::schema::TyposSettings {
-    typos.model = expand_env_string(&typos.model);
-    typos.host = expand_env_string(&typos.host);
+    typos.ai.model = expand_env_string(&typos.ai.model);
+    typos.ai.host = expand_env_string(&typos.ai.host);
     typos
 }
 

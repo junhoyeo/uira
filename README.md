@@ -219,7 +219,8 @@ Astrape provides a standalone CLI for git hook management. Configure hooks in `a
 
 ```yaml
 typos:
-  model: anthropic/claude-sonnet-4-20250514
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
   parallel: false  # fmt must run first before clippy

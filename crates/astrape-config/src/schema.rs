@@ -115,14 +115,23 @@ fn default_opencode_auto_start() -> bool {
 ///
 /// ```yaml
 /// typos:
-///   model: "anthropic/claude-sonnet-4-20250514"
-///   host: "127.0.0.1"
-///   port: 4096
-///   disable_tools: true
-///   disable_mcp: true
+///   ai:
+///     model: "anthropic/claude-sonnet-4-20250514"
+///     host: "127.0.0.1"
+///     port: 4096
+///     disable_tools: true
+///     disable_mcp: true
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TyposSettings {
+    /// AI settings for typos checking
+    #[serde(default)]
+    pub ai: TyposAiSettings,
+}
+
+/// AI settings for typos command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyposAiSettings {
     /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
     #[serde(default = "default_typos_model")]
     pub model: String,
@@ -144,7 +153,7 @@ pub struct TyposSettings {
     pub disable_mcp: bool,
 }
 
-impl Default for TyposSettings {
+impl Default for TyposAiSettings {
     fn default() -> Self {
         Self {
             model: default_typos_model(),
@@ -156,7 +165,7 @@ impl Default for TyposSettings {
     }
 }
 
-impl TyposSettings {
+impl TyposAiSettings {
     /// Parse model string into (provider, model) tuple
     pub fn parse_model(&self) -> (String, String) {
         if let Some((provider, model)) = self.model.split_once('/') {
@@ -650,7 +659,8 @@ max_iterations: 50
     fn test_deserialize_config_with_goals() {
         let yaml = r#"
 typos:
-  model: anthropic/claude-sonnet-4-20250514
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 goals:
   goals:
