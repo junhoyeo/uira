@@ -2,11 +2,22 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Main Astrape configuration
+///
+/// Configuration is loaded from (in priority order):
+/// 1. `astrape.jsonc` - JSON with comments
+/// 2. `astrape.json` - Standard JSON
+/// 3. `astrape.yml` / `astrape.yaml` - YAML format
+///
+/// Also checks hidden variants (`.astrape.*`) and `~/.config/astrape/` for global config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AstrapeConfig {
     /// AI model settings
     #[serde(default)]
     pub ai: AiSettings,
+
+    /// HTTP proxy settings for model routing
+    #[serde(default)]
+    pub proxy: ProxySettings,
 
     /// MCP (Model Context Protocol) settings
     #[serde(default)]
@@ -27,6 +38,93 @@ pub struct AstrapeConfig {
     /// Score-based verification goals
     #[serde(default)]
     pub goals: GoalsConfig,
+}
+
+// ============================================================================
+// Proxy Configuration
+// ============================================================================
+
+/// HTTP proxy settings for agent-based model routing
+///
+/// The proxy intercepts requests to Anthropic API and routes them to
+/// alternative models based on agent configuration.
+///
+/// # Example
+///
+/// ```yaml
+/// proxy:
+///   port: 8787
+///   litellm_base_url: "http://localhost:4000"
+///   request_timeout_secs: 120
+///   auto_start: true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxySettings {
+    /// Server port (default: 8787)
+    #[serde(default = "default_proxy_port")]
+    pub port: u16,
+
+    /// LiteLLM proxy base URL (default: http://localhost:4000)
+    #[serde(default = "default_litellm_base_url")]
+    pub litellm_base_url: String,
+
+    /// Request timeout in seconds (default: 120)
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout_secs: u64,
+
+    /// Auto-start proxy when MCP server initializes (default: true)
+    #[serde(default = "default_auto_start")]
+    pub auto_start: bool,
+
+    /// Health check endpoint path (default: /health)
+    #[serde(default = "default_health_endpoint")]
+    pub health_endpoint: String,
+
+    /// Enable request logging (default: false)
+    #[serde(default)]
+    pub enable_logging: bool,
+
+    /// Maximum concurrent connections (default: 100)
+    #[serde(default = "default_max_connections")]
+    pub max_connections: u32,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            port: default_proxy_port(),
+            litellm_base_url: default_litellm_base_url(),
+            request_timeout_secs: default_request_timeout(),
+            auto_start: default_auto_start(),
+            health_endpoint: default_health_endpoint(),
+            enable_logging: false,
+            max_connections: default_max_connections(),
+        }
+    }
+}
+
+fn default_proxy_port() -> u16 {
+    8787
+}
+
+fn default_litellm_base_url() -> String {
+    "http://localhost:4000".to_string()
+}
+
+fn default_request_timeout() -> u64 {
+    120
+}
+
+fn default_auto_start() -> bool {
+    true
+}
+
+fn default_health_endpoint() -> String {
+    "/health".to_string()
+}
+
+fn default_max_connections() -> u32 {
+    100
 }
 
 /// HUD configuration
@@ -188,11 +286,19 @@ pub struct McpServerConfig {
     pub env: HashMap<String, String>,
 }
 
-/// Agent settings
+/// Agent settings - a map of agent names to their configurations
+///
+/// In YAML/JSON:
+/// ```yaml
+/// agents:
+///   explore:
+///     model: "opencode/gpt-5-nano"
+///   librarian:
+///     model: "opencode/big-pickle"
+/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentSettings {
-    /// Individual agent configurations
-    #[serde(default)]
+    #[serde(flatten)]
     pub agents: HashMap<String, AgentConfig>,
 }
 
