@@ -7,13 +7,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use tokio::process::Command;
 use walkdir::WalkDir;
 
 use crate::anthropic_client;
 use crate::opencode_client;
-use crate::proxy_manager::ProxyManager;
 use crate::router::{route_model, ModelPath};
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
@@ -52,17 +50,14 @@ fn extract_text(output: ToolOutput) -> String {
 pub struct ToolExecutor {
     root_path: PathBuf,
     lsp_client: LspClientImpl,
-    #[allow(dead_code)]
-    proxy_manager: Arc<ProxyManager>,
 }
 
 impl ToolExecutor {
-    pub fn new(root_path: PathBuf, proxy_manager: Arc<ProxyManager>) -> Self {
+    pub fn new(root_path: PathBuf) -> Self {
         let lsp_client = LspClientImpl::new(root_path.clone());
         Self {
             root_path,
             lsp_client,
-            proxy_manager,
         }
     }
 

@@ -5,7 +5,7 @@
 //! `~/Library/Application Support/opencode/auth.json` on macOS).
 //!
 //! This module loads that store and provides access tokens that can be passed to
-//! a LiteLLM proxy as an `api_key` field.
+//! and provides access tokens for direct provider API calls.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
