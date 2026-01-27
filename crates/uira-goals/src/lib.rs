@@ -1,4 +1,3 @@
-use uira_config::schema::GoalConfig;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -6,6 +5,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::time::timeout;
+use uira_config::schema::GoalConfig;
 
 #[derive(Error, Debug)]
 pub enum GoalError {

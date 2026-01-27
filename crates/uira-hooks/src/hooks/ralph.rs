@@ -433,9 +433,7 @@ impl RalphHook {
 
     /// Get the state file path for Ralph
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory)
-            .join(".uira")
-            .join("ralph-state.json")
+        Path::new(directory).join(".uira").join("ralph-state.json")
     }
 
     /// Get the progress file path

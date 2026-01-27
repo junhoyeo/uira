@@ -3,10 +3,6 @@ mod hooks;
 mod linter;
 mod typos;
 
-use uira_agents::get_agent_definitions;
-use uira_features::uira_state::has_uira_state;
-use uira_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
-use uira_sdk::{create_uira_session, SessionOptions};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use config::Config;
@@ -17,6 +13,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
 use typos::TyposChecker;
+use uira_agents::get_agent_definitions;
+use uira_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
+use uira_features::uira_state::has_uira_state;
+use uira_sdk::{create_uira_session, SessionOptions};
 
 #[derive(Parser)]
 #[command(name = "uira")]
@@ -679,12 +679,7 @@ fn session_command(action: SessionCommands) -> anyhow::Result<()> {
             }
 
             // Check for config files
-            let config_candidates = [
-                "uira.yaml",
-                "uira.yml",
-                "uira.json",
-                ".uira.yaml",
-            ];
+            let config_candidates = ["uira.yaml", "uira.yml", "uira.json", ".uira.yaml"];
             let found_config: Vec<_> = config_candidates
                 .iter()
                 .filter(|p| Path::new(p).exists())

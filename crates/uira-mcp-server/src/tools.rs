@@ -1,6 +1,4 @@
 use ast_grep_language::{LanguageExt, SupportLang};
-use uira_oxc::{LintRule, Linter, Severity};
-use uira_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use glob::glob;
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
@@ -11,6 +9,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use uira_oxc::{LintRule, Linter, Severity};
+use uira_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use walkdir::WalkDir;
 
 use uira_config::load_config;

@@ -621,10 +621,7 @@ target: 99.9
 "#;
         let goal: GoalConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(goal.name, "pixel-match");
-        assert_eq!(
-            goal.workspace,
-            Some(".uira/goals/pixel-match/".to_string())
-        );
+        assert_eq!(goal.workspace, Some(".uira/goals/pixel-match/".to_string()));
         assert_eq!(goal.command, "bun run check.ts");
         assert!((goal.target - 99.9).abs() < 0.01);
         assert_eq!(goal.timeout_secs, 60);

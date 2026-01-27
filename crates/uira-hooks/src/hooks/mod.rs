@@ -1,5 +1,4 @@
 pub mod agent_usage_reminder;
-pub mod uira_orchestrator;
 pub mod auto_slash_command;
 pub mod autopilot;
 pub mod background_notification;
@@ -21,6 +20,7 @@ pub mod rules_injector;
 pub mod think_mode;
 pub mod thinking_block_validator;
 pub mod todo_continuation;
+pub mod uira_orchestrator;
 pub mod ultrapilot;
 pub mod ultraqa;
 pub mod ultrawork;
@@ -28,9 +28,6 @@ pub mod ultrawork;
 pub use agent_usage_reminder::{
     clear_agent_usage_state, load_agent_usage_state, save_agent_usage_state,
     AgentUsageReminderHook, AgentUsageState, AGENT_TOOLS, REMINDER_MESSAGE, TARGET_TOOLS,
-};
-pub use uira_orchestrator::{
-    UiraOrchestratorHook, HOOK_NAME as UIRA_ORCHESTRATOR_HOOK_NAME,
 };
 pub use auto_slash_command::{
     AutoSlashCommandHook, AutoSlashCommandHookInput, AutoSlashCommandHookOutput,
@@ -132,6 +129,7 @@ pub use todo_continuation::{
     IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
     TODO_CONTINUATION_PROMPT,
 };
+pub use uira_orchestrator::{UiraOrchestratorHook, HOOK_NAME as UIRA_ORCHESTRATOR_HOOK_NAME};
 pub use ultrapilot::{
     FileOwnership, IntegrationResult, UltrapilotConfig, UltrapilotHook, UltrapilotState,
     WorkerState, WorkerStatus,

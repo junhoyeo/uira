@@ -1,10 +1,10 @@
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::Arc;
 use uira_hooks::hook::{Hook, HookContext, HookResult};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_hooks::registry::HookRegistry;
 use uira_hooks::types::{HookEvent, HookInput, HookOutput};
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Mock hook for testing priority ordering and message combining
 struct MockHook {
@@ -422,9 +422,9 @@ async fn test_empty_prompt_returns_pass() {
 
 mod ralph_goals_integration {
     use super::*;
-    use uira_hooks::hooks::ralph::RalphHook;
     use std::fs;
     use tempfile::TempDir;
+    use uira_hooks::hooks::ralph::RalphHook;
 
     fn create_test_directory() -> TempDir {
         tempfile::tempdir().expect("Failed to create temp directory")

@@ -365,10 +365,7 @@ continue working until everything is done."#
             }
 
             // ~/.config/uira/config.yaml
-            let xdg_config = home_path
-                .join(".config")
-                .join("uira")
-                .join("config.yaml");
+            let xdg_config = home_path.join(".config").join("uira").join("config.yaml");
             if xdg_config.exists() {
                 paths.push(xdg_config);
             }

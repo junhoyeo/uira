@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use uira_sdk::ModelType;
 use serde::{Deserialize, Serialize};
+use uira_sdk::ModelType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "UPPERCASE")]

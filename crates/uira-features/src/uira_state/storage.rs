@@ -4,16 +4,11 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use regex::Regex;
 
-use crate::uira_state::constants::{
-    UIRA_DIR, UIRA_STATE_FILE, PLANNER_PLANS_DIR, PLAN_EXTENSION,
-};
-use crate::uira_state::types::{UiraState, PlanProgress, PlanSummary};
+use crate::uira_state::constants::{PLANNER_PLANS_DIR, PLAN_EXTENSION, UIRA_DIR, UIRA_STATE_FILE};
+use crate::uira_state::types::{PlanProgress, PlanSummary, UiraState};
 
 pub fn get_uira_file_path(directory: impl AsRef<Path>) -> PathBuf {
-    directory
-        .as_ref()
-        .join(UIRA_DIR)
-        .join(UIRA_STATE_FILE)
+    directory.as_ref().join(UIRA_DIR).join(UIRA_STATE_FILE)
 }
 
 pub fn read_uira_state(directory: impl AsRef<Path>) -> Option<UiraState> {
@@ -126,10 +121,7 @@ pub fn get_plan_name(plan_path: impl AsRef<Path>) -> String {
         .to_string()
 }
 
-pub fn create_uira_state(
-    plan_path: impl AsRef<Path>,
-    session_id: impl Into<String>,
-) -> UiraState {
+pub fn create_uira_state(plan_path: impl AsRef<Path>, session_id: impl Into<String>) -> UiraState {
     let plan_path = plan_path.as_ref();
     UiraState {
         active_plan: plan_path.to_string_lossy().to_string(),

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use napi_derive::napi;
 use uira_agents::{get_agent_definitions_with_config, AgentModelConfig};
 use uira_core::HookOutput;
 use uira_features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
@@ -10,7 +11,6 @@ use uira_features::model_routing::{
 };
 use uira_hooks::{default_hooks, HookContext, HookEvent, HookInput};
 use uira_keywords::KeywordDetector;
-use napi_derive::napi;
 
 // ============================================================================
 // Hook Output Types
@@ -319,9 +319,7 @@ pub fn list_agents() -> Vec<JsAgentDefinition> {
         .map(|(name, config)| {
             let tier = match config.model {
                 Some(uira_sdk::ModelType::Haiku) => "LOW",
-                Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => {
-                    "MEDIUM"
-                }
+                Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => "MEDIUM",
                 Some(uira_sdk::ModelType::Opus) => "HIGH",
                 None => "MEDIUM",
             };
@@ -355,9 +353,7 @@ pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
     agents.get(&name).map(|config| {
         let tier = match config.model {
             Some(uira_sdk::ModelType::Haiku) => "LOW",
-            Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => {
-                "MEDIUM"
-            }
+            Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => "MEDIUM",
             Some(uira_sdk::ModelType::Opus) => "HIGH",
             None => "MEDIUM",
         };
@@ -590,10 +586,10 @@ pub fn register_background_task(
     description: String,
     agent: String,
 ) {
+    use chrono::Utc;
     use uira_hooks::hooks::background_notification::{
         background_tasks_dir, BackgroundTask, BackgroundTaskStatus,
     };
-    use chrono::Utc;
 
     let task = BackgroundTask {
         id: task_id.clone(),
