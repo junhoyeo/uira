@@ -482,7 +482,7 @@ Get the output from a background task. Returns immediately if complete, otherwis
 
 **Parameters:**
 - `taskId` (required): The task ID returned from `delegate_task` with `runInBackground=true`
-- `block` (optional): If true, blocks until the task completes (max timeout). Default: false
+- `block` (optional): If true, blocks until the task completes (max 120s by default). Default: false
 - `timeout` (optional): Timeout in seconds when blocking. Default: 120
 
 **Example:**

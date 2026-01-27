@@ -186,7 +186,7 @@ impl McpServer {
                         },
                         "model": {
                             "type": "string",
-                            "description": "Override model (sonnet, opus, haiku). If not specified, uses the agent's configured default"
+                            "description": "Override model - full model ID (e.g., 'anthropic/claude-sonnet-4-20250514', 'openai/gpt-4'). If not specified, uses the agent's configured default"
                         },
                         "allowedTools": {
                             "type": "array",
