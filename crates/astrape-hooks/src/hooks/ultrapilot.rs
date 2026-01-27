@@ -99,7 +99,7 @@ pub struct WorkerState {
     pub owned_files: Vec<String>,
     /// Current status
     pub status: WorkerStatus,
-    /// Task agent ID (from Task tool)
+    /// Task agent ID (from delegate_task tool)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
     /// Start timestamp

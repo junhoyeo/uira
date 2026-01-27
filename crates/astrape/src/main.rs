@@ -588,10 +588,10 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
                 "{}",
                 "Note: Full delegation requires active SDK session.".yellow()
             );
-            println!("To delegate, use the Task tool in an active Claude session:");
+            println!("To delegate, use the delegate_task MCP tool:");
             println!();
             println!(
-                "  Task(subagent_type=\"astrape:{}\", prompt=\"{}\"{})",
+                "  delegate_task(agent=\"{}\", prompt=\"{}\"{})",
                 agent,
                 prompt,
                 model
