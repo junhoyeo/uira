@@ -545,7 +545,7 @@ impl ToolExecutor {
             let prompt_owned = prompt.to_string();
             let allowed_tools_owned = allowed_tools.clone();
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let result = match route_model(&model_owned) {
                     ModelPath::Anthropic => {
                         anthropic_client::query(&prompt_owned, &model_owned, allowed_tools_owned)
@@ -570,6 +570,21 @@ impl ToolExecutor {
                     Err(e) => {
                         BACKGROUND_MANAGER.fail_task(&task_id, e);
                     }
+                }
+            });
+
+            // Spawn a watcher to handle panics/aborts
+            let task_id_watcher = task.id.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle.await {
+                    let error_msg = if e.is_panic() {
+                        "Task panicked during execution".to_string()
+                    } else if e.is_cancelled() {
+                        "Task was cancelled by runtime".to_string()
+                    } else {
+                        format!("Task failed: {}", e)
+                    };
+                    BACKGROUND_MANAGER.fail_task(&task_id_watcher, error_msg);
                 }
             });
 
@@ -618,7 +633,12 @@ impl ToolExecutor {
                                 .unwrap_or_else(|| "Task failed with unknown error".to_string()));
                         }
                         BackgroundTaskStatus::Cancelled => {
-                            return Err("Task was cancelled".to_string());
+                            return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                                "taskId": task_id,
+                                "status": "cancelled",
+                                "message": "Task was cancelled"
+                            }))
+                            .unwrap());
                         }
                         _ => {
                             if start.elapsed() > timeout {
