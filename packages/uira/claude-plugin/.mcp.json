@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "uira-tools": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/../../target/release/uira-mcp",
+      "args": [],
+      "env": {}
+    },
+    "websearch": {
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa"
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "grep_app": {
+      "type": "http",
+      "url": "https://mcp.grep.app"
+    }
+  }
+}

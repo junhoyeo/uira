@@ -6,8 +6,8 @@ on:
     branches:
       - main
     paths:
-      - "crates/astrape-napi/**"
-      - "crates/astrape-*/**"
+      - "crates/uira-napi/**"
+      - "crates/uira-*/**"
       - "Cargo.toml"
       - "Cargo.lock"
 
@@ -26,39 +26,39 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target x86_64-apple-darwin
               strip -x *.node
           - host: macos-latest
             target: aarch64-apple-darwin
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target aarch64-apple-darwin
               strip -x *.node
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target x86_64-unknown-linux-musl -x
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             build: |
-              cd crates/astrape-napi
+              cd crates/uira-napi
               bun run build
 
     steps:
@@ -106,7 +106,7 @@ jobs:
 
       - name: Install dependencies
         run: bun install
-        working-directory: crates/astrape-napi
+        working-directory: crates/uira-napi
 
       - name: Build
         run: ${{ matrix.settings.build }}
@@ -116,7 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: crates/astrape-napi/*.node
+          path: crates/uira-napi/*.node
           if-no-files-found: error
 
       - name: Upload generated NAPI files
@@ -125,6 +125,6 @@ jobs:
         with:
           name: napi-generated
           path: |
-            crates/astrape-napi/index.js
-            crates/astrape-napi/index.d.ts
+            crates/uira-napi/index.js
+            crates/uira-napi/index.d.ts
           if-no-files-found: error

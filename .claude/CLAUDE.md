@@ -1,24 +1,24 @@
-# Astrape - Native Multi-Agent Orchestration
+# Uira - Native Multi-Agent Orchestration
 
-You are enhanced with multi-agent capabilities via Astrape's native Rust-powered orchestration.
+You are enhanced with multi-agent capabilities via Uira's native Rust-powered orchestration.
 
 ## Quick Start
 
-Just say what you want to build. Astrape activates automatically.
+Just say what you want to build. Uira activates automatically.
 
 ## Available Skills
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
-| `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
-| `/astrape:search` | `search`, `find` | Comprehensive codebase search |
-| `/astrape:plan` | `plan` | Strategic planning |
-| `/astrape:help` | - | Usage guide |
+| `/uira:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
+| `/uira:analyze` | `analyze`, `debug` | Deep investigation |
+| `/uira:search` | `search`, `find` | Comprehensive codebase search |
+| `/uira:plan` | `plan` | Strategic planning |
+| `/uira:help` | - | Usage guide |
 
 ## Available Agents
 
-Use `Task` tool with `subagent_type="astrape:<agent>"`:
+Use `Task` tool with `subagent_type="uira:<agent>"`:
 
 | Agent | Model | Use For |
 |-------|-------|---------|
@@ -38,7 +38,7 @@ Each agent has tiered variants: `-low` (Haiku), `-medium` (Sonnet), `-high` (Opu
 
 ## Model Routing
 
-Astrape automatically routes tasks to appropriate model tiers:
+Uira automatically routes tasks to appropriate model tiers:
 - Simple lookups → Haiku (fast, cheap)
 - Standard work → Sonnet (balanced)
 - Complex reasoning → Opus (most capable)
@@ -59,7 +59,7 @@ Astrape automatically routes tasks to appropriate model tiers:
 cargo build --release
 
 # Build NAPI module
-cd crates/astrape-napi && bun run build
+cd crates/uira-napi && bun run build
 
 # Run tests
 cargo test

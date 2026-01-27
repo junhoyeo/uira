@@ -153,265 +153,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astrape"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "astrape-agents",
- "astrape-config",
- "astrape-core",
- "astrape-features",
- "astrape-goals",
- "astrape-keywords",
- "astrape-sdk",
- "clap",
- "colored",
- "dirs",
- "oxc",
- "predicates",
- "rayon",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml",
-]
-
-[[package]]
-name = "astrape-agents"
-version = "0.1.0"
-dependencies = [
- "astrape-sdk",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-comment-checker"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "streaming-iterator",
- "tempfile",
- "thiserror 2.0.18",
- "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-c",
- "tree-sitter-c-sharp",
- "tree-sitter-cpp",
- "tree-sitter-css",
- "tree-sitter-go",
- "tree-sitter-haskell",
- "tree-sitter-html",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-json 0.24.8",
- "tree-sitter-ocaml",
- "tree-sitter-php",
- "tree-sitter-python",
- "tree-sitter-ruby",
- "tree-sitter-rust",
- "tree-sitter-scala",
- "tree-sitter-typescript-codemod",
-]
-
-[[package]]
-name = "astrape-config"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "json5",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-features"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-hooks",
- "astrape-sdk",
- "chrono",
- "futures",
- "lazy_static",
- "parking_lot",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
-]
-
-[[package]]
-name = "astrape-goals"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-config",
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
-]
-
-[[package]]
-name = "astrape-hooks"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-comment-checker",
- "astrape-config",
- "astrape-goals",
- "async-trait",
- "chrono",
- "dirs",
- "lazy_static",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
-]
-
-[[package]]
-name = "astrape-keywords"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-core",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "astrape-mcp-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ast-grep-core",
- "ast-grep-language",
- "astrape-config",
- "astrape-features",
- "astrape-oxc",
- "astrape-tools",
- "claude-agent-sdk-rs",
- "dirs",
- "glob",
- "once_cell",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "walkdir",
- "which",
-]
-
-[[package]]
-name = "astrape-napi"
-version = "0.1.0"
-dependencies = [
- "astrape-agents",
- "astrape-config",
- "astrape-core",
- "astrape-features",
- "astrape-goals",
- "astrape-hooks",
- "astrape-keywords",
- "astrape-sdk",
- "chrono",
- "napi",
- "napi-build",
- "napi-derive",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
-]
-
-[[package]]
-name = "astrape-oxc"
-version = "0.1.0"
-dependencies = [
- "oxc",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "astrape-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "astrape-config",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "astrape-tools"
-version = "0.1.0"
-dependencies = [
- "astrape-agents",
- "astrape-features",
- "astrape-sdk",
- "async-trait",
- "chrono",
- "lsp-types 0.95.1",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tower-lsp",
- "uuid",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3968,6 +3709,265 @@ name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
+
+[[package]]
+name = "uira"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "colored",
+ "dirs",
+ "oxc",
+ "predicates",
+ "rayon",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "uira-agents",
+ "uira-config",
+ "uira-core",
+ "uira-features",
+ "uira-goals",
+ "uira-keywords",
+ "uira-sdk",
+]
+
+[[package]]
+name = "uira-agents"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uira-sdk",
+]
+
+[[package]]
+name = "uira-comment-checker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "streaming-iterator",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-c",
+ "tree-sitter-c-sharp",
+ "tree-sitter-cpp",
+ "tree-sitter-css",
+ "tree-sitter-go",
+ "tree-sitter-haskell",
+ "tree-sitter-html",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-json 0.24.8",
+ "tree-sitter-ocaml",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-scala",
+ "tree-sitter-typescript-codemod",
+]
+
+[[package]]
+name = "uira-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "json5",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "uira-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "uira-features"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "uira-hooks",
+ "uira-sdk",
+]
+
+[[package]]
+name = "uira-goals"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "uira-config",
+]
+
+[[package]]
+name = "uira-hooks"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "lazy_static",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "uira-comment-checker",
+ "uira-config",
+ "uira-goals",
+]
+
+[[package]]
+name = "uira-keywords"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uira-core",
+]
+
+[[package]]
+name = "uira-mcp-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ast-grep-core",
+ "ast-grep-language",
+ "claude-agent-sdk-rs",
+ "dirs",
+ "glob",
+ "once_cell",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uira-config",
+ "uira-features",
+ "uira-oxc",
+ "uira-tools",
+ "walkdir",
+ "which",
+]
+
+[[package]]
+name = "uira-napi"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tokio",
+ "uira-agents",
+ "uira-config",
+ "uira-core",
+ "uira-features",
+ "uira-goals",
+ "uira-hooks",
+ "uira-keywords",
+ "uira-sdk",
+]
+
+[[package]]
+name = "uira-oxc"
+version = "0.1.0"
+dependencies = [
+ "oxc",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "uira-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "uira-config",
+]
+
+[[package]]
+name = "uira-tools"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "lsp-types 0.95.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower-lsp",
+ "uira-agents",
+ "uira-features",
+ "uira-sdk",
+ "uuid",
+]
 
 [[package]]
 name = "unicode-id-start"

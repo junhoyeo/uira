@@ -1,0 +1,42 @@
+[package]
+name = "uira"
+description = "Lightning-fast Rust-native git hooks manager with AI harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+uira-core = { workspace = true }
+uira-keywords = { workspace = true }
+uira-sdk = { workspace = true }
+uira-agents = { workspace = true }
+uira-features = { workspace = true }
+uira-config = { path = "../uira-config" }
+uira-goals = { path = "../uira-goals" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+colored = { workspace = true }
+rayon = { workspace = true }
+oxc = { workspace = true }
+reqwest = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+
+[[bin]]
+name = "uira"
+path = "src/main.rs"

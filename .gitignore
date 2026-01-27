@@ -5,8 +5,8 @@ Cargo.lock
 
 # napi-rs build artifacts
 *.node
-crates/astrape-napi/index.js
-crates/astrape-napi/index.d.ts
+crates/uira-napi/index.js
+crates/uira-napi/index.d.ts
 
 # Node
 node_modules/
@@ -47,7 +47,7 @@ npm-debug.log*
 # Reference materials (external repos)
 references/
 
-# Astrape and legacy state directories
-.astrape/
+# Uira and legacy state directories
+.uira/
 .omc/
 .sisyphus/

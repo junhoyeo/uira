@@ -1,11 +1,11 @@
-![Astrape](./.github/assets/cover.jpg)
+![Uira](./.github/assets/cover.jpg)
 
 <div align="center">
-  <h1>Astrape</h1>
+  <h1>Uira</h1>
   <p>Lightning-fast multi-agent orchestration with native Rust performance</p>
 </div>
 
-> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
+> **Uira** (Māori: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
 
 ## Features
 
@@ -17,7 +17,7 @@
 - **Comment Checker** - Tree-sitter powered detection of problematic comments/docstrings
 - **Background Task Notifications** - Track and notify on background agent completions
 - **Skill System** - Extensible skill templates (ultrawork, analyze, plan, search)
-- **Git Hooks** - Configurable pre/post commit hooks via `astrape.yml`
+- **Git Hooks** - Configurable pre/post commit hooks via `uira.yml`
 - **Goal Verification** - Score-based verification for persistent work loops (ralph mode)
 
 ## Quick Start
@@ -26,20 +26,20 @@
 
 ```bash
 # Clone and build
-git clone https://github.com/junhoyeo/Astrape astrape
-cd astrape
+git clone https://github.com/junhoyeo/Uira uira
+cd uira
 cargo build --release
 
 # Build NAPI bindings (automatically syncs to plugin)
-cd crates/astrape-napi && bun run build
+cd crates/uira-napi && bun run build
 
 # Install plugin in Claude Code
-# Add packages/astrape/claude-plugin to your Claude Code plugins
+# Add packages/uira/claude-plugin to your Claude Code plugins
 ```
 
 ### Usage in Claude Code
 
-Just talk naturally - Astrape activates automatically:
+Just talk naturally - Uira activates automatically:
 
 ```
 "ultrawork: fix all TypeScript errors"    → Maximum parallel execution
@@ -72,7 +72,7 @@ Just talk naturally - Astrape activates automatically:
 
 ### Custom Model Routing
 
-Some agents can be configured to use non-Anthropic models via `astrape.yml`:
+Some agents can be configured to use non-Anthropic models via `uira.yml`:
 
 ```yaml
 agents:
@@ -88,11 +88,11 @@ agents:
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| `/astrape:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
-| `/astrape:analyze` | `analyze`, `debug` | Deep investigation |
-| `/astrape:search` | `search`, `find` | Comprehensive codebase search |
-| `/astrape:plan` | `plan` | Strategic planning |
-| `/astrape:help` | - | Usage guide |
+| `/uira:ultrawork` | `ultrawork`, `ulw` | Maximum parallel execution |
+| `/uira:analyze` | `analyze`, `debug` | Deep investigation |
+| `/uira:search` | `search`, `find` | Comprehensive codebase search |
+| `/uira:plan` | `plan` | Strategic planning |
+| `/uira:help` | - | Usage guide |
 
 ### Keyword Modes
 
@@ -110,28 +110,28 @@ agents:
                    ┌────────────────┐
                    ▼                ▼
 ┌───────────────────┐  ┌───────────────────────┐
-│  astrape-napi     │  │   astrape-mcp-server  │
+│  uira-napi     │  │   uira-mcp-server  │
 │  (NAPI Bindings)  │  │     (MCP Server)      │
 └───────────────────┘  └───────────────────────┘
           │                          │
           │              ┌───────────┴───────────┐
           │              ▼                       ▼
           │    ┌─────────────────┐    ┌─────────────────┐
-          │    │  astrape-tools  │    │   astrape-oxc   │
+          │    │  uira-tools  │    │   uira-oxc   │
           │    │  (LSP Client)   │    │  (JS/TS Tools)  │
           │    └─────────────────┘    └─────────────────┘
           │
           └───────┬─────────────┬─────────────┬
                   ▼             ▼             ▼
     ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
-    │   astrape-hooks   │ │  agents   │ │ astrape-features│
+    │   uira-hooks   │ │  agents   │ │ uira-features│
     │ (Hooks + Goals)   │ │(32 Agents)│ │ (Skills/Router) │
     └───────────────────┘ └───────────┘ └─────────────────┘
               │
               └── Ralph Hook (Stop event → goal verification)
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            astrape (CLI)                                    │
+│                            uira (CLI)                                    │
 │                  Git Hooks · Typo Check · Goals · Dev Tools                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -140,19 +140,19 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 
 | Crate | Description |
 |-------|-------------|
-| **astrape** | Standalone CLI for git hooks and dev tools |
-| **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
-| **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
-| **astrape-tools** | LSP client, tool registry, and orchestration utilities |
-| **astrape-keywords** | Keyword detection for agent activation |
-| **astrape-hooks** | Hook implementations (22 hooks) |
-| **astrape-agents** | Agent definitions and prompt loading |
-| **astrape-features** | Model routing, skills, state management |
-| **astrape-goals** | Score-based goal verification for ralph mode |
-| **astrape-napi** | Node.js bindings exposing Rust to the plugin |
-| **astrape-comment-checker** | Tree-sitter based comment detection |
-| **astrape-core** | Shared types and utilities |
-| **astrape-config** | Configuration loading and management |
+| **uira** | Standalone CLI for git hooks and dev tools |
+| **uira-mcp-server** | MCP server with native LSP and AST-grep integration |
+| **uira-oxc** | OXC-powered linter, parser, transformer, minifier |
+| **uira-tools** | LSP client, tool registry, and orchestration utilities |
+| **uira-keywords** | Keyword detection for agent activation |
+| **uira-hooks** | Hook implementations (22 hooks) |
+| **uira-agents** | Agent definitions and prompt loading |
+| **uira-features** | Model routing, skills, state management |
+| **uira-goals** | Score-based goal verification for ralph mode |
+| **uira-napi** | Node.js bindings exposing Rust to the plugin |
+| **uira-comment-checker** | Tree-sitter based comment detection |
+| **uira-core** | Shared types and utilities |
+| **uira-config** | Configuration loading and management |
 
 ## Model Routing Architecture
 
@@ -165,7 +165,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 
 ### OpenCode Configuration
 
-Configure OpenCode server settings in `astrape.yml`:
+Configure OpenCode server settings in `uira.yml`:
 
 ```yaml
 opencode:
@@ -195,7 +195,7 @@ Environment variables take precedence over config file values:
 
 **Example:**
 ```bash
-OPENCODE_PORT=8080 astrape-mcp  # Use port 8080 instead of 4096
+OPENCODE_PORT=8080 uira-mcp  # Use port 8080 instead of 4096
 ```
 
 ### Agent-Based Model Routing
@@ -203,7 +203,7 @@ OPENCODE_PORT=8080 astrape-mcp  # Use port 8080 instead of 4096
 Route different agents to different models based on purpose, not provider:
 
 ```yaml
-# astrape.yml
+# uira.yml
 agents:
   explore:
     model: "opencode/gpt-5-nano"  # Fast, cheap model for exploration
@@ -215,7 +215,7 @@ agents:
 
 ## Git Hooks
 
-Astrape provides a standalone CLI for git hook management. Configure hooks in `astrape.yml`:
+Uira provides a standalone CLI for git hook management. Configure hooks in `uira.yml`:
 
 ```yaml
 typos:
@@ -234,7 +234,7 @@ pre-commit:
     - name: clippy
       run: cargo clippy -- -D warnings
     - name: typos
-      run: ./target/debug/astrape typos --ai --stage
+      run: ./target/debug/uira typos --ai --stage
 
 post-commit:
   commands:
@@ -244,7 +244,7 @@ post-commit:
 
 Install hooks with:
 ```bash
-astrape install
+uira install
 ```
 
 ## Ralph Mode & Goal Verification
@@ -261,7 +261,7 @@ Ralph mode is a persistent work loop that keeps Claude working until tasks are t
 |------|----------------|
 | **Worker** (AI) | Write code, try fixes, iterate |
 | **Judge** (Script) | Measure reality objectively |
-| **System** (Astrape) | Keep worker working until judge says "done" |
+| **System** (Uira) | Keep worker working until judge says "done" |
 
 An agent can *think* it's done. A test coverage report doesn't hallucinate. A pixel-diff script doesn't confabulate. **Numbers don't lie.**
 
@@ -324,7 +324,7 @@ Ralph mode activates when Claude detects keywords in your prompt:
 
 ### Goal Configuration
 
-Define verification goals in `astrape.yml`:
+Define verification goals in `uira.yml`:
 
 ```yaml
 goals:
@@ -393,9 +393,9 @@ Continue working to meet all goals, then signal completion again.
 ### CLI Commands
 
 ```bash
-astrape goals list           # List all configured goals
-astrape goals check          # Run all goals, show results
-astrape goals check coverage # Run specific goal by name
+uira goals list           # List all configured goals
+uira goals check          # Run all goals, show results
+uira goals check coverage # Run specific goal by name
 ```
 
 ### Safety Features
@@ -407,7 +407,7 @@ astrape goals check coverage # Run specific goal by name
 
 ## MCP Server
 
-The `astrape-mcp` binary exposes development tools via the Model Context Protocol:
+The `uira-mcp` binary exposes development tools via the Model Context Protocol:
 
 ### LSP Tools
 | Tool | Description |
@@ -525,7 +525,7 @@ Cancel a running background task or all background tasks.
 
 ## OXC Tools
 
-The `astrape-oxc` crate provides fast JavaScript/TypeScript tooling powered by [OXC](https://oxc.rs):
+The `uira-oxc` crate provides fast JavaScript/TypeScript tooling powered by [OXC](https://oxc.rs):
 
 ### Linter
 10 built-in rules: `no-console`, `no-debugger`, `no-alert`, `no-eval`, `no-var`, `prefer-const`, `no-unused-vars`, `no-empty-function`, `no-duplicate-keys`, `no-param-reassign`
@@ -556,11 +556,11 @@ Minify JavaScript with optional mangling and compression, returning compression 
 cargo build --workspace --release
 
 # Build NAPI module (automatically syncs to plugin)
-cd crates/astrape-napi && bun run build
+cd crates/uira-napi && bun run build
 
 # Run tests
 cargo test --workspace
 
 # Build comment-checker
-cargo build --release -p astrape-comment-checker
+cargo build --release -p uira-comment-checker
 ```

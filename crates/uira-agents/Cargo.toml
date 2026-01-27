@@ -1,0 +1,17 @@
+[package]
+name = "uira-agents"
+description = "Agent infrastructure for Uira multi-agent orchestration"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-sdk = { workspace = true }
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

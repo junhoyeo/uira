@@ -1,40 +1,40 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/astrape",
-  "crates/astrape-core",
-  "crates/astrape-keywords",
-  "crates/astrape-napi",
-  "crates/astrape-sdk",
-  "crates/astrape-comment-checker",
-  "crates/astrape-hooks",
-  "crates/astrape-features",
-  "crates/astrape-agents",
-  "crates/astrape-tools",
-  "crates/astrape-config",
-  "crates/astrape-mcp-server",
-  "crates/astrape-oxc",
-  "crates/astrape-goals",
+  "crates/uira",
+  "crates/uira-core",
+  "crates/uira-keywords",
+  "crates/uira-napi",
+  "crates/uira-sdk",
+  "crates/uira-comment-checker",
+  "crates/uira-hooks",
+  "crates/uira-features",
+  "crates/uira-agents",
+  "crates/uira-tools",
+  "crates/uira-config",
+  "crates/uira-mcp-server",
+  "crates/uira-oxc",
+  "crates/uira-goals",
 ]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Junho Yeo <i@junho.io>"]
 license = "MIT"
-repository = "https://github.com/junhoyeo/astrape"
+repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates
-astrape-core = { path = "crates/astrape-core" }
-astrape-keywords = { path = "crates/astrape-keywords" }
-astrape-sdk = { path = "crates/astrape-sdk" }
-astrape-comment-checker = { path = "crates/astrape-comment-checker" }
-astrape-tools = { path = "crates/astrape-tools" }
-astrape-agents = { path = "crates/astrape-agents" }
-astrape-features = { path = "crates/astrape-features" }
-astrape-hooks = { path = "crates/astrape-hooks" }
-astrape-goals = { path = "crates/astrape-goals" }
-astrape-config = { path = "crates/astrape-config" }
+uira-core = { path = "crates/uira-core" }
+uira-keywords = { path = "crates/uira-keywords" }
+uira-sdk = { path = "crates/uira-sdk" }
+uira-comment-checker = { path = "crates/uira-comment-checker" }
+uira-tools = { path = "crates/uira-tools" }
+uira-agents = { path = "crates/uira-agents" }
+uira-features = { path = "crates/uira-features" }
+uira-hooks = { path = "crates/uira-hooks" }
+uira-goals = { path = "crates/uira-goals" }
+uira-config = { path = "crates/uira-config" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

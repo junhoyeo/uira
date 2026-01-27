@@ -1,0 +1,48 @@
+{
+  "name": "@uira/native",
+  "version": "0.1.0",
+  "description": "Native Node.js/Bun bindings for Uira AI harness - keyword detection, hook system",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "uira",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junhoyeo/uira"
+  },
+  "keywords": [
+    "uira",
+    "ai",
+    "hooks",
+    "claude",
+    "opencode",
+    "napi",
+    "native"
+  ],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "postbuild": "node scripts/sync-plugin.cjs",
+    "prepublishOnly": "napi prepublish -t npm",
+    "artifacts": "napi artifacts"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.5.1"
+  }
+}
