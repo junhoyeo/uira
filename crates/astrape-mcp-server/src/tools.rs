@@ -724,10 +724,23 @@ impl ToolExecutor {
             .unwrap())
         } else if let Some(task_id) = args["taskId"].as_str() {
             if let Some(task) = BACKGROUND_MANAGER.cancel_task(task_id) {
+                let status_str = match task.status {
+                    BackgroundTaskStatus::Queued => "queued",
+                    BackgroundTaskStatus::Pending => "pending",
+                    BackgroundTaskStatus::Running => "running",
+                    BackgroundTaskStatus::Completed => "completed",
+                    BackgroundTaskStatus::Error => "error",
+                    BackgroundTaskStatus::Cancelled => "cancelled",
+                };
+                let message = if task.status == BackgroundTaskStatus::Cancelled {
+                    "Task cancelled successfully"
+                } else {
+                    "Task was already in terminal state"
+                };
                 Ok(serde_json::to_string_pretty(&serde_json::json!({
                     "taskId": task.id,
-                    "status": "cancelled",
-                    "message": "Task cancelled successfully"
+                    "status": status_str,
+                    "message": message
                 }))
                 .unwrap())
             } else {

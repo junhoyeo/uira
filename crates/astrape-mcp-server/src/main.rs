@@ -240,7 +240,7 @@ impl McpServer {
                     "properties": {
                         "taskId": {
                             "type": "string",
-                            "description": "The task ID to cancel. Omit to cancel ALL background tasks."
+                            "description": "The task ID to cancel"
                         },
                         "all": {
                             "type": "boolean",
