@@ -5,10 +5,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-mod proxy_manager;
+mod anthropic_client;
+mod auth;
+mod opencode_client;
+mod opencode_server;
+mod router;
 mod tools;
 
-use proxy_manager::{ProxyManager, DEFAULT_PROXY_PORT};
 use tools::ToolExecutor;
 
 #[derive(Debug, Serialize)]
@@ -41,18 +44,12 @@ struct JsonRpcRequest {
 
 struct McpServer {
     executor: Arc<RwLock<ToolExecutor>>,
-    proxy_manager: Arc<ProxyManager>,
 }
 
 impl McpServer {
     fn new(root_path: PathBuf) -> Self {
-        let proxy_manager = Arc::new(ProxyManager::new(DEFAULT_PROXY_PORT));
         Self {
-            executor: Arc::new(RwLock::new(ToolExecutor::new(
-                root_path,
-                proxy_manager.clone(),
-            ))),
-            proxy_manager,
+            executor: Arc::new(RwLock::new(ToolExecutor::new(root_path))),
         }
     }
 
@@ -170,12 +167,11 @@ impl McpServer {
                     "required": ["pattern", "rewrite", "lang"]
                 }
             }),
-            // Agent Spawning Tool - routes through astrape-proxy for model routing
+            // Agent Delegation Tool - multi-provider model routing
             json!({
-                "name": "spawn_agent",
-                "description": "Spawn a specialized agent with automatic model routing through astrape-proxy. \
-                    The agent will run with ANTHROPIC_BASE_URL pointing to the proxy, which routes requests \
-                    to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
+                "name": "delegate_task",
+                "description": "Delegate a task to a specialized agent with multi-provider model routing via OpenCode. \
+                    Routes to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
                     Returns the agent's response.",
                 "inputSchema": {
                     "type": "object",
@@ -190,7 +186,7 @@ impl McpServer {
                         },
                         "model": {
                             "type": "string",
-                            "description": "Override model (sonnet, opus, haiku). If not specified, uses the agent's configured default"
+                            "description": "Override model - full model ID (e.g., 'anthropic/claude-sonnet-4-20250514', 'openai/gpt-4'). If not specified, uses the agent's configured default"
                         },
                         "allowedTools": {
                             "type": "array",
@@ -202,13 +198,56 @@ impl McpServer {
                             "minimum": 1,
                             "description": "Maximum number of turns before stopping. Default: 10"
                         },
-                        "proxyPort": {
-                            "type": "integer",
-                            "default": 8787,
-                            "description": "Port where astrape-proxy is running. Default: 8787"
+                        "runInBackground": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, runs the agent in the background and returns a task_id immediately. Use background_output to get results."
                         }
                     },
                     "required": ["agent", "prompt"]
+                }
+            }),
+            // Background Task Tools
+            json!({
+                "name": "background_output",
+                "description": "Get the output from a background task. Returns immediately if complete, otherwise shows current status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "taskId": {
+                            "type": "string",
+                            "description": "The task ID returned from delegate_task with runInBackground=true"
+                        },
+                        "block": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, blocks until the task completes (max 120s timeout)"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Timeout in seconds when blocking. Default: 120"
+                        }
+                    },
+                    "required": ["taskId"]
+                }
+            }),
+            json!({
+                "name": "background_cancel",
+                "description": "Cancel a running background task or all background tasks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "taskId": {
+                            "type": "string",
+                            "description": "The task ID to cancel"
+                        },
+                        "all": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, cancels ALL running background tasks"
+                        }
+                    }
                 }
             }),
         ]
@@ -244,10 +283,6 @@ impl McpServer {
     }
 
     async fn handle_initialize(&self, id: Option<Value>) -> JsonRpcResponse {
-        if let Err(e) = self.proxy_manager.ensure_running().await {
-            tracing::warn!(error = %e, "Failed to start proxy on initialize (non-fatal)");
-        }
-
         JsonRpcResponse {
             jsonrpc: "2.0",
             id,

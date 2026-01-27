@@ -7,66 +7,10 @@ use std::path::Path;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ai: Option<AiConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_hooks: Option<AiHooksConfig>,
 
     #[serde(flatten)]
     pub hooks: HashMap<String, HookConfig>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AiConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-
-    #[serde(default = "AiConfig::default_disable_tools")]
-    pub disable_tools: bool,
-
-    #[serde(default = "AiConfig::default_disable_mcp")]
-    pub disable_mcp: bool,
-}
-
-impl AiConfig {
-    fn default_disable_tools() -> bool {
-        true
-    }
-
-    fn default_disable_mcp() -> bool {
-        true
-    }
-
-    pub fn parse_model(&self) -> (String, String) {
-        let model_str = self
-            .model
-            .as_deref()
-            .unwrap_or("anthropic/claude-sonnet-4-20250514");
-
-        if let Some((provider, model)) = model_str.split_once('/') {
-            (provider.to_string(), model.to_string())
-        } else {
-            ("anthropic".to_string(), model_str.to_string())
-        }
-    }
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            model: None,
-            host: None,
-            port: None,
-            disable_tools: true,
-            disable_mcp: true,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -126,7 +70,6 @@ impl Config {
         hooks.insert("post-commit".to_string(), post_commit);
 
         Config {
-            ai: None,
             ai_hooks: None,
             hooks,
         }

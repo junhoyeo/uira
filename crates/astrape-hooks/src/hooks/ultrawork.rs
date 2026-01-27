@@ -252,8 +252,8 @@ impl UltraworkHook {
 Your ultrawork session is NOT complete. Incomplete todos remain.
 
 REMEMBER THE ULTRAWORK RULES:
-- **PARALLEL**: Fire independent calls simultaneously - NEVER wait sequentially
-- **BACKGROUND FIRST**: Use Task(run_in_background=true) for exploration (10+ concurrent)
+- **PARALLEL**: Fire independent delegate_task calls simultaneously - NEVER wait sequentially
+- **BACKGROUND FIRST**: Use delegate_task for exploration (10+ concurrent)
 - **TODO**: Track EVERY step. Mark complete IMMEDIATELY after each
 - **VERIFY**: Check ALL requirements met before done
 - **NO Premature Stopping**: ALL TODOs must be complete

@@ -4,8 +4,7 @@
 //! (typically `~/.local/share/opencode/auth.json` on Linux and
 //! `~/Library/Application Support/opencode/auth.json` on macOS).
 //!
-//! This module loads that store and provides access tokens that can be passed to
-//! a LiteLLM proxy as an `api_key` field.
+//! This module loads that store and provides access tokens for OpenCode session API calls.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -91,18 +90,5 @@ pub fn get_access_token(store: &AuthStore, provider: &str) -> Result<String> {
             Ok(access.clone())
         }
         AuthCredential::ApiKey { key } => Ok(key.clone()),
-    }
-}
-
-/// Map an API model identifier to a provider key used by OpenCode.
-///
-/// Model identifiers are generally of the form `provider/model-name`.
-pub fn model_to_provider(model: &str) -> &str {
-    let prefix = model.split('/').next().unwrap_or("anthropic");
-    match prefix {
-        "opencode" => "opencode",
-        "openai" | "gpt" => "openai",
-        "google" | "gemini" => "google",
-        _ => "anthropic",
     }
 }

@@ -21,14 +21,6 @@ impl AstrapeOrchestratorHook {
             .map(|s| s.to_string())
     }
 
-    fn get_tool_output_text(tool_output: &Option<serde_json::Value>) -> String {
-        match tool_output {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            Some(v) => v.to_string(),
-            None => String::new(),
-        }
-    }
-
     fn process_pre_tool(&self, input: &HookInput, _context: &HookContext) -> HookOutput {
         let tool_name = match &input.tool_name {
             Some(name) => name,
@@ -76,16 +68,7 @@ impl AstrapeOrchestratorHook {
             }
         }
 
-        if tool_name == "Task" || tool_name == "task" {
-            let tool_output = Self::get_tool_output_text(&input.tool_output);
-
-            let is_background = tool_output.contains("Background task launched")
-                || tool_output.contains("Background task resumed");
-
-            if is_background {
-                return HookOutput::pass();
-            }
-
+        if tool_name == "delegate_task" || tool_name.ends_with("__delegate_task") {
             let reminder = format!(
                 "<system-reminder>\n{}\n</system-reminder>",
                 VERIFICATION_REMINDER
@@ -217,11 +200,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_post_tool_adds_verification_after_task() {
+    async fn test_post_tool_adds_verification_after_delegate_task() {
         let hook = AstrapeOrchestratorHook;
         let context = create_test_context();
-        let mut input = create_test_input("Task", json!({"prompt": "do something"}));
-        input.tool_output = Some(json!("Task completed successfully"));
+        let mut input = create_test_input(
+            "delegate_task",
+            json!({"agent": "executor", "prompt": "do something"}),
+        );
+        input.tool_output = Some(json!({"success": true, "result": "Task completed"}));
 
         let result = hook
             .execute(HookEvent::PostToolUse, &input, &context)
@@ -234,11 +220,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_post_tool_skips_background_tasks() {
+    async fn test_post_tool_adds_verification_for_mcp_delegate_task() {
         let hook = AstrapeOrchestratorHook;
         let context = create_test_context();
-        let mut input = create_test_input("Task", json!({"prompt": "do something"}));
-        input.tool_output = Some(json!("Background task launched with id: abc123"));
+        let mut input = create_test_input(
+            "mcp__astrape__delegate_task",
+            json!({"agent": "executor", "prompt": "do something"}),
+        );
+        input.tool_output = Some(json!({"success": true}));
 
         let result = hook
             .execute(HookEvent::PostToolUse, &input, &context)
@@ -246,7 +235,8 @@ mod tests {
             .unwrap();
 
         assert!(result.should_continue);
-        assert!(result.message.is_none());
+        assert!(result.message.is_some());
+        assert!(result.message.unwrap().contains("MANDATORY VERIFICATION"));
     }
 
     #[test]

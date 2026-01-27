@@ -86,8 +86,9 @@ npx astrape goals check
 Create an `astrape.yml` file in your project root:
 
 ```yaml
-ai:
-  model: anthropic/claude-sonnet-4-20250514
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
   parallel: false

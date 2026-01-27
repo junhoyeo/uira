@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 use crate::hook::{Hook, HookContext, HookResult};
-use crate::hooks::ralph::RalphHook;
 use crate::hooks::todo_continuation::{
     StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
 };
@@ -63,80 +62,6 @@ pub fn reset_todo_continuation_attempts(session_id: &str) {
     let mut attempts = TODO_CONTINUATION_ATTEMPTS.write().unwrap();
     attempts.remove(session_id);
 }
-
-#[allow(dead_code)]
-fn check_ralph_loop(session_id: Option<&str>, directory: &str) -> Option<PersistentModeResult> {
-    let state = RalphHook::read_state(Some(directory))?;
-
-    if !state.active {
-        return None;
-    }
-
-    if let (Some(state_sid), Some(sid)) = (&state.session_id, session_id) {
-        if state_sid != sid {
-            return None;
-        }
-    }
-
-    if state.iteration >= state.max_iterations {
-        RalphHook::clear_state(Some(directory));
-        UltraworkHook::deactivate(Some(directory));
-        return Some(PersistentModeResult {
-            should_block: false,
-            message: format!(
-                "[RALPH LOOP STOPPED] Max iterations ({}) reached without completion promise. Consider reviewing the task requirements.",
-                state.max_iterations
-            ),
-            mode: PersistentMode::None,
-            metadata: PersistentModeMetadata::default(),
-        });
-    }
-
-    let new_state = RalphHook::increment_iteration(Some(directory))?;
-
-    let message = format!(
-        r#"<ralph-continuation>
-
-[RALPH - ITERATION {}/{}]
-
-Your previous attempt did not output the completion promise. The work is NOT done yet.
-
-CRITICAL INSTRUCTIONS:
-1. Review your progress and the original task
-2. Check your todo list - are ALL items marked complete?
-3. Continue from where you left off
-4. When FULLY complete, output: <promise>{}</promise>
-5. Do NOT stop until the task is truly done
-
-{}
-
-</ralph-continuation>
-
----
-
-"#,
-        new_state.iteration,
-        new_state.max_iterations,
-        new_state.completion_promise,
-        new_state
-            .prompt
-            .as_ref()
-            .map(|p| format!("Original task: {}", p))
-            .unwrap_or_default()
-    );
-
-    Some(PersistentModeResult {
-        should_block: true,
-        message,
-        mode: PersistentMode::Ralph,
-        metadata: PersistentModeMetadata {
-            iteration: Some(new_state.iteration),
-            max_iterations: Some(new_state.max_iterations),
-            ..Default::default()
-        },
-    })
-}
-
 fn check_ultrawork(
     session_id: Option<&str>,
     directory: &str,
@@ -268,12 +193,6 @@ pub fn check_persistent_modes(
     let has_incomplete_todos = todo_result.count > 0;
 
     // Ralph is now handled by the RalphHook directly for full goal-based verification
-    // if let Some(result) = check_ralph_loop(session_id, directory) {
-    //     if result.should_block {
-    //         return result;
-    //     }
-    // }
-
     if let Some(result) = check_ultrawork(session_id, directory, has_incomplete_todos) {
         if result.should_block {
             return result;

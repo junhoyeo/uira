@@ -11,13 +11,13 @@ use std::collections::HashMap;
 /// Also checks hidden variants (`.astrape.*`) and `~/.config/astrape/` for global config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AstrapeConfig {
-    /// AI model settings
+    /// Typos command settings (AI-assisted typo checking)
     #[serde(default)]
-    pub ai: AiSettings,
+    pub typos: TyposSettings,
 
-    /// HTTP proxy settings for model routing
+    /// OpenCode server settings
     #[serde(default)]
-    pub proxy: ProxySettings,
+    pub opencode: OpencodeSettings,
 
     /// MCP (Model Context Protocol) settings
     #[serde(default)]
@@ -41,90 +41,159 @@ pub struct AstrapeConfig {
 }
 
 // ============================================================================
-// Proxy Configuration
+// OpenCode Configuration
 // ============================================================================
 
-/// HTTP proxy settings for agent-based model routing
+/// OpenCode server settings
 ///
-/// The proxy intercepts requests to Anthropic API and routes them to
-/// alternative models based on agent configuration.
+/// Configuration for connecting to OpenCode server for agent-based model routing.
 ///
 /// # Example
 ///
 /// ```yaml
-/// proxy:
-///   port: 8787
-///   litellm_base_url: "http://localhost:4000"
-///   request_timeout_secs: 120
+/// opencode:
+///   host: 127.0.0.1
+///   port: 4096
+///   timeout_secs: 120
 ///   auto_start: true
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxySettings {
-    /// Server port (default: 8787)
-    #[serde(default = "default_proxy_port")]
+pub struct OpencodeSettings {
+    /// Server host (default: 127.0.0.1)
+    #[serde(default = "default_opencode_host")]
+    pub host: String,
+
+    /// Server port (default: 4096)
+    #[serde(default = "default_opencode_port")]
     pub port: u16,
 
-    /// LiteLLM proxy base URL (default: http://localhost:4000)
-    #[serde(default = "default_litellm_base_url")]
-    pub litellm_base_url: String,
-
     /// Request timeout in seconds (default: 120)
-    #[serde(default = "default_request_timeout")]
-    pub request_timeout_secs: u64,
+    #[serde(default = "default_opencode_timeout")]
+    pub timeout_secs: u64,
 
-    /// Auto-start proxy when MCP server initializes (default: true)
-    #[serde(default = "default_auto_start")]
+    /// Auto-start OpenCode server (default: true)
+    #[serde(default = "default_opencode_auto_start")]
     pub auto_start: bool,
-
-    /// Health check endpoint path (default: /health)
-    #[serde(default = "default_health_endpoint")]
-    pub health_endpoint: String,
-
-    /// Enable request logging (default: false)
-    #[serde(default)]
-    pub enable_logging: bool,
-
-    /// Maximum concurrent connections (default: 100)
-    #[serde(default = "default_max_connections")]
-    pub max_connections: u32,
 }
 
-impl Default for ProxySettings {
+impl Default for OpencodeSettings {
     fn default() -> Self {
         Self {
-            port: default_proxy_port(),
-            litellm_base_url: default_litellm_base_url(),
-            request_timeout_secs: default_request_timeout(),
-            auto_start: default_auto_start(),
-            health_endpoint: default_health_endpoint(),
-            enable_logging: false,
-            max_connections: default_max_connections(),
+            host: default_opencode_host(),
+            port: default_opencode_port(),
+            timeout_secs: default_opencode_timeout(),
+            auto_start: default_opencode_auto_start(),
         }
     }
 }
 
-fn default_proxy_port() -> u16 {
-    8787
+fn default_opencode_host() -> String {
+    "127.0.0.1".to_string()
 }
 
-fn default_litellm_base_url() -> String {
-    "http://localhost:4000".to_string()
+fn default_opencode_port() -> u16 {
+    4096
 }
 
-fn default_request_timeout() -> u64 {
+fn default_opencode_timeout() -> u64 {
     120
 }
 
-fn default_auto_start() -> bool {
+fn default_opencode_auto_start() -> bool {
     true
 }
 
-fn default_health_endpoint() -> String {
-    "/health".to_string()
+// ============================================================================
+// Typos Configuration
+// ============================================================================
+
+/// Typos command settings for AI-assisted typo checking
+///
+/// Configuration for the `astrape typos --ai` command.
+///
+/// # Example
+///
+/// ```yaml
+/// typos:
+///   ai:
+///     model: "anthropic/claude-sonnet-4-20250514"
+///     host: "127.0.0.1"
+///     port: 4096
+///     disable_tools: true
+///     disable_mcp: true
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TyposSettings {
+    /// AI settings for typos checking
+    #[serde(default)]
+    pub ai: TyposAiSettings,
 }
 
-fn default_max_connections() -> u32 {
-    100
+/// AI settings for typos command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TyposAiSettings {
+    /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
+    #[serde(default = "default_typos_model")]
+    pub model: String,
+
+    /// OpenCode server host (default: 127.0.0.1)
+    #[serde(default = "default_typos_host")]
+    pub host: String,
+
+    /// OpenCode server port (default: 4096)
+    #[serde(default = "default_typos_port")]
+    pub port: u16,
+
+    /// Disable built-in tools (default: true)
+    #[serde(default = "default_typos_disable_tools")]
+    pub disable_tools: bool,
+
+    /// Disable MCP servers (default: true)
+    #[serde(default = "default_typos_disable_mcp")]
+    pub disable_mcp: bool,
+}
+
+impl Default for TyposAiSettings {
+    fn default() -> Self {
+        Self {
+            model: default_typos_model(),
+            host: default_typos_host(),
+            port: default_typos_port(),
+            disable_tools: default_typos_disable_tools(),
+            disable_mcp: default_typos_disable_mcp(),
+        }
+    }
+}
+
+impl TyposAiSettings {
+    /// Parse model string into (provider, model) tuple
+    pub fn parse_model(&self) -> (String, String) {
+        if let Some((provider, model)) = self.model.split_once('/') {
+            (provider.to_string(), model.to_string())
+        } else {
+            ("anthropic".to_string(), self.model.clone())
+        }
+    }
+}
+
+fn default_typos_model() -> String {
+    "anthropic/claude-sonnet-4-20250514".to_string()
+}
+
+fn default_typos_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_typos_port() -> u16 {
+    4096
+}
+
+fn default_typos_disable_tools() -> bool {
+    true
+}
+
+fn default_typos_disable_mcp() -> bool {
+    true
 }
 
 /// HUD configuration
@@ -220,47 +289,6 @@ pub struct PluginSettings {
     /// Plugin-specific configuration
     #[serde(default)]
     pub config: HashMap<String, serde_json::Value>,
-}
-
-/// AI model configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiSettings {
-    /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
-    #[serde(default = "default_model")]
-    pub model: String,
-
-    /// Temperature for model responses (0.0 - 1.0)
-    #[serde(default = "default_temperature")]
-    pub temperature: f32,
-
-    /// Opencode server host
-    #[serde(default = "default_host")]
-    pub host: String,
-
-    /// Opencode server port
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    /// Disable built-in tools
-    #[serde(default = "default_disable_tools")]
-    pub disable_tools: bool,
-
-    /// Disable MCP servers
-    #[serde(default = "default_disable_mcp")]
-    pub disable_mcp: bool,
-}
-
-impl Default for AiSettings {
-    fn default() -> Self {
-        Self {
-            model: default_model(),
-            temperature: default_temperature(),
-            host: default_host(),
-            port: default_port(),
-            disable_tools: default_disable_tools(),
-            disable_mcp: default_disable_mcp(),
-        }
-    }
 }
 
 /// MCP (Model Context Protocol) settings
@@ -541,63 +569,9 @@ fn default_tier() -> String {
     "medium".to_string()
 }
 
-fn default_model() -> String {
-    "anthropic/claude-sonnet-4-20250514".to_string()
-}
-
-fn default_temperature() -> f32 {
-    0.7
-}
-
-fn default_host() -> String {
-    "127.0.0.1".to_string()
-}
-
-fn default_port() -> u16 {
-    4096
-}
-
-fn default_disable_tools() -> bool {
-    true
-}
-
-fn default_disable_mcp() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_default_ai_settings() {
-        let ai = AiSettings::default();
-        assert_eq!(ai.model, "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(ai.temperature, 0.7);
-        assert_eq!(ai.host, "127.0.0.1");
-        assert_eq!(ai.port, 4096);
-        assert!(ai.disable_tools);
-        assert!(ai.disable_mcp);
-    }
-
-    #[test]
-    fn test_deserialize_ai_settings() {
-        let yaml = r#"
-model: anthropic/claude-opus-4-1
-temperature: 0.5
-host: localhost
-port: 8080
-disable_tools: false
-disable_mcp: false
-"#;
-        let ai: AiSettings = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(ai.model, "anthropic/claude-opus-4-1");
-        assert_eq!(ai.temperature, 0.5);
-        assert_eq!(ai.host, "localhost");
-        assert_eq!(ai.port, 8080);
-        assert!(!ai.disable_tools);
-        assert!(!ai.disable_mcp);
-    }
 
     #[test]
     fn test_deserialize_hook_config() {
@@ -620,10 +594,6 @@ commands:
     #[test]
     fn test_deserialize_full_config() {
         let yaml = r#"
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
-
 hooks:
   pre_commit:
     parallel: true
@@ -637,7 +607,6 @@ hooks:
         run: git push origin HEAD
 "#;
         let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-sonnet-4-20250514");
         assert!(config.hooks.pre_commit.is_some());
         assert!(config.hooks.post_commit.is_some());
     }
@@ -689,8 +658,9 @@ max_iterations: 50
     #[test]
     fn test_deserialize_config_with_goals() {
         let yaml = r#"
-ai:
-  model: anthropic/claude-sonnet-4-20250514
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 goals:
   goals:

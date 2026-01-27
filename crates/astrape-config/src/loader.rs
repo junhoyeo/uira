@@ -129,14 +129,27 @@ pub fn find_all_config_files() -> Vec<PathBuf> {
 
 fn expand_env_vars(config: AstrapeConfig) -> AstrapeConfig {
     AstrapeConfig {
-        ai: expand_ai_settings(config.ai),
-        proxy: expand_proxy_settings(config.proxy),
+        typos: expand_typos_settings(config.typos),
+        opencode: expand_opencode_settings(config.opencode),
         mcp: expand_mcp_settings(config.mcp),
         agents: config.agents,
         hooks: config.hooks,
         ai_hooks: config.ai_hooks,
         goals: expand_goals_settings(config.goals),
     }
+}
+
+fn expand_opencode_settings(
+    mut opencode: crate::schema::OpencodeSettings,
+) -> crate::schema::OpencodeSettings {
+    opencode.host = expand_env_string(&opencode.host);
+    opencode
+}
+
+fn expand_typos_settings(mut typos: crate::schema::TyposSettings) -> crate::schema::TyposSettings {
+    typos.ai.model = expand_env_string(&typos.ai.model);
+    typos.ai.host = expand_env_string(&typos.ai.host);
+    typos
 }
 
 fn expand_goals_settings(mut goals: crate::schema::GoalsConfig) -> crate::schema::GoalsConfig {
@@ -147,18 +160,6 @@ fn expand_goals_settings(mut goals: crate::schema::GoalsConfig) -> crate::schema
         }
     }
     goals
-}
-
-fn expand_ai_settings(mut ai: crate::schema::AiSettings) -> crate::schema::AiSettings {
-    ai.model = expand_env_string(&ai.model);
-    ai.host = expand_env_string(&ai.host);
-    ai
-}
-
-fn expand_proxy_settings(mut proxy: crate::schema::ProxySettings) -> crate::schema::ProxySettings {
-    proxy.litellm_base_url = expand_env_string(&proxy.litellm_base_url);
-    proxy.health_endpoint = expand_env_string(&proxy.health_endpoint);
-    proxy
 }
 
 fn expand_mcp_settings(mut mcp: crate::schema::McpSettings) -> crate::schema::McpSettings {
@@ -264,9 +265,8 @@ mod tests {
     #[test]
     fn test_load_config_from_yaml() {
         let yaml_content = r#"
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
+opencode:
+  port: 4096
 
 pre-commit:
   parallel: true
@@ -275,21 +275,18 @@ pre-commit:
       run: cargo fmt --check
 "#;
         let config: AstrapeConfig = serde_yaml::from_str(yaml_content).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(config.ai.temperature, 0.7);
+        assert_eq!(config.opencode.port, 4096);
     }
 
     #[test]
     fn test_load_config_from_json() {
         let json_content = r#"{
-  "ai": {
-    "model": "anthropic/claude-opus-4-1",
-    "temperature": 0.5
+  "opencode": {
+    "port": 8080
   }
 }"#;
         let config: AstrapeConfig = serde_json::from_str(json_content).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-opus-4-1");
-        assert_eq!(config.ai.temperature, 0.5);
+        assert_eq!(config.opencode.port, 8080);
     }
 
     #[test]
@@ -333,18 +330,13 @@ pre-commit:
     fn test_load_jsonc_with_comments() {
         let jsonc_content = r#"{
   // This is a comment
-  "ai": {
-    "model": "anthropic/claude-opus-4-1", // inline comment
-    "temperature": 0.5
-  },
-  /* block comment */
-  "proxy": {
-    "port": 9000
+  "opencode": {
+    "port": 9000 // inline comment
   }
+  /* block comment */
 }"#;
         let config: AstrapeConfig = json5::from_str(jsonc_content).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-opus-4-1");
-        assert_eq!(config.proxy.port, 9000);
+        assert_eq!(config.opencode.port, 9000);
     }
 
     #[test]
@@ -354,15 +346,13 @@ pre-commit:
 
         let content = r#"{
   // Configuration with comments
-  "ai": { "model": "test-model" },
-  "proxy": { "port": 8888 }
+  "opencode": { "port": 5000 }
 }"#;
         fs::write(&path, content).unwrap();
 
         let resolved = load_config_from_file(&path).unwrap();
         assert_eq!(resolved.format, ConfigFormat::Jsonc);
-        assert_eq!(resolved.config.ai.model, "test-model");
-        assert_eq!(resolved.config.proxy.port, 8888);
+        assert_eq!(resolved.config.opencode.port, 5000);
     }
 
     #[test]
@@ -370,13 +360,12 @@ pre-commit:
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("astrape.json");
 
-        let content = r#"{"ai": {"model": "json-model"}, "proxy": {"port": 7777}}"#;
+        let content = r#"{"opencode": {"port": 6000}}"#;
         fs::write(&path, content).unwrap();
 
         let resolved = load_config_from_file(&path).unwrap();
         assert_eq!(resolved.format, ConfigFormat::Json);
-        assert_eq!(resolved.config.ai.model, "json-model");
-        assert_eq!(resolved.config.proxy.port, 7777);
+        assert_eq!(resolved.config.opencode.port, 6000);
     }
 
     #[test]
@@ -385,64 +374,14 @@ pre-commit:
         let path = dir.path().join("astrape.yml");
 
         let content = r#"
-ai:
-  model: yaml-model
-proxy:
-  port: 6666
+opencode:
+  port: 7000
 "#;
         fs::write(&path, content).unwrap();
 
         let resolved = load_config_from_file(&path).unwrap();
         assert_eq!(resolved.format, ConfigFormat::Yaml);
-        assert_eq!(resolved.config.ai.model, "yaml-model");
-        assert_eq!(resolved.config.proxy.port, 6666);
-    }
-
-    #[test]
-    fn test_proxy_settings_defaults() {
-        let config = AstrapeConfig::default();
-        assert_eq!(config.proxy.port, 8787);
-        assert_eq!(config.proxy.litellm_base_url, "http://localhost:4000");
-        assert_eq!(config.proxy.request_timeout_secs, 120);
-        assert!(config.proxy.auto_start);
-        assert_eq!(config.proxy.health_endpoint, "/health");
-        assert!(!config.proxy.enable_logging);
-        assert_eq!(config.proxy.max_connections, 100);
-    }
-
-    #[test]
-    fn test_proxy_settings_from_yaml() {
-        let yaml = r#"
-proxy:
-  port: 9999
-  litellm_base_url: "http://custom:5000"
-  request_timeout_secs: 60
-  auto_start: false
-  enable_logging: true
-  max_connections: 50
-"#;
-        let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.proxy.port, 9999);
-        assert_eq!(config.proxy.litellm_base_url, "http://custom:5000");
-        assert_eq!(config.proxy.request_timeout_secs, 60);
-        assert!(!config.proxy.auto_start);
-        assert!(config.proxy.enable_logging);
-        assert_eq!(config.proxy.max_connections, 50);
-    }
-
-    #[test]
-    fn test_proxy_env_var_expansion() {
-        env::set_var("TEST_LITELLM_URL", "http://env-url:4000");
-
-        let yaml = r#"
-proxy:
-  litellm_base_url: "${TEST_LITELLM_URL}"
-"#;
-        let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
-        let expanded = expand_env_vars(config);
-        assert_eq!(expanded.proxy.litellm_base_url, "http://env-url:4000");
-
-        env::remove_var("TEST_LITELLM_URL");
+        assert_eq!(resolved.config.opencode.port, 7000);
     }
 
     #[test]
@@ -464,16 +403,16 @@ proxy:
         let jsonc_path = dir.path().join("config.jsonc");
         let json_path = dir.path().join("config.json");
 
-        fs::write(&jsonc_path, r#"{"ai": {"model": "jsonc-wins"}}"#).unwrap();
-        fs::write(&json_path, r#"{"ai": {"model": "json-loses"}}"#).unwrap();
+        fs::write(&jsonc_path, r#"{"opencode": {"port": 1111}}"#).unwrap();
+        fs::write(&json_path, r#"{"opencode": {"port": 2222}}"#).unwrap();
 
         let jsonc_result = load_config_from_file(&jsonc_path).unwrap();
         let json_result = load_config_from_file(&json_path).unwrap();
 
         assert_eq!(jsonc_result.format, ConfigFormat::Jsonc);
         assert_eq!(json_result.format, ConfigFormat::Json);
-        assert_eq!(jsonc_result.config.ai.model, "jsonc-wins");
-        assert_eq!(json_result.config.ai.model, "json-loses");
+        assert_eq!(jsonc_result.config.opencode.port, 1111);
+        assert_eq!(json_result.config.opencode.port, 2222);
     }
 
     #[test]
@@ -483,16 +422,16 @@ proxy:
         let json_path = dir.path().join("config.json");
         let yml_path = dir.path().join("config.yml");
 
-        fs::write(&json_path, r#"{"ai": {"model": "json-wins"}}"#).unwrap();
-        fs::write(&yml_path, "ai:\n  model: yml-loses").unwrap();
+        fs::write(&json_path, r#"{"opencode": {"port": 3333}}"#).unwrap();
+        fs::write(&yml_path, "opencode:\n  port: 4444").unwrap();
 
         let json_result = load_config_from_file(&json_path).unwrap();
         let yml_result = load_config_from_file(&yml_path).unwrap();
 
         assert_eq!(json_result.format, ConfigFormat::Json);
         assert_eq!(yml_result.format, ConfigFormat::Yaml);
-        assert_eq!(json_result.config.ai.model, "json-wins");
-        assert_eq!(yml_result.config.ai.model, "yml-loses");
+        assert_eq!(json_result.config.opencode.port, 3333);
+        assert_eq!(yml_result.config.opencode.port, 4444);
     }
 
     #[test]
@@ -504,46 +443,14 @@ proxy:
         let yml = dir.path().join("test.yml");
         let yaml = dir.path().join("test.yaml");
 
-        fs::write(&jsonc, r#"{"ai": {"model": "m1"}}"#).unwrap();
-        fs::write(&json, r#"{"ai": {"model": "m2"}}"#).unwrap();
-        fs::write(&yml, "ai:\n  model: m3").unwrap();
-        fs::write(&yaml, "ai:\n  model: m4").unwrap();
+        fs::write(&jsonc, r#"{"opencode": {"port": 1}}"#).unwrap();
+        fs::write(&json, r#"{"opencode": {"port": 2}}"#).unwrap();
+        fs::write(&yml, "opencode:\n  port: 3").unwrap();
+        fs::write(&yaml, "opencode:\n  port: 4").unwrap();
 
         assert!(load_config_from_file(&jsonc).is_ok());
         assert!(load_config_from_file(&json).is_ok());
         assert!(load_config_from_file(&yml).is_ok());
         assert!(load_config_from_file(&yaml).is_ok());
-    }
-
-    #[test]
-    fn test_full_config_with_proxy() {
-        let yaml = r#"
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
-
-proxy:
-  port: 8787
-  litellm_base_url: "http://localhost:4000"
-  request_timeout_secs: 120
-  auto_start: true
-
-agents:
-  explore:
-    model: "opencode/gpt-5-nano"
-  librarian:
-    model: "opencode/big-pickle"
-
-goals:
-  goals:
-    - name: test-coverage
-      command: echo 100
-      target: 80.0
-"#;
-        let config: AstrapeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.ai.model, "anthropic/claude-sonnet-4-20250514");
-        assert_eq!(config.proxy.port, 8787);
-        assert!(config.proxy.auto_start);
-        assert_eq!(config.goals.goals.len(), 1);
     }
 }

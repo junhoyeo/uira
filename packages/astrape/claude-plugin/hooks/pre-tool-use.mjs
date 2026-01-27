@@ -47,9 +47,9 @@ if (toolName === 'Task') {
     console.log(JSON.stringify({
       continue: false,
       decision: 'block',
-      reason: `Agent '${agentName}' requires custom model routing. Use the spawn_agent MCP tool instead:\n\n` +
-        `mcp__plugin_astrape_astrape-tools__spawn_agent(agent="${agentName}", prompt="your prompt here")\n\n` +
-        `This ensures the agent routes through astrape-proxy to the correct model (e.g., opencode/big-pickle for librarian).`
+      reason: `Agent '${agentName}' requires custom model routing. Use the delegate_task MCP tool instead:\n\n` +
+        `mcp__plugin_astrape_astrape-tools__delegate_task(agent="${agentName}", prompt="your prompt here")\n\n` +
+        `This ensures the agent routes to the correct model via OpenCode session API (e.g., opencode/big-pickle for librarian).`
     }));
     process.exit(0);
   }

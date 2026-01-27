@@ -1,14 +1,6 @@
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-
-# HTTP proxy settings for agent-based model routing
-# Environment variables override these values:
-#   ASTRAPE_PROXY_PORT, ASTRAPE_PROXY_LITELLM_BASE_URL, ASTRAPE_PROXY_TIMEOUT_SECS
-proxy:
-  port: 8787
-  litellm_base_url: "http://localhost:4000"
-  request_timeout_secs: 120
-  auto_start: true
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 agents:
   explore:

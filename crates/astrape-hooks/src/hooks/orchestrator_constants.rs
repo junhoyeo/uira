@@ -30,7 +30,7 @@ You just performed direct file modifications outside `.astrape/`.
 **You are an ORCHESTRATOR, not an IMPLEMENTER.**
 
 As an orchestrator, you should:
-- **DELEGATE** implementation work to subagents via the Task tool
+- **DELEGATE** implementation work to subagents via `delegate_task`
 - **VERIFY** the work done by subagents
 - **COORDINATE** multiple tasks and ensure completion
 
@@ -40,7 +40,7 @@ You should NOT:
 - Implement features yourself
 
 **If you need to make changes:**
-1. Use the Task tool to delegate to an appropriate subagent
+1. Use `delegate_task` to delegate to an appropriate subagent
 2. Provide clear instructions in the prompt
 3. Verify the subagent's work after completion
 
@@ -65,7 +65,7 @@ You (coordinator) are attempting to directly modify a file outside `.astrape/`.
 **THIS IS FORBIDDEN** (except for VERIFICATION purposes)
 
 As an ORCHESTRATOR, you MUST:
-1. **DELEGATE** all implementation work via the Task tool
+1. **DELEGATE** all implementation work via `delegate_task`
 2. **VERIFY** the work done by subagents (reading files is OK)
 3. **COORDINATE** - you orchestrate, you don't implement
 
@@ -85,12 +85,11 @@ As an ORCHESTRATOR, you MUST:
 
 **IF THIS IS FOR VERIFICATION:**
 Proceed if you are verifying subagent work by making a small fix.
-But for any substantial changes, USE the Task tool.
+But for any substantial changes, USE `delegate_task`.
 
 **CORRECT APPROACH:**
 ```
-Task tool with subagent_type="executor"
-prompt="[specific single task with clear acceptance criteria]"
+delegate_task(agent="executor", prompt="[specific single task with clear acceptance criteria]")
 ```
 
 DELEGATE. DON'T IMPLEMENT.

@@ -8,11 +8,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::config::AiConfig;
 use crate::hooks::{AiHookExecutor, HookContext, HookEvent, HooksConfig};
-
-const DEFAULT_OPENCODE_PORT: u16 = 4096;
-const DEFAULT_OPENCODE_HOST: &str = "127.0.0.1";
+use astrape_config::TyposSettings;
 
 #[derive(Debug, Deserialize)]
 pub struct TypoEntry {
@@ -79,7 +76,7 @@ pub struct TyposChecker {
     client: reqwest::blocking::Client,
     session_id: Option<String>,
     server_was_started: bool,
-    config: AiConfig,
+    config: TyposSettings,
     host: String,
     port: u16,
     hook_executor: Option<AiHookExecutor>,
@@ -89,7 +86,7 @@ pub struct TyposChecker {
 
 impl TyposChecker {
     #[allow(dead_code)]
-    pub fn new(config: Option<AiConfig>) -> Self {
+    pub fn new(config: Option<TyposSettings>) -> Self {
         Self::with_hooks(config, None)
     }
 
@@ -98,13 +95,10 @@ impl TyposChecker {
         self
     }
 
-    pub fn with_hooks(config: Option<AiConfig>, hooks_config: Option<HooksConfig>) -> Self {
+    pub fn with_hooks(config: Option<TyposSettings>, hooks_config: Option<HooksConfig>) -> Self {
         let config = config.unwrap_or_default();
-        let host = config
-            .host
-            .clone()
-            .unwrap_or_else(|| DEFAULT_OPENCODE_HOST.to_string());
-        let port = config.port.unwrap_or(DEFAULT_OPENCODE_PORT);
+        let host = config.ai.host.clone();
+        let port = config.ai.port;
 
         let hook_executor = hooks_config.map(AiHookExecutor::new);
 
@@ -138,13 +132,13 @@ impl TyposChecker {
     }
 
     fn build_tools_config(&self) -> Option<HashMap<String, bool>> {
-        if !self.config.disable_tools && !self.config.disable_mcp {
+        if !self.config.ai.disable_tools && !self.config.ai.disable_mcp {
             return None;
         }
 
         let mut tools = HashMap::new();
 
-        if self.config.disable_tools {
+        if self.config.ai.disable_tools {
             tools.insert("bash".to_string(), false);
             tools.insert("edit".to_string(), false);
             tools.insert("write".to_string(), false);
@@ -155,7 +149,7 @@ impl TyposChecker {
             tools.insert("webfetch".to_string(), false);
         }
 
-        if self.config.disable_mcp {
+        if self.config.ai.disable_mcp {
             tools.insert("mcp_*".to_string(), false);
         }
 
@@ -458,7 +452,7 @@ Your response (one word per line, {} lines total):"#,
             typos.len()
         );
 
-        let (provider_id, model_id) = self.config.parse_model();
+        let (provider_id, model_id) = self.config.ai.parse_model();
 
         let body = ChatBody {
             model_id,
@@ -670,8 +664,8 @@ impl Default for TyposChecker {
     }
 }
 
-impl From<AiConfig> for TyposChecker {
-    fn from(config: AiConfig) -> Self {
+impl From<TyposSettings> for TyposChecker {
+    fn from(config: TyposSettings) -> Self {
         Self::with_hooks(Some(config), None)
     }
 }
@@ -698,41 +692,46 @@ struct TyposDefaultConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astrape_config::TyposAiSettings;
 
     #[test]
     fn test_typos_checker_creation() {
         let checker = TyposChecker::new(None);
         assert!(checker.session_id.is_none());
         assert!(!checker.server_was_started);
-        assert!(checker.config.disable_tools);
-        assert!(checker.config.disable_mcp);
+        assert!(checker.config.ai.disable_tools);
+        assert!(checker.config.ai.disable_mcp);
 
-        let config = AiConfig {
-            model: Some("openai/gpt-4o".to_string()),
-            disable_tools: false,
-            disable_mcp: true,
-            ..Default::default()
+        let config = TyposSettings {
+            ai: TyposAiSettings {
+                model: "openai/gpt-4o".to_string(),
+                disable_tools: false,
+                disable_mcp: true,
+                ..Default::default()
+            },
         };
         let checker_with_config = TyposChecker::new(Some(config));
-        let (provider, model) = checker_with_config.config.parse_model();
+        let (provider, model) = checker_with_config.config.ai.parse_model();
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o");
-        assert!(!checker_with_config.config.disable_tools);
-        assert!(checker_with_config.config.disable_mcp);
+        assert!(!checker_with_config.config.ai.disable_tools);
+        assert!(checker_with_config.config.ai.disable_mcp);
     }
 
     #[test]
     fn test_parse_model() {
-        let config = AiConfig::default();
-        let (provider, model) = config.parse_model();
+        let config = TyposSettings::default();
+        let (provider, model) = config.ai.parse_model();
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "claude-sonnet-4-20250514");
 
-        let config = AiConfig {
-            model: Some("anthropic/claude-opus-4-5-high".to_string()),
-            ..Default::default()
+        let config = TyposSettings {
+            ai: TyposAiSettings {
+                model: "anthropic/claude-opus-4-5-high".to_string(),
+                ..Default::default()
+            },
         };
-        let (provider, model) = config.parse_model();
+        let (provider, model) = config.ai.parse_model();
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "claude-opus-4-5-high");
     }
@@ -744,10 +743,12 @@ mod tests {
         assert_eq!(tools.get("bash"), Some(&false));
         assert_eq!(tools.get("mcp_*"), Some(&false));
 
-        let config = AiConfig {
-            disable_tools: false,
-            disable_mcp: false,
-            ..Default::default()
+        let config = TyposSettings {
+            ai: TyposAiSettings {
+                disable_tools: false,
+                disable_mcp: false,
+                ..Default::default()
+            },
         };
         let checker_no_disable = TyposChecker::new(Some(config));
         assert!(checker_no_disable.build_tools_config().is_none());

@@ -618,35 +618,6 @@ impl RalphHook {
         }
     }
 
-    /// Archive current state before branch change
-    #[allow(dead_code)]
-    fn archive_state(directory: &str, reason: &str) {
-        if let Some(state) = Self::read_state(Some(directory)) {
-            let archive_dir = Path::new(directory).join(".astrape").join("ralph-archives");
-            let _ = fs::create_dir_all(&archive_dir);
-
-            let timestamp = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-            let archive_file = archive_dir.join(format!("ralph-state-{}.json", timestamp));
-
-            #[derive(Serialize)]
-            struct ArchivedState {
-                state: RalphState,
-                archive_reason: String,
-                archived_at: DateTime<Utc>,
-            }
-
-            let archived = ArchivedState {
-                state,
-                archive_reason: reason.to_string(),
-                archived_at: Utc::now(),
-            };
-
-            if let Ok(content) = serde_json::to_string_pretty(&archived) {
-                let _ = fs::write(archive_file, content);
-            }
-        }
-    }
-
     /// Activate ralph mode
     pub fn activate(
         prompt: &str,

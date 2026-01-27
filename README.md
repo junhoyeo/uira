@@ -5,13 +5,12 @@
   <p>Lightning-fast multi-agent orchestration with native Rust performance</p>
 </div>
 
-> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection, HTTP proxy with agent-based routing, and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
+> **Astrape** (Greek: "lightning") — Native Rust-powered multi-agent orchestration for Claude Code. Sub-millisecond keyword detection and high-performance LSP/AST tools. Route different agents to different models. Mix Claude, GPT, Gemini—orchestrate by purpose, not by provider.
 
 ## Features
 
 - **32 Specialized Agents** - Architect, Designer, Executor, Explorer, Librarian, and more with tiered variants (Haiku/Sonnet/Opus)
 - **Smart Model Routing** - Automatically select the right model based on task complexity
-- **HTTP Proxy** - Agent-based routing proxy with auto-start (starts automatically when Claude Code boots)
 - **Native Performance** - Sub-millisecond keyword detection via Rust NAPI bindings
 - **MCP Server** - LSP and AST-grep tools exposed via Model Context Protocol
 - **OXC-Powered Tools** - Fast JavaScript/TypeScript linting, parsing, transformation, and minification
@@ -83,7 +82,7 @@ agents:
     model: "opencode/gpt-5-nano"
 ```
 
-**Important:** Agents with custom model routing must use the `spawn_agent` MCP tool instead of the built-in Task tool. The Claude Code plugin automatically blocks Task tool calls for these agents and provides guidance to use `spawn_agent`.
+**Important:** Agents with custom model routing must use the `delegate_task` MCP tool instead of the built-in Task tool. The Claude Code plugin automatically blocks Task tool calls for these agents and provides guidance to use `delegate_task`.
 
 ## Skills
 
@@ -108,21 +107,21 @@ agents:
 │                              Claude Code                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
-          ┌──────────────────────────┼────────────────────────────┐
-          ▼                          ▼                            ▼
-┌───────────────────┐  ┌───────────────────────┐  ┌─────────────────────────┐
-│  astrape-napi     │  │   astrape-mcp-server  │  │   astrape-proxy         │
-│  (NAPI Bindings)  │  │     (MCP Server)      │  │ (HTTP Proxy / Routing)  │
-└───────────────────┘  └───────────────────────┘  └─────────────────────────┘
-          │                          │                            │
-          │              ┌───────────┴───────────┐                │
-          │              ▼                       ▼                │
-          │    ┌─────────────────┐    ┌─────────────────┐        │
-          │    │  astrape-tools  │    │   astrape-oxc   │        │
-          │    │  (LSP Client)   │    │  (JS/TS Tools)  │        │
-          │    └─────────────────┘    └─────────────────┘        │
-          │                                                       │
-          └───────┬─────────────┬─────────────┬───────────────────┘
+                   ┌────────────────┐
+                   ▼                ▼
+┌───────────────────┐  ┌───────────────────────┐
+│  astrape-napi     │  │   astrape-mcp-server  │
+│  (NAPI Bindings)  │  │     (MCP Server)      │
+└───────────────────┘  └───────────────────────┘
+          │                          │
+          │              ┌───────────┴───────────┐
+          │              ▼                       ▼
+          │    ┌─────────────────┐    ┌─────────────────┐
+          │    │  astrape-tools  │    │   astrape-oxc   │
+          │    │  (LSP Client)   │    │  (JS/TS Tools)  │
+          │    └─────────────────┘    └─────────────────┘
+          │
+          └───────┬─────────────┬─────────────┬
                   ▼             ▼             ▼
     ┌───────────────────┐ ┌───────────┐ ┌─────────────────┐
     │   astrape-hooks   │ │  agents   │ │ astrape-features│
@@ -142,7 +141,6 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | Crate | Description |
 |-------|-------------|
 | **astrape** | Standalone CLI for git hooks and dev tools |
-| **astrape-proxy** | HTTP proxy for agent-based model routing with OpenCode auth |
 | **astrape-mcp-server** | MCP server with native LSP and AST-grep integration |
 | **astrape-oxc** | OXC-powered linter, parser, transformer, minifier |
 | **astrape-tools** | LSP client, tool registry, and orchestration utilities |
@@ -156,106 +154,49 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **astrape-core** | Shared types and utilities |
 | **astrape-config** | Configuration loading and management |
 
-## Configuration
+## Model Routing Architecture
 
-Astrape uses a unified configuration system supporting multiple formats with priority-based resolution.
+`delegate_task` provides multi-provider model routing:
 
-### Config File Priority
+- **Anthropic models** (`claude-*`, `anthropic/*`) → Direct via `claude-agent-sdk-rs`
+- **External models** (OpenAI, Google, etc.) → OpenCode session API (`POST /session/{id}/message`)
+- **OpenCode routing** - Automatically routes to ANY configured provider
+- **Streaming support** - Full SSE streaming via OpenCode
 
-Files are loaded in this order (first found wins):
+### OpenCode Configuration
 
-| Priority | File | Format |
-|----------|------|--------|
-| 1 | `astrape.jsonc` | JSON with comments |
-| 2 | `astrape.json` | Standard JSON |
-| 3 | `astrape.yml` | YAML |
-| 4 | `astrape.yaml` | YAML (alternate) |
-| 5 | `.astrape.*` | Hidden variants |
-| 6 | `~/.config/astrape/*` | Global config |
-
-### Config File Structure
+Configure OpenCode server settings in `astrape.yml`:
 
 ```yaml
-# astrape.yml - Full example
-ai:
-  model: anthropic/claude-sonnet-4-20250514
-  temperature: 0.7
-
-proxy:
-  port: 8787
-  litellm_base_url: "http://localhost:4000"
-  request_timeout_secs: 120
-  auto_start: true
-
-agents:
-  explore:
-    model: "opencode/gpt-5-nano"
-  librarian:
-    model: "opencode/big-pickle"
-  architect:
-    model: "openai/gpt-4.1"
-
-goals:
-  auto_verify: true
-  goals:
-    - name: test-coverage
-      command: ./scripts/coverage.sh
-      target: 80.0
-
-pre-commit:
-  parallel: false
-  commands:
-    - name: fmt
-      run: cargo fmt
-    - name: clippy
-      run: cargo clippy -- -D warnings
+opencode:
+  host: "127.0.0.1"      # Server host (default: 127.0.0.1)
+  port: 4096             # Server port (default: 4096)
+  timeout_secs: 120      # Request timeout (default: 120)
+  auto_start: true       # Auto-start server (default: true)
 ```
 
-### JSONC Support
+**Auto-Start Behavior:**
 
-Use `astrape.jsonc` for JSON with comments:
+The OpenCode server automatically starts before the first `delegate_task` call when `auto_start: true`. The MCP server:
+1. Checks if OpenCode is running via health check (`GET /health`)
+2. If not running, spawns `opencode serve` in the background
+3. Waits up to 15 seconds for the server to become ready
+4. Proceeds with agent spawning once healthy
 
-```jsonc
-{
-  // AI model settings
-  "ai": {
-    "model": "anthropic/claude-sonnet-4-20250514"
-  },
-  
-  /* Proxy configuration */
-  "proxy": {
-    "port": 8787,
-    "auto_start": true
-  },
-  
-  "agents": {
-    "explore": { "model": "opencode/gpt-5-nano" }
-  }
-}
-```
+**Environment Variable Overrides:**
 
-### Environment Variables
-
-Environment variables override config file values for key settings:
+Environment variables take precedence over config file values:
 
 | Variable | Overrides | Default |
 |----------|-----------|---------|
-| `ASTRAPE_PROXY_PORT` | `proxy.port` | 8787 |
-| `ASTRAPE_PROXY_LITELLM_BASE_URL` | `proxy.litellm_base_url` | http://localhost:4000 |
-| `ASTRAPE_PROXY_TIMEOUT_SECS` | `proxy.request_timeout_secs` | 120 |
+| `OPENCODE_HOST` | `opencode.host` | 127.0.0.1 |
+| `OPENCODE_PORT` | `opencode.port` | 4096 |
+| `OPENCODE_TIMEOUT_SECS` | `opencode.timeout_secs` | 120 |
 
-## HTTP Proxy
-
-The `astrape-proxy` crate is a Rust-based HTTP proxy that enables agent-based model routing for Claude Code.
-
-### Key Features
-
-- **Agent-based routing** - Route specific agents to alternative models via `astrape.yml`
-- **Transparent passthrough** - Requests without agent config go directly to Anthropic
-- **OpenCode authentication** - Uses OpenCode's auth for alternative providers
-- **Multi-provider support** - OpenAI, Google Gemini, OpenCode (via LiteLLM)
-- **Format translation** - Anthropic API ↔ LiteLLM/OpenAI format conversion
-- **Streaming support** - Full SSE (Server-Sent Events) streaming
+**Example:**
+```bash
+OPENCODE_PORT=8080 astrape-mcp  # Use port 8080 instead of 4096
+```
 
 ### Agent-Based Model Routing
 
@@ -272,160 +213,14 @@ agents:
     model: "openai/gpt-4.1-mini"  # Balanced model for execution
 ```
 
-### Configuration
-
-Proxy settings can be configured in `astrape.yml` (or `astrape.jsonc`/`astrape.json`):
-
-```yaml
-proxy:
-  port: 8787                              # Server port
-  litellm_base_url: "http://localhost:4000"  # LiteLLM proxy URL
-  request_timeout_secs: 120               # Upstream timeout
-  auto_start: true                        # Auto-start with MCP server
-  enable_logging: false                   # Request logging
-  max_connections: 100                    # Max concurrent connections
-```
-
-**Environment Variable Overrides:**
-
-Environment variables take precedence over config file values:
-
-```bash
-ASTRAPE_PROXY_PORT=8787                              # Overrides proxy.port
-ASTRAPE_PROXY_LITELLM_BASE_URL=http://localhost:4000 # Overrides proxy.litellm_base_url
-ASTRAPE_PROXY_TIMEOUT_SECS=120                       # Overrides proxy.request_timeout_secs
-```
-
-**OpenCode Authentication:**
-
-The proxy uses OpenCode's authentication system. Ensure you've logged in:
-
-```bash
-opencode auth login openai
-opencode auth login google
-opencode auth login opencode
-```
-
-Auth credentials are stored in `~/.local/share/opencode/auth.json` (or platform equivalent).
-
-### Usage
-
-**Automatic startup (recommended):**
-
-When using the Astrape Claude Code plugin, the proxy starts automatically. The MCP server manages the entire proxy lifecycle:
-
-1. **On boot**: Proxy starts when MCP server receives `initialize` from Claude Code
-2. **Health check**: Before each `spawn_agent`, ensures proxy is running
-3. **Auto-restart**: If proxy crashes, it restarts on next agent spawn
-4. **Clean shutdown**: Proxy stops automatically when Claude Code exits
-
-Binary discovery order: `CLAUDE_PLUGIN_ROOT` → `target/release` → `target/debug` → PATH
-
-**Manual startup (for development/testing):**
-
-```bash
-cargo run --release -p astrape-proxy
-# Output: astrape-proxy listening addr=0.0.0.0:8787
-```
-
-**Use with Claude Code (without plugin):**
-
-```bash
-ANTHROPIC_BASE_URL=http://localhost:8787 claude
-```
-
-**Test the proxy:**
-
-```bash
-# Health check
-curl http://localhost:8787/health
-# Output: OK
-
-# Test agent-based routing
-curl -X POST http://localhost:8787/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-sonnet",
-    "max_tokens": 100,
-    "messages": [{"role": "user", "content": "Hello"}],
-    "metadata": {"agent": "explore"}
-  }'
-```
-
-### How It Works
-
-The proxy routes requests based on the `metadata.agent` field:
-
-**Agent configured in `astrape.yml`:**
-```
-Claude Code → astrape-proxy → LiteLLM → OpenAI/Gemini/etc
-                   ↓
-            OpenCode auth
-```
-
-**Agent NOT configured (passthrough):**
-```
-Claude Code → astrape-proxy → Anthropic API
-                   ↓
-            Original auth header
-```
-
-### Request Flow
-
-1. Claude Code sends request with `metadata: {agent: "explore"}`
-2. Proxy checks if `explore` is configured in `astrape.yml`
-3. **If configured**: Routes to configured model via LiteLLM with OpenCode auth
-4. **If not configured**: Passes through to Anthropic with original Authorization header
-
-### Endpoints
-
-- `GET /health` - Health check (returns "OK")
-- `POST /v1/messages` - Chat completions (streaming & non-streaming)
-- `POST /v1/messages/count_tokens` - Token counting
-- `POST /agent/{name}/v1/messages` - Path-based agent routing
-
-### Path-Based Agent Routing
-
-For agents requiring custom model routing (like `librarian` and `explore`), the proxy supports path-based routing:
-
-```
-POST /agent/librarian/v1/messages
-POST /agent/explore/v1/messages
-```
-
-This is used by the `spawn_agent` MCP tool, which sets:
-```bash
-ANTHROPIC_BASE_URL=http://localhost:8787/agent/librarian
-```
-
-The proxy extracts the agent name from the URL path and routes to the configured model in `astrape.yml`.
-
-### Development
-
-**Run tests:**
-
-```bash
-cargo test -p astrape-proxy
-```
-
-**Build release binary:**
-
-```bash
-cargo build --release -p astrape-proxy
-# Binary: target/release/astrape-proxy
-```
-
-**End-to-end testing:**
-
-See [crates/astrape-proxy/E2E_TEST.md](crates/astrape-proxy/E2E_TEST.md) for comprehensive testing guide.
-
 ## Git Hooks
 
 Astrape provides a standalone CLI for git hook management. Configure hooks in `astrape.yml`:
 
 ```yaml
-ai:
-  model: anthropic/claude-sonnet-4-20250514
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
 
 pre-commit:
   parallel: false  # fmt must run first before clippy
@@ -633,19 +428,25 @@ The `astrape-mcp` binary exposes development tools via the Model Context Protoco
 ### Agent Tools
 | Tool | Description |
 |------|-------------|
-| `spawn_agent` | Spawn agent with automatic model routing via astrape-proxy |
+| `delegate_task` | Delegate task to agent with automatic model routing via OpenCode |
+| `background_output` | Get the output from a background task |
+| `background_cancel` | Cancel a running background task or all background tasks |
 
-#### spawn_agent
+#### delegate_task
 
-Spawns a specialized agent with automatic model routing through astrape-proxy. The agent runs with `ANTHROPIC_BASE_URL` pointing to the proxy, which routes requests to the configured model.
+Delegates a task to a specialized agent with automatic model routing via OpenCode. Routes requests to the configured model for that agent.
 
 **Parameters:**
 - `agent` (required): Agent name (e.g., `librarian`, `explore`, `architect`)
 - `prompt` (required): The task for the agent to execute
-- `model` (optional): Override model (sonnet, opus, haiku)
+- `model` (optional): Override model - full model ID (e.g., `anthropic/claude-sonnet-4-20250514`, `openai/gpt-4`)
 - `allowedTools` (optional): List of tools to allow
 - `maxTurns` (optional): Maximum turns before stopping (default: 10)
-- `proxyPort` (optional): Proxy port (default: 8787)
+- `runInBackground` (optional): If true, runs the agent in the background and returns a task_id immediately. Use `background_output` to get results. Default: false
+
+**Model Routing:**
+- `claude-*` or `anthropic/*` → Direct Anthropic API
+- All other models → OpenCode session API
 
 **Example:**
 ```json
@@ -655,7 +456,72 @@ Spawns a specialized agent with automatic model routing through astrape-proxy. T
 }
 ```
 
-The proxy extracts the agent name and routes to the configured model (e.g., `librarian` → `opencode/big-pickle`).
+Routes to the configured model for that agent (e.g., `librarian` → `opencode/big-pickle` via OpenCode).
+
+**Background Execution Example:**
+```json
+{
+  "agent": "explore",
+  "prompt": "Search for authentication patterns",
+  "runInBackground": true
+}
+```
+
+Returns immediately with a task ID:
+```json
+{
+  "taskId": "bg_abc123def",
+  "status": "running",
+  "message": "Task started in background. Use background_output to get results."
+}
+```
+
+#### background_output
+
+Get the output from a background task. Returns immediately if complete, otherwise shows current status.
+
+**Parameters:**
+- `taskId` (required): The task ID returned from `delegate_task` with `runInBackground=true`
+- `block` (optional): If true, blocks until the task completes (max 120s by default). Default: false
+- `timeout` (optional): Timeout in seconds when blocking. Default: 120
+
+**Example:**
+```json
+{
+  "taskId": "bg_abc123def"
+}
+```
+
+**Blocking Example:**
+```json
+{
+  "taskId": "bg_abc123def",
+  "block": true,
+  "timeout": 60
+}
+```
+
+#### background_cancel
+
+Cancel a running background task or all background tasks.
+
+**Parameters:**
+- `taskId` (optional): The task ID to cancel
+- `all` (optional): If true, cancels ALL running background tasks. Default: false
+
+**Example (single task):**
+```json
+{
+  "taskId": "bg_abc123def"
+}
+```
+
+**Example (all tasks):**
+```json
+{
+  "all": true
+}
+```
 
 ## OXC Tools
 

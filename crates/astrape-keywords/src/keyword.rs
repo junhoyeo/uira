@@ -143,7 +143,7 @@ TELL THE USER WHAT AGENTS YOU WILL LEVERAGE NOW TO SATISFY USER'S REQUEST.
 ## EXECUTION RULES
 - **TODO**: Track EVERY step. Mark complete IMMEDIATELY.
 - **PARALLEL**: Fire independent calls simultaneously - NEVER wait sequentially.
-- **BACKGROUND FIRST**: Use Task tool with run_in_background=true for exploration.
+- **BACKGROUND FIRST**: Use delegate_task with runInBackground=true for exploration.
 - **VERIFY**: Check ALL requirements met before done.
 - **DELEGATE**: Orchestrate specialized agents.
 
