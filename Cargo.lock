@@ -326,6 +326,7 @@ dependencies = [
  "ast-grep-core",
  "ast-grep-language",
  "astrape-config",
+ "astrape-features",
  "astrape-oxc",
  "astrape-tools",
  "claude-agent-sdk-rs",

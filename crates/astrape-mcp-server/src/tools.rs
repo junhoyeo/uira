@@ -14,6 +14,10 @@ use tokio::sync::Mutex;
 use walkdir::WalkDir;
 
 use astrape_config::load_config;
+use astrape_features::background_agent::{
+    get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
+    LaunchInput,
+};
 
 use crate::anthropic_client;
 use crate::opencode_client;
@@ -43,6 +47,9 @@ static OPENCODE_MANAGER: Lazy<Arc<Mutex<OpencodeServerManager>>> = Lazy::new(|| 
         get_opencode_port(),
     )))
 });
+
+static BACKGROUND_MANAGER: Lazy<Arc<BackgroundManager>> =
+    Lazy::new(|| get_background_manager(BackgroundTaskConfig::default()));
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
     match lang {
@@ -171,8 +178,12 @@ impl ToolExecutor {
             "ast_search" => self.ast_search(args).await,
             "ast_replace" => self.ast_replace(args).await,
 
-            // Agent spawning with model routing
-            "spawn_agent" => self.spawn_agent(args).await,
+            // Agent delegation with model routing
+            "delegate_task" => self.delegate_task(args).await,
+
+            // Background task tools
+            "background_output" => self.background_output(args).await,
+            "background_cancel" => self.background_cancel(args).await,
 
             _ => Err(format!("Unknown tool: {}", tool_name)),
         }
@@ -475,10 +486,12 @@ impl ToolExecutor {
     }
 
     // =========================================================================
-    // Agent Spawning with Model Routing
+    // Agent Delegation with Model Routing
     // =========================================================================
 
-    async fn spawn_agent(&self, args: Value) -> Result<String, String> {
+    async fn delegate_task(&self, args: Value) -> Result<String, String> {
+        let run_in_background = args["runInBackground"].as_bool().unwrap_or(false);
+
         {
             let mut manager = OPENCODE_MANAGER.lock().await;
             if let Err(e) = manager.ensure_opencode_server().await {
@@ -488,7 +501,6 @@ impl ToolExecutor {
 
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
 
-        // Validate agent name (keep existing validation)
         if !agent
             .chars()
             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
@@ -507,21 +519,202 @@ impl ToolExecutor {
             .as_str()
             .unwrap_or("claude-3-5-sonnet-20241022");
 
+        let description = args["description"].as_str().unwrap_or(prompt);
+
         let allowed_tools: Option<Vec<String>> = args["allowedTools"].as_array().map(|arr| {
             arr.iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect()
         });
 
-        match route_model(model) {
-            ModelPath::Anthropic => {
-                tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via Claude Agent SDK");
-                anthropic_client::query(prompt, model, allowed_tools).await
+        if run_in_background {
+            let input = LaunchInput {
+                description: description.to_string(),
+                prompt: prompt.to_string(),
+                agent: agent.to_string(),
+                parent_session_id: "mcp".to_string(),
+                model: Some(model.to_string()),
+            };
+
+            let task = BACKGROUND_MANAGER
+                .launch(input)
+                .map_err(|e| format!("Failed to launch background task: {}", e))?;
+
+            let task_id = task.id.clone();
+            let model_owned = model.to_string();
+            let prompt_owned = prompt.to_string();
+            let allowed_tools_owned = allowed_tools.clone();
+
+            tokio::spawn(async move {
+                let result = match route_model(&model_owned) {
+                    ModelPath::Anthropic => {
+                        anthropic_client::query(&prompt_owned, &model_owned, allowed_tools_owned)
+                            .await
+                    }
+                    ModelPath::DirectProvider => {
+                        let port = get_opencode_port();
+                        opencode_client::query(
+                            &prompt_owned,
+                            &model_owned,
+                            port,
+                            allowed_tools_owned,
+                        )
+                        .await
+                    }
+                };
+
+                match result {
+                    Ok(output) => {
+                        BACKGROUND_MANAGER.complete_task(&task_id, output);
+                    }
+                    Err(e) => {
+                        BACKGROUND_MANAGER.fail_task(&task_id, e);
+                    }
+                }
+            });
+
+            Ok(serde_json::to_string_pretty(&serde_json::json!({
+                "taskId": task.id,
+                "status": "running",
+                "message": "Task started in background. Use background_output to get results."
+            }))
+            .unwrap())
+        } else {
+            match route_model(model) {
+                ModelPath::Anthropic => {
+                    tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via Claude Agent SDK");
+                    anthropic_client::query(prompt, model, allowed_tools).await
+                }
+                ModelPath::DirectProvider => {
+                    tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via OpenCode client");
+                    opencode_client::query(prompt, model, get_opencode_port(), allowed_tools).await
+                }
             }
-            ModelPath::DirectProvider => {
-                tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via OpenCode client");
-                opencode_client::query(prompt, model, get_opencode_port(), allowed_tools).await
+        }
+    }
+
+    async fn background_output(&self, args: Value) -> Result<String, String> {
+        let task_id = args["taskId"]
+            .as_str()
+            .ok_or("Missing 'taskId' parameter")?;
+        let block = args["block"].as_bool().unwrap_or(false);
+        let timeout_secs = args["timeout"].as_u64().unwrap_or(120);
+
+        if block {
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(timeout_secs);
+
+            loop {
+                if let Some(task) = BACKGROUND_MANAGER.get_task(task_id) {
+                    match task.status {
+                        BackgroundTaskStatus::Completed => {
+                            return Ok(task
+                                .result
+                                .unwrap_or_else(|| "Task completed with no output".to_string()));
+                        }
+                        BackgroundTaskStatus::Error => {
+                            return Err(task
+                                .error
+                                .unwrap_or_else(|| "Task failed with unknown error".to_string()));
+                        }
+                        BackgroundTaskStatus::Cancelled => {
+                            return Err("Task was cancelled".to_string());
+                        }
+                        _ => {
+                            if start.elapsed() > timeout {
+                                return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                                    "taskId": task_id,
+                                    "status": format!("{:?}", task.status).to_lowercase(),
+                                    "message": "Timeout waiting for task completion"
+                                }))
+                                .unwrap());
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        }
+                    }
+                } else {
+                    return Err(format!("Task not found: {}", task_id));
+                }
             }
+        } else if let Some(task) = BACKGROUND_MANAGER.get_task(task_id) {
+            // Non-blocking: return current status
+            let status_str = match task.status {
+                BackgroundTaskStatus::Queued => "queued",
+                BackgroundTaskStatus::Pending => "pending",
+                BackgroundTaskStatus::Running => "running",
+                BackgroundTaskStatus::Completed => "completed",
+                BackgroundTaskStatus::Error => "error",
+                BackgroundTaskStatus::Cancelled => "cancelled",
+            };
+
+            let mut response = serde_json::json!({
+                "taskId": task.id,
+                "status": status_str,
+                "agent": task.agent,
+                "startedAt": task.started_at.to_rfc3339(),
+            });
+
+            if let Some(completed_at) = task.completed_at {
+                response["completedAt"] = serde_json::json!(completed_at.to_rfc3339());
+            }
+
+            if let Some(result) = task.result {
+                response["result"] = serde_json::json!(result);
+            }
+
+            if let Some(error) = task.error {
+                response["error"] = serde_json::json!(error);
+            }
+
+            if let Some(progress) = task.progress {
+                response["progress"] = serde_json::json!({
+                    "toolCalls": progress.tool_calls,
+                    "lastTool": progress.last_tool,
+                    "lastUpdate": progress.last_update.to_rfc3339(),
+                });
+            }
+
+            Ok(serde_json::to_string_pretty(&response).unwrap())
+        } else {
+            Err(format!("Task not found: {}", task_id))
+        }
+    }
+
+    async fn background_cancel(&self, args: Value) -> Result<String, String> {
+        let cancel_all = args["all"].as_bool().unwrap_or(false);
+
+        if cancel_all {
+            let tasks = BACKGROUND_MANAGER.get_all_tasks();
+            let mut cancelled = 0;
+            for task in tasks {
+                if !matches!(
+                    task.status,
+                    BackgroundTaskStatus::Completed
+                        | BackgroundTaskStatus::Error
+                        | BackgroundTaskStatus::Cancelled
+                ) {
+                    BACKGROUND_MANAGER.cancel_task(&task.id);
+                    cancelled += 1;
+                }
+            }
+            Ok(serde_json::to_string_pretty(&serde_json::json!({
+                "cancelled": cancelled,
+                "message": format!("Cancelled {} background task(s)", cancelled)
+            }))
+            .unwrap())
+        } else if let Some(task_id) = args["taskId"].as_str() {
+            if let Some(task) = BACKGROUND_MANAGER.cancel_task(task_id) {
+                Ok(serde_json::to_string_pretty(&serde_json::json!({
+                    "taskId": task.id,
+                    "status": "cancelled",
+                    "message": "Task cancelled successfully"
+                }))
+                .unwrap())
+            } else {
+                Err(format!("Task not found: {}", task_id))
+            }
+        } else {
+            Err("Must provide either 'taskId' or 'all: true'".to_string())
         }
     }
 }

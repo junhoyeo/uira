@@ -175,7 +175,7 @@ pub async fn query(
     // 8. Extract text from parts
     let combined_text = extract_text(&message.parts);
 
-    // 9. Return in spawn_agent format
+    // 9. Return in delegate_task format
     serde_json::to_string(&json!({"result": combined_text}))
         .map_err(|e| format!("Failed to serialize result: {}", e))
 }

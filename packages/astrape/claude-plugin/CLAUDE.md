@@ -29,9 +29,9 @@ Just say what you want:
 | `designer` | Sonnet | UI/UX work |
 | `writer` | Haiku | Documentation |
 
-### Custom-Routed Agents (use spawn_agent MCP tool)
+### Custom-Routed Agents (use delegate_task MCP tool)
 
-These agents use non-Anthropic models and require the `spawn_agent` MCP tool:
+These agents use non-Anthropic models and require the `delegate_task` MCP tool:
 
 | Agent | Model | Use For |
 |-------|-------|---------|
@@ -40,14 +40,14 @@ These agents use non-Anthropic models and require the `spawn_agent` MCP tool:
 
 **Usage:**
 ```
-mcp__plugin_astrape_astrape-tools__spawn_agent(
+mcp__plugin_astrape_astrape-tools__delegate_task(
   agent="librarian",
   prompt="Find React hooks documentation"
 )
 ```
 
 **Note:** The built-in Task tool is blocked for these agents. They use
-spawn_agent with OpenCode session API for model routing.
+delegate_task with OpenCode session API for model routing.
 
 ### Tiered Variants
 
@@ -61,7 +61,7 @@ Astrape automatically routes tasks to appropriate model tiers:
 - Simple lookups → Haiku (fast, cheap)
 - Standard work → Sonnet (balanced)
 - Complex reasoning → Opus (most capable)
-- Custom models → Via spawn_agent with OpenCode (librarian, explore)
+- Custom models → Via delegate_task with OpenCode (librarian, explore)
 
 ## Performance
 

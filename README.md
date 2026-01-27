@@ -82,7 +82,7 @@ agents:
     model: "opencode/gpt-5-nano"
 ```
 
-**Important:** Agents with custom model routing must use the `spawn_agent` MCP tool instead of the built-in Task tool. The Claude Code plugin automatically blocks Task tool calls for these agents and provides guidance to use `spawn_agent`.
+**Important:** Agents with custom model routing must use the `delegate_task` MCP tool instead of the built-in Task tool. The Claude Code plugin automatically blocks Task tool calls for these agents and provides guidance to use `delegate_task`.
 
 ## Skills
 
@@ -156,7 +156,7 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 
 ## Model Routing Architecture
 
-`spawn_agent` provides multi-provider model routing:
+`delegate_task` provides multi-provider model routing:
 
 - **Anthropic models** (`claude-*`, `anthropic/*`) → Direct via `claude-agent-sdk-rs`
 - **External models** (OpenAI, Google, etc.) → OpenCode session API (`POST /session/{id}/message`)
@@ -177,7 +177,7 @@ opencode:
 
 **Auto-Start Behavior:**
 
-The OpenCode server automatically starts before the first `spawn_agent` call when `auto_start: true`. The MCP server:
+The OpenCode server automatically starts before the first `delegate_task` call when `auto_start: true`. The MCP server:
 1. Checks if OpenCode is running via health check (`GET /health`)
 2. If not running, spawns `opencode serve` in the background
 3. Waits up to 15 seconds for the server to become ready
@@ -428,11 +428,13 @@ The `astrape-mcp` binary exposes development tools via the Model Context Protoco
 ### Agent Tools
 | Tool | Description |
 |------|-------------|
-| `spawn_agent` | Spawn agent with automatic model routing via OpenCode |
+| `delegate_task` | Delegate task to agent with automatic model routing via OpenCode |
+| `background_output` | Get the output from a background task |
+| `background_cancel` | Cancel a running background task or all background tasks |
 
-#### spawn_agent
+#### delegate_task
 
-Spawns a specialized agent with automatic model routing via OpenCode. Routes requests to the configured model for that agent.
+Delegates a task to a specialized agent with automatic model routing via OpenCode. Routes requests to the configured model for that agent.
 
 **Parameters:**
 - `agent` (required): Agent name (e.g., `librarian`, `explore`, `architect`)
@@ -440,6 +442,7 @@ Spawns a specialized agent with automatic model routing via OpenCode. Routes req
 - `model` (optional): Override model - full model ID (e.g., `anthropic/claude-sonnet-4-20250514`, `openai/gpt-4`)
 - `allowedTools` (optional): List of tools to allow
 - `maxTurns` (optional): Maximum turns before stopping (default: 10)
+- `runInBackground` (optional): If true, runs the agent in the background and returns a task_id immediately. Use `background_output` to get results. Default: false
 
 **Model Routing:**
 - `claude-*` or `anthropic/*` → Direct Anthropic API
@@ -454,6 +457,71 @@ Spawns a specialized agent with automatic model routing via OpenCode. Routes req
 ```
 
 Routes to the configured model for that agent (e.g., `librarian` → `opencode/big-pickle` via OpenCode).
+
+**Background Execution Example:**
+```json
+{
+  "agent": "explore",
+  "prompt": "Search for authentication patterns",
+  "runInBackground": true
+}
+```
+
+Returns immediately with a task ID:
+```json
+{
+  "taskId": "bg_abc123def",
+  "status": "running",
+  "message": "Task started in background. Use background_output to get results."
+}
+```
+
+#### background_output
+
+Get the output from a background task. Returns immediately if complete, otherwise shows current status.
+
+**Parameters:**
+- `taskId` (required): The task ID returned from `delegate_task` with `runInBackground=true`
+- `block` (optional): If true, blocks until the task completes (max timeout). Default: false
+- `timeout` (optional): Timeout in seconds when blocking. Default: 120
+
+**Example:**
+```json
+{
+  "taskId": "bg_abc123def"
+}
+```
+
+**Blocking Example:**
+```json
+{
+  "taskId": "bg_abc123def",
+  "block": true,
+  "timeout": 60
+}
+```
+
+#### background_cancel
+
+Cancel a running background task or all background tasks.
+
+**Parameters:**
+- `taskId` (optional): The task ID to cancel
+- `all` (optional): If true, cancels ALL running background tasks. Default: false
+
+**Example (single task):**
+```json
+{
+  "taskId": "bg_abc123def"
+}
+```
+
+**Example (all tasks):**
+```json
+{
+  "all": true
+}
+```
 
 ## OXC Tools
 

@@ -15,6 +15,7 @@ path = "src/main.rs"
 astrape-tools = { path = "../astrape-tools" }
 astrape-oxc = { path = "../astrape-oxc" }
 astrape-config = { path = "../astrape-config" }
+astrape-features = { path = "../astrape-features" }
 claude-agent-sdk-rs = "0.6.3"
 serde = { workspace = true }
 serde_json = { workspace = true }

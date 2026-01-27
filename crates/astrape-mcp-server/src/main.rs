@@ -167,10 +167,10 @@ impl McpServer {
                     "required": ["pattern", "rewrite", "lang"]
                 }
             }),
-            // Agent Spawning Tool - multi-provider model routing
+            // Agent Delegation Tool - multi-provider model routing
             json!({
-                "name": "spawn_agent",
-                "description": "Spawn a specialized agent with multi-provider model routing via OpenCode. \
+                "name": "delegate_task",
+                "description": "Delegate a task to a specialized agent with multi-provider model routing via OpenCode. \
                     Routes to the configured model for that agent (e.g., librarian -> opencode/big-pickle). \
                     Returns the agent's response.",
                 "inputSchema": {
@@ -197,9 +197,57 @@ impl McpServer {
                             "type": "integer",
                             "minimum": 1,
                             "description": "Maximum number of turns before stopping. Default: 10"
+                        },
+                        "runInBackground": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, runs the agent in the background and returns a task_id immediately. Use background_output to get results."
                         }
                     },
                     "required": ["agent", "prompt"]
+                }
+            }),
+            // Background Task Tools
+            json!({
+                "name": "background_output",
+                "description": "Get the output from a background task. Returns immediately if complete, otherwise shows current status.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "taskId": {
+                            "type": "string",
+                            "description": "The task ID returned from delegate_task with runInBackground=true"
+                        },
+                        "block": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, blocks until the task completes (max 120s timeout)"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Timeout in seconds when blocking. Default: 120"
+                        }
+                    },
+                    "required": ["taskId"]
+                }
+            }),
+            json!({
+                "name": "background_cancel",
+                "description": "Cancel a running background task or all background tasks.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "taskId": {
+                            "type": "string",
+                            "description": "The task ID to cancel. Omit to cancel ALL background tasks."
+                        },
+                        "all": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, cancels ALL running background tasks"
+                        }
+                    }
                 }
             }),
         ]
