@@ -13,6 +13,7 @@ mod error;
 mod gemini;
 mod ollama;
 mod openai;
+mod opencode;
 mod traits;
 
 pub use anthropic::AnthropicClient;
@@ -22,4 +23,5 @@ pub use error::ProviderError;
 pub use gemini::GeminiClient;
 pub use ollama::OllamaClient;
 pub use openai::OpenAIClient;
+pub use opencode::OpenCodeClient;
 pub use traits::{ModelClient, ModelResult, ResponseStream};

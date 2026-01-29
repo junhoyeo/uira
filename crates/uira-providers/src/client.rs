@@ -4,7 +4,8 @@ use std::sync::Arc;
 use uira_protocol::Provider;
 
 use crate::{
-    AnthropicClient, GeminiClient, OllamaClient, OpenAIClient, ProviderConfig, ProviderError,
+    AnthropicClient, GeminiClient, OllamaClient, OpenAIClient, OpenCodeClient, ProviderConfig,
+    ProviderError,
 };
 
 /// Builder for creating model clients
@@ -30,6 +31,7 @@ impl ModelClientBuilder {
             Provider::OpenAI => Ok(Arc::new(OpenAIClient::new(self.config)?)),
             Provider::Google => Ok(Arc::new(GeminiClient::new(self.config)?)),
             Provider::Ollama => Ok(Arc::new(OllamaClient::new(self.config)?)),
+            Provider::OpenCode => Ok(Arc::new(OpenCodeClient::new(self.config)?)),
             Provider::OpenRouter => {
                 // OpenRouter uses OpenAI-compatible API
                 let mut config = self.config;

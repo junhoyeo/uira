@@ -12,6 +12,7 @@ pub enum Provider {
     OpenAI,
     Google,
     Ollama,
+    OpenCode,
     OpenRouter,
     Custom,
 }
@@ -23,6 +24,7 @@ impl std::fmt::Display for Provider {
             Self::OpenAI => write!(f, "openai"),
             Self::Google => write!(f, "google"),
             Self::Ollama => write!(f, "ollama"),
+            Self::OpenCode => write!(f, "opencode"),
             Self::OpenRouter => write!(f, "openrouter"),
             Self::Custom => write!(f, "custom"),
         }
@@ -207,5 +209,6 @@ mod tests {
     fn test_provider_display() {
         assert_eq!(Provider::Anthropic.to_string(), "anthropic");
         assert_eq!(Provider::OpenAI.to_string(), "openai");
+        assert_eq!(Provider::OpenCode.to_string(), "opencode");
     }
 }
