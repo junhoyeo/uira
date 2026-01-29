@@ -42,6 +42,9 @@ chrono = { workspace = true }
 # Directories
 dirs = { workspace = true }
 
+# File locking for concurrent access safety
+fs2 = "0.4"
+
 # HTTP server for OAuth callbacks
 actix-web = { workspace = true, optional = true }
 actix-rt = { workspace = true, optional = true }

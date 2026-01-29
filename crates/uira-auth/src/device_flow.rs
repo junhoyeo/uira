@@ -53,7 +53,7 @@ pub async fn poll_for_token(
     expires_in: u64,
 ) -> Result<OAuthTokens> {
     let client = reqwest::Client::new();
-    let poll_interval = Duration::from_secs(interval);
+    let mut poll_interval = Duration::from_secs(interval);
     let timeout = Duration::from_secs(expires_in);
     let start = Instant::now();
 
@@ -99,8 +99,8 @@ pub async fn poll_for_token(
                         continue;
                     }
                     "slow_down" => {
-                        // Increase polling interval
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        // RFC 8628: permanently increase polling interval by 5 seconds
+                        poll_interval += Duration::from_secs(5);
                         continue;
                     }
                     "expired_token" => {
