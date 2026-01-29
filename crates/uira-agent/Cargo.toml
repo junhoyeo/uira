@@ -1,0 +1,28 @@
+[package]
+name = "uira-agent"
+description = "Core agent loop for Uira AI harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-protocol = { workspace = true }
+uira-providers = { workspace = true }
+uira-sandbox = { workspace = true }
+uira-context = { workspace = true }
+uira-tools = { workspace = true }
+uira-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+futures = { workspace = true }
+async-trait = "0.1"
+tracing = "0.1"
+indexmap = { version = "2", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

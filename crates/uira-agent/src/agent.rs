@@ -1,0 +1,428 @@
+//! Main agent implementation
+
+use std::sync::Arc;
+use uira_protocol::{
+    AgentError, AgentState, ContentBlock, ExecutionResult, Message, Role, ThreadEvent, ToolCall,
+};
+use uira_providers::ModelClient;
+
+use crate::{
+    events::{EventSender, EventStream},
+    AgentConfig, AgentControl, AgentLoopError, Session,
+};
+
+/// The main agent that orchestrates the conversation loop
+pub struct Agent {
+    session: Session,
+    control: AgentControl,
+    state: AgentState,
+    event_sender: Option<EventSender>,
+    /// Pending tool calls for step-by-step execution
+    pending_tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl Agent {
+    /// Create a new agent with the given configuration and model client
+    pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
+        Self {
+            session: Session::new(config, client),
+            control: AgentControl::default(),
+            state: AgentState::Idle,
+            event_sender: None,
+            pending_tool_calls: None,
+        }
+    }
+
+    /// Create an agent with event streaming enabled
+    pub fn with_event_stream(mut self) -> (Self, EventStream) {
+        let (sender, stream) = EventStream::channel(100);
+        self.event_sender = Some(sender);
+        (self, stream)
+    }
+
+    /// Get the agent control handle
+    pub fn control(&self) -> &AgentControl {
+        &self.control
+    }
+
+    /// Get the current state
+    pub fn state(&self) -> AgentState {
+        self.state
+    }
+
+    /// Get the session
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// Run the agent with the given prompt
+    pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
+        self.state = AgentState::Thinking;
+
+        // Emit thread started event
+        self.emit_event(ThreadEvent::ThreadStarted {
+            thread_id: self.session.id.to_string(),
+        })
+        .await;
+
+        // Add user message
+        let user_message = Message::user(prompt);
+        self.session
+            .context
+            .add_message(user_message)
+            .map_err(AgentLoopError::Context)?;
+
+        // Main agent loop
+        loop {
+            // Check for cancellation
+            if self.control.is_cancelled() {
+                self.state = AgentState::Cancelled;
+                return Err(AgentLoopError::Cancelled);
+            }
+
+            // Check for max turns
+            if self.session.is_max_turns_exceeded() {
+                self.state = AgentState::Failed;
+                return Ok(ExecutionResult::failure(
+                    AgentError::MaxTurnsExceeded {
+                        turns: self.session.turn,
+                    },
+                    self.session.turn,
+                    self.session.usage.clone(),
+                ));
+            }
+
+            // Start a new turn
+            let turn_number = self.session.start_turn();
+            self.emit_event(ThreadEvent::TurnStarted { turn_number })
+                .await;
+
+            // Get model response
+            let response = self
+                .session
+                .client
+                .chat(self.session.context.messages(), &[])
+                .await
+                .map_err(AgentLoopError::Provider)?;
+
+            // Record usage
+            self.session.record_usage(response.usage.clone());
+
+            // Add assistant message to context
+            let assistant_message =
+                Message::with_blocks(uira_protocol::Role::Assistant, response.content.clone());
+            self.session
+                .context
+                .add_message(assistant_message)
+                .map_err(AgentLoopError::Context)?;
+
+            // Emit turn completed
+            self.emit_event(ThreadEvent::TurnCompleted {
+                turn_number,
+                usage: response.usage.clone(),
+            })
+            .await;
+
+            // Check if we should continue (tool calls) or stop
+            if response.has_tool_calls() {
+                // Process tool calls
+                self.state = AgentState::ExecutingTool;
+
+                let tool_calls = response.tool_calls();
+                let tool_results = self.execute_tool_calls(&tool_calls).await?;
+
+                // Add tool results to context
+                let tool_result_message = Message::with_blocks(Role::User, tool_results);
+                self.session
+                    .context
+                    .add_message(tool_result_message)
+                    .map_err(AgentLoopError::Context)?;
+
+                self.state = AgentState::Thinking;
+            } else {
+                // No tool calls, we're done
+                self.state = AgentState::Complete;
+                self.emit_event(ThreadEvent::ThreadCompleted {
+                    usage: self.session.usage.clone(),
+                })
+                .await;
+
+                return Ok(ExecutionResult::success(
+                    response.text(),
+                    self.session.turn,
+                    self.session.usage.clone(),
+                ));
+            }
+        }
+    }
+
+    /// Execute a single step of the agent loop
+    ///
+    /// This allows fine-grained control over execution - useful for TUI/debugging.
+    /// Returns the new state after the step completes.
+    pub async fn step(&mut self) -> Result<AgentState, AgentLoopError> {
+        match self.state {
+            AgentState::Idle => {
+                // Nothing to do in idle state - need to call run() with a prompt first
+                Ok(AgentState::Idle)
+            }
+            AgentState::Thinking => {
+                // Check for cancellation
+                if self.control.is_cancelled() {
+                    self.state = AgentState::Cancelled;
+                    return Ok(AgentState::Cancelled);
+                }
+
+                // Check for max turns
+                if self.session.is_max_turns_exceeded() {
+                    self.state = AgentState::Failed;
+                    return Ok(AgentState::Failed);
+                }
+
+                // Start a new turn
+                let turn_number = self.session.start_turn();
+                self.emit_event(ThreadEvent::TurnStarted { turn_number })
+                    .await;
+
+                // Get model response
+                let response = self
+                    .session
+                    .client
+                    .chat(self.session.context.messages(), &[])
+                    .await
+                    .map_err(AgentLoopError::Provider)?;
+
+                // Record usage
+                self.session.record_usage(response.usage.clone());
+
+                // Add assistant message to context
+                let assistant_message =
+                    Message::with_blocks(Role::Assistant, response.content.clone());
+                self.session
+                    .context
+                    .add_message(assistant_message)
+                    .map_err(AgentLoopError::Context)?;
+
+                // Emit turn completed
+                self.emit_event(ThreadEvent::TurnCompleted {
+                    turn_number,
+                    usage: response.usage.clone(),
+                })
+                .await;
+
+                // Determine next state based on response
+                if response.has_tool_calls() {
+                    // Store pending tool calls for next step
+                    let tool_calls = response.tool_calls();
+                    self.pending_tool_calls = Some(tool_calls);
+                    self.state = AgentState::ExecutingTool;
+                } else {
+                    // No tool calls, we're done
+                    self.state = AgentState::Complete;
+                    self.emit_event(ThreadEvent::ThreadCompleted {
+                        usage: self.session.usage.clone(),
+                    })
+                    .await;
+                }
+
+                Ok(self.state)
+            }
+            AgentState::ExecutingTool => {
+                // Execute pending tool calls
+                if let Some(tool_calls) = self.pending_tool_calls.take() {
+                    let tool_results = self.execute_tool_calls(&tool_calls).await?;
+
+                    // Add tool results to context
+                    let tool_result_message = Message::with_blocks(Role::User, tool_results);
+                    self.session
+                        .context
+                        .add_message(tool_result_message)
+                        .map_err(AgentLoopError::Context)?;
+
+                    // Go back to thinking for next turn
+                    self.state = AgentState::Thinking;
+                } else {
+                    // No pending tool calls, should not happen
+                    self.state = AgentState::Thinking;
+                }
+
+                Ok(self.state)
+            }
+            AgentState::WaitingForApproval => {
+                // Waiting for external approval - state will be updated externally
+                Ok(AgentState::WaitingForApproval)
+            }
+            AgentState::WaitingForUser => {
+                // Waiting for user input - state will be updated externally
+                Ok(AgentState::WaitingForUser)
+            }
+            AgentState::Complete | AgentState::Cancelled | AgentState::Failed => {
+                // Terminal states - no more steps
+                Ok(self.state)
+            }
+        }
+    }
+
+    /// Start a new run with a prompt (sets up for step-by-step execution)
+    pub async fn start(&mut self, prompt: &str) -> Result<(), AgentLoopError> {
+        self.state = AgentState::Thinking;
+        self.pending_tool_calls = None;
+
+        // Emit thread started event
+        self.emit_event(ThreadEvent::ThreadStarted {
+            thread_id: self.session.id.to_string(),
+        })
+        .await;
+
+        // Add user message
+        let user_message = Message::user(prompt);
+        self.session
+            .context
+            .add_message(user_message)
+            .map_err(AgentLoopError::Context)?;
+
+        Ok(())
+    }
+
+    /// Check if the agent is in a terminal state
+    pub fn is_done(&self) -> bool {
+        matches!(
+            self.state,
+            AgentState::Complete | AgentState::Cancelled | AgentState::Failed
+        )
+    }
+
+    /// Get the final result if the agent is complete
+    pub fn result(&self) -> Option<ExecutionResult> {
+        match self.state {
+            AgentState::Complete => {
+                // Get the last assistant message text
+                let last_text = self
+                    .session
+                    .context
+                    .messages()
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::Assistant)
+                    .map(|m| match &m.content {
+                        uira_protocol::MessageContent::Text(s) => s.clone(),
+                        uira_protocol::MessageContent::Blocks(blocks) => blocks
+                            .iter()
+                            .filter_map(|b| {
+                                if let ContentBlock::Text { text } = b {
+                                    Some(text.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(""),
+                        uira_protocol::MessageContent::ToolCalls(_) => String::new(),
+                    })
+                    .unwrap_or_default();
+
+                Some(ExecutionResult::success(
+                    last_text,
+                    self.session.turn,
+                    self.session.usage.clone(),
+                ))
+            }
+            AgentState::Failed => Some(ExecutionResult::failure(
+                AgentError::MaxTurnsExceeded {
+                    turns: self.session.turn,
+                },
+                self.session.turn,
+                self.session.usage.clone(),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Pause the agent
+    pub fn pause(&mut self) {
+        self.control.pause();
+    }
+
+    /// Resume the agent
+    pub fn resume(&mut self) {
+        self.control.resume();
+    }
+
+    /// Cancel the agent
+    pub fn cancel(&mut self) {
+        self.control.cancel();
+        self.state = AgentState::Cancelled;
+    }
+
+    async fn emit_event(&self, event: ThreadEvent) {
+        if let Some(ref sender) = self.event_sender {
+            let _ = sender.send(event).await;
+        }
+    }
+
+    /// Execute tool calls and return results as content blocks
+    async fn execute_tool_calls(
+        &mut self,
+        tool_calls: &[ToolCall],
+    ) -> Result<Vec<ContentBlock>, AgentLoopError> {
+        use uira_protocol::Item;
+
+        let mut results = Vec::new();
+        let ctx = self.session.tool_context();
+
+        for call in tool_calls {
+            // Emit tool start event
+            self.emit_event(ThreadEvent::ItemStarted {
+                item: Item::ToolCall {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    input: call.input.clone(),
+                },
+            })
+            .await;
+
+            // Execute the tool
+            let result = self
+                .session
+                .orchestrator
+                .run(&call.name, call.input.clone(), &ctx)
+                .await;
+
+            match result {
+                Ok(output) => {
+                    let content = output.as_text().unwrap_or("").to_string();
+                    results.push(ContentBlock::tool_result(&call.id, &content));
+
+                    self.emit_event(ThreadEvent::ItemCompleted {
+                        item: Item::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            output: content,
+                            is_error: false,
+                        },
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    results.push(ContentBlock::tool_error(&call.id, &error_msg));
+
+                    self.emit_event(ThreadEvent::ItemCompleted {
+                        item: Item::ToolResult {
+                            tool_call_id: call.id.clone(),
+                            output: error_msg,
+                            is_error: true,
+                        },
+                    })
+                    .await;
+                }
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Tests would require mocking the model client
+}
