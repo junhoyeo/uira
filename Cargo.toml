@@ -3,7 +3,6 @@ resolver = "2"
 members = [
   "crates/uira",
   "crates/uira-core",
-  "crates/uira-keywords",
   "crates/uira-napi",
   "crates/uira-sdk",
   "crates/uira-comment-checker",
@@ -21,10 +20,9 @@ members = [
   "crates/uira-sandbox",
   "crates/uira-context",
   "crates/uira-agent",
-   "crates/uira-cli",
-   "crates/uira-tui",
-   "crates/uira-auth",
-   "crates/uira-auth-providers",
+    "crates/uira-cli",
+    "crates/uira-tui",
+    "crates/uira-auth",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -36,7 +34,6 @@ repository = "https://github.com/junhoyeo/uira"
 [workspace.dependencies]
 # Internal crates
 uira-core = { path = "crates/uira-core" }
-uira-keywords = { path = "crates/uira-keywords" }
 uira-sdk = { path = "crates/uira-sdk" }
 uira-comment-checker = { path = "crates/uira-comment-checker" }
 uira-tools = { path = "crates/uira-tools" }

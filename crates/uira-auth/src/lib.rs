@@ -1,5 +1,6 @@
 pub mod error;
 pub mod pkce;
+pub mod providers;
 pub mod storage;
 pub mod traits;
 pub mod types;

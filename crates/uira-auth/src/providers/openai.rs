@@ -1,15 +1,15 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use uira_auth::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result};
+use crate::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result, generate_pkce};
 use url::Url;
 
-const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const AUTHORIZE_URL: &str = "https://auth.openai.com/authorize";
+const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const REDIRECT_URI: &str = "http://localhost:8765/callback";
 
 #[derive(Debug, Clone)]
-pub struct GoogleAuth {
+pub struct OpenAIAuth {
     client_id: Option<String>,
     redirect_uri: String,
     scopes: Vec<String>,
@@ -39,26 +39,34 @@ struct TokenResponse {
     token_type: String,
 }
 
-impl Default for GoogleAuth {
+impl Default for OpenAIAuth {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl GoogleAuth {
+impl OpenAIAuth {
     pub fn new() -> Self {
         Self {
             client_id: None,
             redirect_uri: REDIRECT_URI.to_string(),
-            scopes: vec!["https://www.googleapis.com/auth/generative-language".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
         }
     }
 
-    pub fn with_client_id(client_id: String) -> Self {
+    pub fn with_oauth(client_id: String) -> Self {
         Self {
             client_id: Some(client_id),
             redirect_uri: REDIRECT_URI.to_string(),
-            scopes: vec!["https://www.googleapis.com/auth/generative-language".to_string()],
+            scopes: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
         }
     }
 
@@ -146,17 +154,20 @@ impl GoogleAuth {
 }
 
 #[async_trait]
-impl AuthProvider for GoogleAuth {
+impl AuthProvider for OpenAIAuth {
     fn provider_id(&self) -> &str {
-        "google"
+        "openai"
     }
 
     fn auth_methods(&self) -> Vec<AuthMethod> {
-        let mut methods = vec![];
+        let mut methods = vec![AuthMethod::ApiKey {
+            label: "OpenAI API Key".to_string(),
+            env_var: "OPENAI_API_KEY".to_string(),
+        }];
 
         if self.client_id.is_some() {
             methods.push(AuthMethod::OAuth {
-                label: "Google OAuth".to_string(),
+                label: "OpenAI OAuth".to_string(),
                 authorize_url: AUTHORIZE_URL.to_string(),
                 token_url: TOKEN_URL.to_string(),
                 scopes: self.scopes.clone(),
@@ -172,7 +183,7 @@ impl AuthProvider for GoogleAuth {
             .as_ref()
             .ok_or_else(|| AuthError::OAuthFailed("Client ID not configured".to_string()))?;
 
-        let pkce = uira_auth::generate_pkce();
+        let pkce = generate_pkce();
 
         let mut auth_url =
             Url::parse(AUTHORIZE_URL).map_err(|e| AuthError::OAuthFailed(e.to_string()))?;

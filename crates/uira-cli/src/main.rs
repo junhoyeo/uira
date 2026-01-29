@@ -163,8 +163,8 @@ async fn run_auth(
     command: &AuthCommands,
     _config: &CliConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_auth::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
     use uira_auth::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
-    use uira_auth_providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
 
     match command {
         AuthCommands::Login { provider } => {

@@ -1,6 +1,6 @@
 //! OAuth provider implementations for UIRA authentication
 //!
-//! This crate provides native OAuth provider implementations for various services.
+//! This module provides native OAuth provider implementations for various services.
 //! Currently supports:
 //! - Anthropic OAuth
 //! - OpenAI OAuth and API Key

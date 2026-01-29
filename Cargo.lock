@@ -4688,7 +4688,6 @@ dependencies = [
  "uira-core",
  "uira-features",
  "uira-goals",
- "uira-keywords",
  "uira-sdk",
 ]
 
@@ -4750,21 +4749,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
- "uuid",
-]
-
-[[package]]
-name = "uira-auth-providers"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uira-auth",
  "url",
  "uuid",
 ]
@@ -4791,7 +4775,6 @@ dependencies = [
  "tracing-subscriber",
  "uira-agent",
  "uira-auth",
- "uira-auth-providers",
  "uira-config",
  "uira-features",
  "uira-goals",
@@ -4879,6 +4862,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "parking_lot",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
@@ -4886,6 +4870,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "uira-core",
  "uira-hooks",
  "uira-sdk",
 ]
@@ -4925,19 +4910,6 @@ dependencies = [
  "uira-comment-checker",
  "uira-config",
  "uira-goals",
-]
-
-[[package]]
-name = "uira-keywords"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "uira-core",
 ]
 
 [[package]]
@@ -4985,7 +4957,6 @@ dependencies = [
  "uira-features",
  "uira-goals",
  "uira-hooks",
- "uira-keywords",
  "uira-sdk",
 ]
 

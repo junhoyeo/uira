@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use uira_auth::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result};
+use crate::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result, generate_pkce};
 use url::Url;
 
 const CLIENT_ID: &str = "b897d1b9-1fdd-4a90-a129-43751e0bde9b";
@@ -148,7 +148,7 @@ impl AuthProvider for AnthropicAuth {
     }
 
     async fn start_oauth(&self, _method_index: usize) -> Result<OAuthChallenge> {
-        let pkce = uira_auth::generate_pkce();
+        let pkce = generate_pkce();
 
         let mut auth_url =
             Url::parse(AUTHORIZE_URL).map_err(|e| AuthError::OAuthFailed(e.to_string()))?;

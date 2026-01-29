@@ -12,7 +12,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 uira-core = { workspace = true }
-uira-keywords = { workspace = true }
 uira-hooks = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }
