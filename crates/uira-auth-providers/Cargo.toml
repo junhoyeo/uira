@@ -1,0 +1,16 @@
+[package]
+name = "uira-auth-providers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uira-auth = { path = "../uira-auth" }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+url = "2.5"
+uuid = { version = "1.0", features = ["v4"] }
+async-trait = "0.1"

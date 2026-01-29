@@ -1,11 +1,15 @@
 //! Anthropic (Claude) client implementation
 
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::StreamExt;
 use reqwest::Client;
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
+use uira_auth::CredentialStore;
 use uira_protocol::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamError, StreamMessageStart, TokenUsage, ToolSpec,
@@ -17,28 +21,36 @@ use crate::{
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const PROVIDER_NAME: &str = "anthropic";
+/// Buffer time before token expiration to trigger refresh (5 minutes)
+const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
+
+/// Credential source for the client
+#[derive(Debug, Clone)]
+enum CredentialSource {
+    /// OAuth credentials from credential store
+    OAuth {
+        access_token: SecretString,
+        refresh_token: Option<SecretString>,
+        expires_at: Option<i64>,
+    },
+    /// API key from config or environment variable
+    ApiKey(SecretString),
+}
 
 /// Anthropic API client
 pub struct AnthropicClient {
     client: Client,
     config: ProviderConfig,
+    /// Current credential source (wrapped in RwLock for token refresh)
+    credential: Arc<RwLock<CredentialSource>>,
 }
 
 impl AnthropicClient {
     pub fn new(config: ProviderConfig) -> Result<Self, ProviderError> {
-        let api_key = config
-            .api_key
-            .as_ref()
-            .ok_or_else(|| ProviderError::Configuration("API key required for Anthropic".into()))?;
+        let credential = Self::load_credential(&config)?;
 
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "x-api-key",
-            api_key
-                .expose_secret()
-                .parse()
-                .map_err(|_| ProviderError::Configuration("Invalid API key format".into()))?,
-        );
         headers.insert("anthropic-version", ANTHROPIC_VERSION.parse().unwrap());
         headers.insert("content-type", "application/json".parse().unwrap());
 
@@ -49,7 +61,172 @@ impl AnthropicClient {
             .timeout(timeout)
             .build()?;
 
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            credential: Arc::new(RwLock::new(credential)),
+        })
+    }
+
+    fn load_credential(config: &ProviderConfig) -> Result<CredentialSource, ProviderError> {
+        if let Ok(store) = CredentialStore::load() {
+            if let Some(cred) = store.get(PROVIDER_NAME) {
+                use uira_auth::secrecy::ExposeSecret as AuthExposeSecret;
+                use uira_auth::StoredCredential;
+                match cred {
+                    StoredCredential::OAuth {
+                        access_token,
+                        refresh_token,
+                        expires_at,
+                    } => {
+                        return Ok(CredentialSource::OAuth {
+                            access_token: SecretString::from(
+                                access_token.expose_secret().to_string(),
+                            ),
+                            refresh_token: refresh_token
+                                .as_ref()
+                                .map(|t| SecretString::from(t.expose_secret().to_string())),
+                            expires_at: *expires_at,
+                        });
+                    }
+                    StoredCredential::ApiKey { key } => {
+                        return Ok(CredentialSource::ApiKey(SecretString::from(
+                            key.expose_secret().to_string(),
+                        )));
+                    }
+                }
+            }
+        }
+
+        if let Some(api_key) = &config.api_key {
+            return Ok(CredentialSource::ApiKey(api_key.clone()));
+        }
+
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            return Ok(CredentialSource::ApiKey(SecretString::from(key)));
+        }
+
+        Err(ProviderError::Configuration(
+            "No Anthropic credentials found. Set ANTHROPIC_API_KEY or authenticate via OAuth."
+                .into(),
+        ))
+    }
+
+    fn is_token_expired(expires_at: Option<i64>) -> bool {
+        match expires_at {
+            Some(exp) => {
+                let now = Utc::now().timestamp();
+                now >= (exp - TOKEN_REFRESH_BUFFER_SECS)
+            }
+            None => false,
+        }
+    }
+
+    async fn refresh_token_if_needed(&self) -> Result<(), ProviderError> {
+        let (needs_refresh, refresh_token_opt) = {
+            let credential = self.credential.read().await;
+
+            if let CredentialSource::OAuth {
+                refresh_token,
+                expires_at,
+                ..
+            } = &*credential
+            {
+                (Self::is_token_expired(*expires_at), refresh_token.clone())
+            } else {
+                (false, None)
+            }
+        };
+
+        if needs_refresh {
+            if let Some(refresh_token) = refresh_token_opt {
+                self.do_token_refresh(&refresh_token).await?;
+            } else {
+                return Err(ProviderError::Configuration(
+                    "OAuth token expired and no refresh token available".into(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn do_token_refresh(&self, refresh_token: &SecretString) -> Result<(), ProviderError> {
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post("https://console.anthropic.com/v1/oauth/token")
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token.expose_secret()),
+            ])
+            .send()
+            .await
+            .map_err(ProviderError::Network)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Configuration(format!(
+                "Token refresh failed ({}): {}",
+                status, body
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            refresh_token: Option<String>,
+            expires_in: Option<i64>,
+        }
+
+        let token_response: TokenResponse = response.json().await.map_err(|e| {
+            ProviderError::InvalidResponse(format!("Invalid token response: {}", e))
+        })?;
+
+        let expires_at = token_response
+            .expires_in
+            .map(|exp| Utc::now().timestamp() + exp);
+
+        let mut credential = self.credential.write().await;
+        *credential = CredentialSource::OAuth {
+            access_token: SecretString::from(token_response.access_token.clone()),
+            refresh_token: token_response
+                .refresh_token
+                .clone()
+                .map(SecretString::from)
+                .or_else(|| Some(refresh_token.clone())),
+            expires_at,
+        };
+
+        if let Ok(mut store) = CredentialStore::load() {
+            use uira_auth::StoredCredential;
+            store.insert(
+                PROVIDER_NAME.to_string(),
+                StoredCredential::OAuth {
+                    access_token: uira_auth::secrecy::SecretString::from(
+                        token_response.access_token,
+                    ),
+                    refresh_token: token_response
+                        .refresh_token
+                        .map(uira_auth::secrecy::SecretString::from),
+                    expires_at,
+                },
+            );
+            let _ = store.save();
+        }
+
+        Ok(())
+    }
+
+    async fn get_current_api_key(&self) -> Result<SecretString, ProviderError> {
+        self.refresh_token_if_needed().await?;
+
+        let credential = self.credential.read().await;
+        match &*credential {
+            CredentialSource::OAuth { access_token, .. } => Ok(access_token.clone()),
+            CredentialSource::ApiKey(key) => Ok(key.clone()),
+        }
     }
 
     fn build_request(
@@ -161,10 +338,17 @@ impl AnthropicClient {
 #[async_trait]
 impl ModelClient for AnthropicClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
+        let api_key = self.get_current_api_key().await?;
         let request = self.build_request(messages, tools, false);
         let url = format!("{}/v1/messages", self.base_url());
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", api_key.expose_secret())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -191,10 +375,17 @@ impl ModelClient for AnthropicClient {
         messages: &[Message],
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
+        let api_key = self.get_current_api_key().await?;
         let request = self.build_request(messages, tools, true);
         let url = format!("{}/v1/messages", self.base_url());
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", api_key.expose_secret())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();

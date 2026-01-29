@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio::sync::Mutex;
 use uira_oxc::{LintRule, Linter, Severity};
 use uira_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use walkdir::WalkDir;
@@ -20,33 +19,7 @@ use uira_features::background_agent::{
 };
 
 use crate::anthropic_client;
-use crate::opencode_client;
-use crate::opencode_server::OpencodeServerManager;
 use crate::router::{route_model, ModelPath};
-
-/// Get OpenCode port with priority: ENV > CONFIG > DEFAULT
-fn get_opencode_port() -> u16 {
-    std::env::var("OPENCODE_PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .or_else(|| load_config(None).ok().map(|c| c.opencode.port))
-        .unwrap_or(4096)
-}
-
-/// Get OpenCode host with priority: ENV > CONFIG > DEFAULT
-fn get_opencode_host() -> String {
-    std::env::var("OPENCODE_HOST")
-        .ok()
-        .or_else(|| load_config(None).ok().map(|c| c.opencode.host))
-        .unwrap_or_else(|| "127.0.0.1".to_string())
-}
-
-static OPENCODE_MANAGER: Lazy<Arc<Mutex<OpencodeServerManager>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(OpencodeServerManager::new(
-        get_opencode_host(),
-        get_opencode_port(),
-    )))
-});
 
 static BACKGROUND_MANAGER: Lazy<Arc<BackgroundManager>> =
     Lazy::new(|| get_background_manager(BackgroundTaskConfig::default()));
@@ -492,13 +465,6 @@ impl ToolExecutor {
     async fn delegate_task(&self, args: Value) -> Result<String, String> {
         let run_in_background = args["runInBackground"].as_bool().unwrap_or(false);
 
-        {
-            let mut manager = OPENCODE_MANAGER.lock().await;
-            if let Err(e) = manager.ensure_opencode_server().await {
-                return Err(format!("Failed to start OpenCode server: {}", e));
-            }
-        }
-
         let agent = args["agent"].as_str().ok_or("Missing 'agent' parameter")?;
 
         if !agent
@@ -569,14 +535,7 @@ impl ToolExecutor {
                             .await
                     }
                     ModelPath::DirectProvider => {
-                        let port = get_opencode_port();
-                        opencode_client::query(
-                            &prompt_owned,
-                            &model_owned,
-                            port,
-                            allowed_tools_owned,
-                        )
-                        .await
+                        Err("OpenCode proxy support has been removed. Use native Anthropic or OpenAI providers.".to_string())
                     }
                 };
 
@@ -618,8 +577,7 @@ impl ToolExecutor {
                     anthropic_client::query(prompt, model, allowed_tools).await
                 }
                 ModelPath::DirectProvider => {
-                    tracing::info!(agent = %agent, model = %model, ?allowed_tools, "Spawning agent via OpenCode client");
-                    opencode_client::query(prompt, model, get_opencode_port(), allowed_tools).await
+                    Err("OpenCode proxy support has been removed. Use native Anthropic or OpenAI providers.".to_string())
                 }
             }
         }

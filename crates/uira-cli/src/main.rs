@@ -163,46 +163,127 @@ async fn run_auth(
     command: &AuthCommands,
     _config: &CliConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_auth::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
+    use uira_auth_providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
+
     match command {
         AuthCommands::Login { provider } => {
             println!("{} {}", "Logging in to:".cyan().bold(), provider.yellow());
 
-            match provider.to_lowercase().as_str() {
-                "anthropic" => {
-                    println!("Set the ANTHROPIC_API_KEY environment variable");
-                    println!("  export ANTHROPIC_API_KEY=your-api-key");
-                }
-                "openai" => {
-                    println!("Set the OPENAI_API_KEY environment variable");
-                    println!("  export OPENAI_API_KEY=your-api-key");
-                }
+            // Create provider instance
+            let auth_provider: Box<dyn AuthProvider> = match provider.to_lowercase().as_str() {
+                "anthropic" => Box::new(AnthropicAuth::new()),
+                "openai" => Box::new(OpenAIAuth::new()),
+                "google" | "gemini" => Box::new(GoogleAuth::new()),
                 _ => {
-                    println!("Unknown provider: {}", provider);
+                    return Err(format!("Unknown provider: {}", provider).into());
                 }
-            }
-        }
-        AuthCommands::Logout { provider } => {
+            };
+
+            // Start OAuth flow
+            println!("{}", "Starting OAuth flow...".dimmed());
+            let challenge = auth_provider.start_oauth(0).await?;
+
+            // Start callback server
+            let server = Arc::new(OAuthCallbackServer::new(8765));
+
+            // Spawn server in a separate thread (actix-web requires its own runtime)
+            let server_clone = server.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let _ = server_clone.start().await;
+                });
+            });
+
+            // Give server time to start
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+            // Open browser
+            println!("{}", "Opening browser for authorization...".cyan());
             println!(
-                "{} {}",
-                "Logging out from:".cyan().bold(),
+                "{}",
+                format!("If browser doesn't open, visit: {}", challenge.url).dimmed()
+            );
+
+            if let Err(e) = webbrowser::open(&challenge.url) {
+                eprintln!("{}: {}", "Warning: Failed to open browser".yellow(), e);
+                println!("{}", "Please open the URL manually.".yellow());
+            }
+
+            // Wait for callback
+            println!("{}", "Waiting for authorization...".dimmed());
+            let callback = server.wait_for_callback(&challenge.state).await?;
+
+            // Exchange code for tokens
+            println!("{}", "Exchanging authorization code for tokens...".dimmed());
+            let tokens = auth_provider
+                .exchange_code(&callback.code, &challenge.verifier)
+                .await?;
+
+            // Save credentials
+            let mut store = CredentialStore::load()?;
+
+            // Convert tokens to StoredCredential via JSON to handle secrecy version mismatch
+            let credential_json = serde_json::json!({
+                "type": "oauth",
+                "access_token": tokens.access_token,
+                "refresh_token": tokens.refresh_token,
+                "expires_at": tokens.expires_at,
+            });
+            let credential: StoredCredential = serde_json::from_value(credential_json)?;
+
+            store.insert(provider.to_lowercase(), credential);
+            store.save()?;
+
+            println!(
+                "{} Successfully authenticated with {}",
+                "✓".green().bold(),
                 provider.yellow()
             );
-            println!("Remove the API key from your environment");
+        }
+        AuthCommands::Logout { provider } => {
+            let mut store = CredentialStore::load()?;
+
+            if store.remove(&provider.to_lowercase()).is_some() {
+                store.save()?;
+                println!(
+                    "{} Logged out from {}",
+                    "✓".green().bold(),
+                    provider.yellow()
+                );
+            } else {
+                println!(
+                    "{} No credentials found for {}",
+                    "✗".red(),
+                    provider.yellow()
+                );
+            }
         }
         AuthCommands::Status => {
             println!("{}", "Authentication status:".cyan().bold());
+            println!("{}", "─".repeat(50).dimmed());
 
-            if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-                println!("  {} Anthropic API key set", "✓".green());
+            let store = CredentialStore::load()?;
+
+            if store.is_empty() {
+                println!("{}", "No providers configured".dimmed());
+                println!();
+                println!("{}", "To authenticate, run:".dimmed());
+                println!("  {} uira auth login <provider>", "→".cyan());
+                println!();
+                println!("{}", "Supported providers:".dimmed());
+                println!("  • anthropic");
+                println!("  • openai");
+                println!("  • google");
             } else {
-                println!("  {} Anthropic API key not set", "✗".red());
+                println!("{}", "Configured providers:".green());
+                for provider in store.providers() {
+                    println!("  {} {}", "✓".green(), provider.yellow());
+                }
             }
 
-            if std::env::var("OPENAI_API_KEY").is_ok() {
-                println!("  {} OpenAI API key set", "✓".green());
-            } else {
-                println!("  {} OpenAI API key not set", "✗".red());
-            }
+            println!("{}", "─".repeat(50).dimmed());
         }
     }
     Ok(())

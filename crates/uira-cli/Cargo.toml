@@ -20,7 +20,10 @@ uira-sandbox = { workspace = true }
 uira-features = { path = "../uira-features" }
 uira-goals = { path = "../uira-goals" }
 uira-tui = { path = "../uira-tui" }
+uira-auth = { path = "../uira-auth", features = ["oauth-server"] }
+uira-auth-providers = { path = "../uira-auth-providers" }
 secrecy = "0.10"
+webbrowser = "1.0"
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

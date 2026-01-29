@@ -21,8 +21,10 @@ members = [
   "crates/uira-sandbox",
   "crates/uira-context",
   "crates/uira-agent",
-  "crates/uira-cli",
-  "crates/uira-tui",
+   "crates/uira-cli",
+   "crates/uira-tui",
+   "crates/uira-auth",
+   "crates/uira-auth-providers",
 ]
 [workspace.package]
 version = "0.1.0"
