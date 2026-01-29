@@ -5,13 +5,16 @@
 //! - Model routing and smart selection
 //! - Workflow orchestration
 //! - Advanced execution patterns
+//! - Analytics and metrics collection
 
+pub mod analytics;
 pub mod background_agent;
 pub mod builtin_skills;
 pub mod context_injector;
 pub mod delegation_categories;
 pub mod model_routing;
 pub mod notepad_wisdom;
+pub mod rate_limit_wait;
 pub mod state_manager;
 pub mod task_decomposer;
 pub mod uira_state;
