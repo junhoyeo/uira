@@ -14,11 +14,13 @@ Strategic planning mode with interview workflow.
 
 ## Behavior
 
-1. Gather context via explore agents
-2. Consult architect for guidance
+1. Gather context via explore agents (delegate_task MCP tool)
+2. Consult architect for guidance (Task tool)
 3. Interview user for requirements
 4. Create comprehensive implementation plan
 5. Get user approval before proceeding
+
+**Note:** Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for explore agents.
 
 ## Planning Approach
 

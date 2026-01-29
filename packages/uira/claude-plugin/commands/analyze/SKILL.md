@@ -15,15 +15,18 @@ Deep analysis and investigation mode.
 ## Behavior
 
 When activated:
-1. Gather context via explore agents (parallel)
+1. Gather context via explore/librarian agents (parallel, via delegate_task)
 2. Use architect for complex reasoning
 3. Synthesize findings before proceeding
 
 ## Context Gathering
 
-- 1-2 explore agents for codebase patterns
-- librarian agents for external library docs
-- Direct tools: Grep, Glob, LSP
+- Direct tools: Grep, Glob, LSP (preferred for speed)
+- **delegate_task** agents (via MCP tool):
+  - `explore`: Codebase patterns (1-2 parallel)
+  - `librarian`: External library docs
+
+Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for agent delegation.
 
 ## Complex Analysis
 

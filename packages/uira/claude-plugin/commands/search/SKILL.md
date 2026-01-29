@@ -15,8 +15,11 @@ Comprehensive codebase search mode.
 ## Behavior
 
 Maximize search effort with parallel agents:
-- explore agents (codebase patterns, file structures)
-- librarian agents (remote repos, official docs)
-- Direct tools: Grep, Glob
+- Direct tools: Grep, Glob (preferred for speed)
+- **delegate_task** agents (via MCP tool):
+  - `explore`: Codebase patterns, file structures
+  - `librarian`: Remote repos, official docs
+
+Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for agent delegation.
 
 NEVER stop at first result - be exhaustive.

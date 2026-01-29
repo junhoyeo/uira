@@ -30,11 +30,22 @@ Say these naturally in your prompt:
 
 ## Agents
 
-30 agents across 3 tiers (Haiku/Sonnet/Opus):
+### Standard Agents (Task tool)
+
+27 agents across 3 tiers (Haiku/Sonnet/Opus):
 - **Analysis**: architect, analyst, critic, planner
-- **Execution**: executor, explore, librarian
+- **Execution**: executor
 - **Frontend**: designer, vision
 - **Quality**: qa-tester, code-reviewer, security-reviewer
 - **Specialists**: scientist, writer, tdd-guide, build-fixer
 
 Use `-low`, `-medium`, `-high` suffixes for tier control (e.g., `executor-low`, `architect-high`).
+
+### Custom-Routed Agents (delegate_task MCP tool)
+
+- **explore**: Fast codebase search (opencode/gpt-5-nano)
+- **librarian**: External docs, multi-repo (opencode/big-pickle)
+
+```
+mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")
+```

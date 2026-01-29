@@ -18,19 +18,28 @@ Just say what you want to build. Uira activates automatically.
 
 ## Available Agents
 
+### Standard Agents (Task tool)
+
 Use `Task` tool with `subagent_type="uira:<agent>"`:
 
 | Agent | Model | Use For |
 |-------|-------|---------|
 | `architect` | Opus | Complex problems, architecture |
 | `executor` | Sonnet | Implementation tasks |
-| `explore` | Haiku | Fast codebase search |
 | `designer` | Sonnet | UI/UX work |
-| `researcher` | Sonnet | External docs, references |
 | `writer` | Haiku | Documentation |
 | `qa-tester` | Opus | CLI testing |
 | `security-reviewer` | Opus | Security analysis |
 | `build-fixer` | Sonnet | Build error resolution |
+
+### Custom-Routed Agents (delegate_task MCP tool)
+
+Use `mcp__plugin_uira_uira-tools__delegate_task(agent="...", prompt="...")`:
+
+| Agent | Model | Use For |
+|-------|-------|---------|
+| `explore` | opencode/gpt-5-nano | Fast codebase search |
+| `librarian` | opencode/big-pickle | External docs, multi-repo analysis |
 
 ### Tiered Variants
 

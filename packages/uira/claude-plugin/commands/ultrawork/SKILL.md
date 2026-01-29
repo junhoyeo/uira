@@ -30,7 +30,12 @@ When activated:
 
 ## Agent Utilization
 
-- **explore**: Codebase patterns, file structures
+### Standard Agents (Task tool)
 - **architect**: Complex decisions, debugging
 - **executor**: Implementation tasks
+
+### Custom-Routed Agents (delegate_task MCP tool)
+- **explore**: Codebase patterns, file structures
 - **librarian**: External docs, references
+
+Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for these.
