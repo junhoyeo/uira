@@ -1,7 +1,9 @@
+use crate::{
+    generate_pkce, AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result, generate_pkce};
 use url::Url;
 
 const CLIENT_ID: &str = "b897d1b9-1fdd-4a90-a129-43751e0bde9b";

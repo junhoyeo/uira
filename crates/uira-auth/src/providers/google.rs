@@ -1,7 +1,9 @@
+use crate::{
+    generate_pkce, AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result,
+};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::{AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result, generate_pkce};
 use url::Url;
 
 const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
