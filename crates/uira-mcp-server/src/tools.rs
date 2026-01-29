@@ -515,9 +515,26 @@ impl ToolExecutor {
             .as_str()
             .ok_or("Missing 'prompt' parameter")?;
 
-        let model = args["model"]
-            .as_str()
-            .unwrap_or("claude-3-5-sonnet-20241022");
+        // Model resolution priority:
+        // 1. Explicit model parameter
+        // 2. Agent config from uira.yml
+        // 3. Default fallback
+        let model = if let Some(explicit_model) = args["model"].as_str() {
+            explicit_model.to_string()
+        } else {
+            // Try to load agent model from config
+            load_config(None)
+                .ok()
+                .and_then(|config| {
+                    config
+                        .agents
+                        .agents
+                        .get(agent)
+                        .and_then(|agent_config| agent_config.model.clone())
+                })
+                .unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string())
+        };
+        let model = model.as_str();
 
         let description = args["description"].as_str().unwrap_or(prompt);
 

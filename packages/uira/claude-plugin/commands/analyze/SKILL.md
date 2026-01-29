@@ -26,7 +26,7 @@ When activated:
   - `explore`: Codebase patterns (1-2 parallel)
   - `librarian`: External library docs
 
-Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for agent delegation.
+Use `mcp__plugin_uira_t__delegate_task(agent="explore", prompt="...")` for agent delegation.
 
 ## Complex Analysis
 

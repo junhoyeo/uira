@@ -38,4 +38,4 @@ When activated:
 - **explore**: Codebase patterns, file structures
 - **librarian**: External docs, references
 
-Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for these.
+Use `mcp__plugin_uira_t__delegate_task(agent="explore", prompt="...")` for these.

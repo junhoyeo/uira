@@ -20,18 +20,20 @@ Just say what you want:
 
 ## Agents
 
+**IMPORTANT:** When using `explore` or `librarian` agents, you MUST use `mcp__plugin_uira_t__delegate_task`, NOT the built-in Task tool. The built-in `Explore` agent is different from Uira's `explore` agent.
+
 ### Standard Agents (use Task tool)
 
 | Agent | Model | Use For |
 |-------|-------|---------|
-| `architect` | Opus | Complex problems, architecture |
-| `executor` | Sonnet | Implementation tasks |
-| `designer` | Sonnet | UI/UX work |
-| `writer` | Haiku | Documentation |
+| `uira:architect` | Opus | Complex problems, architecture |
+| `uira:executor` | Sonnet | Implementation tasks |
+| `uira:designer` | Sonnet | UI/UX work |
+| `uira:writer` | Haiku | Documentation |
 
 ### Custom-Routed Agents (use delegate_task MCP tool)
 
-These agents use non-Anthropic models and require the `delegate_task` MCP tool:
+**DO NOT use Task tool for these.** Use `mcp__plugin_uira_t__delegate_task`:
 
 | Agent | Model | Use For |
 |-------|-------|---------|
@@ -40,7 +42,7 @@ These agents use non-Anthropic models and require the `delegate_task` MCP tool:
 
 **Usage:**
 ```
-mcp__plugin_uira_uira-tools__delegate_task(
+mcp__plugin_uira_t__delegate_task(
   agent="librarian",
   prompt="Find React hooks documentation"
 )

@@ -48,7 +48,7 @@ if (toolName === 'Task') {
       continue: false,
       decision: 'block',
       reason: `Agent '${agentName}' requires custom model routing. Use the delegate_task MCP tool instead:\n\n` +
-        `mcp__plugin_uira_uira-tools__delegate_task(agent="${agentName}", prompt="your prompt here")\n\n` +
+        `mcp__plugin_uira_t__delegate_task(agent="${agentName}", prompt="your prompt here")\n\n` +
         `This ensures the agent routes to the correct model via OpenCode session API (e.g., opencode/big-pickle for librarian).`
     }));
     process.exit(0);

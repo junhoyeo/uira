@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "uira-tools": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/../../target/release/uira-mcp",
+    "t": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/../../../target/release/uira-mcp",
       "args": [],
       "env": {}
     },
