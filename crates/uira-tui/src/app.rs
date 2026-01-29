@@ -17,6 +17,7 @@ use uira_agent::{Agent, AgentConfig};
 use uira_protocol::{AgentState, Item, ThreadEvent};
 use uira_providers::ModelClient;
 
+use crate::views::ApprovalOverlay;
 use crate::widgets::{ChatMessage, ChatWidget};
 use crate::AppEvent;
 
@@ -44,6 +45,8 @@ pub struct App {
     input_focused: bool,
     /// Current streaming message buffer
     streaming_buffer: Option<String>,
+    /// Approval overlay for tool approvals
+    approval_overlay: ApprovalOverlay,
 }
 
 impl App {
@@ -61,6 +64,7 @@ impl App {
             scroll: 0,
             input_focused: true,
             streaming_buffer: None,
+            approval_overlay: ApprovalOverlay::new(),
         }
     }
 
@@ -88,6 +92,8 @@ impl App {
             }
 
             if self.should_quit {
+                // Deny any pending approvals before quitting
+                self.approval_overlay.deny_all();
                 break;
             }
         }
@@ -138,6 +144,11 @@ impl App {
 
         // Render input
         self.render_input(frame, chunks[2]);
+
+        // Render approval overlay on top if active
+        if self.approval_overlay.is_active() {
+            self.approval_overlay.render(frame, area);
+        }
     }
 
     fn render_chat(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -162,7 +173,7 @@ impl App {
             AgentState::Failed => ("Failed", Color::Red),
         };
 
-        let spans = vec![
+        let mut spans = vec![
             Span::styled(
                 format!(" {} ", state_str.0),
                 Style::default().fg(Color::Black).bg(state_str.1),
@@ -171,6 +182,16 @@ impl App {
             Span::styled(&self.status, Style::default().fg(Color::DarkGray)),
         ];
 
+        // Show pending approval count
+        let pending = self.approval_overlay.pending_count();
+        if pending > 0 {
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                format!("{} pending approval(s)", pending),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
         let status = Paragraph::new(Line::from(spans))
             .style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
@@ -178,14 +199,19 @@ impl App {
     }
 
     fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Input (Enter to send, Ctrl+C to quit) ")
-            .borders(Borders::ALL)
-            .style(if self.input_focused {
+        let title = if self.approval_overlay.is_active() {
+            " Input (approval overlay active) "
+        } else {
+            " Input (Enter to send, Ctrl+C to quit) "
+        };
+
+        let block = Block::default().title(title).borders(Borders::ALL).style(
+            if self.input_focused && !self.approval_overlay.is_active() {
                 Style::default().fg(Color::Cyan)
             } else {
                 Style::default().fg(Color::Gray)
-            });
+            },
+        );
 
         let inner = block.inner(area);
 
@@ -204,6 +230,16 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) {
+        // Approval overlay takes priority for key handling
+        if self.approval_overlay.handle_key(key.code) {
+            // Key was consumed by overlay
+            if !self.approval_overlay.is_active() {
+                // Overlay finished, update state
+                self.agent_state = AgentState::Thinking;
+            }
+            return;
+        }
+
         // Global shortcuts
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
@@ -300,6 +336,11 @@ impl App {
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
             }
+            AppEvent::ApprovalRequest(request) => {
+                // Enqueue approval and update state
+                self.approval_overlay.enqueue(request);
+                self.agent_state = AgentState::WaitingForApproval;
+            }
             AppEvent::Redraw => {
                 // Force redraw (handled automatically)
             }
@@ -328,6 +369,14 @@ impl App {
                     turn_number, usage.input_tokens, usage.output_tokens
                 );
             }
+            ThreadEvent::ContentDelta { delta } => {
+                // Accumulate streaming content
+                if let Some(ref mut buffer) = self.streaming_buffer {
+                    buffer.push_str(&delta);
+                } else {
+                    self.streaming_buffer = Some(delta);
+                }
+            }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { name, .. } => {
                     self.agent_state = AgentState::ExecutingTool;
@@ -336,6 +385,17 @@ impl App {
                 Item::AgentMessage { content } => {
                     // Start streaming
                     self.streaming_buffer = Some(content);
+                }
+                Item::ApprovalRequest {
+                    id,
+                    tool_name,
+                    reason,
+                } => {
+                    // Note: In full implementation, this would be received via a separate channel
+                    // with a oneshot sender for the response
+                    self.status = format!("Approval needed: {} - {}", tool_name, reason);
+                    self.agent_state = AgentState::WaitingForApproval;
+                    tracing::debug!("Approval request: {} for {}", id, tool_name);
                 }
                 _ => {}
             },
@@ -358,6 +418,21 @@ impl App {
                         content,
                     });
                 }
+                Item::ApprovalDecision {
+                    request_id,
+                    approved,
+                } => {
+                    self.status = format!(
+                        "Approval {}: {}",
+                        request_id,
+                        if approved { "granted" } else { "denied" }
+                    );
+                    if approved {
+                        self.agent_state = AgentState::ExecutingTool;
+                    } else {
+                        self.agent_state = AgentState::Thinking;
+                    }
+                }
                 _ => {}
             },
             ThreadEvent::ThreadCompleted { usage } => {
@@ -366,6 +441,20 @@ impl App {
                     "Complete (total: {} in / {} out tokens)",
                     usage.input_tokens, usage.output_tokens
                 );
+
+                // Flush streaming buffer if present
+                if let Some(buffer) = self.streaming_buffer.take() {
+                    if !buffer.is_empty() {
+                        self.messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: buffer,
+                        });
+                    }
+                }
+            }
+            ThreadEvent::ThreadCancelled => {
+                self.agent_state = AgentState::Cancelled;
+                self.status = "Cancelled".to_string();
             }
             ThreadEvent::Error { message, .. } => {
                 self.agent_state = AgentState::Failed;

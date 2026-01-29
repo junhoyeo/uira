@@ -1,5 +1,7 @@
 //! Main agent implementation
 
+use futures::StreamExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use uira_protocol::{
     AgentError, AgentState, ContentBlock, ExecutionResult, Message, Role, ThreadEvent, ToolCall,
@@ -8,6 +10,8 @@ use uira_providers::ModelClient;
 
 use crate::{
     events::{EventSender, EventStream},
+    rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
+    streaming::StreamController,
     AgentConfig, AgentControl, AgentLoopError, Session,
 };
 
@@ -19,6 +23,10 @@ pub struct Agent {
     event_sender: Option<EventSender>,
     /// Pending tool calls for step-by-step execution
     pending_tool_calls: Option<Vec<ToolCall>>,
+    /// Rollout recorder for session persistence
+    rollout: Option<RolloutRecorder>,
+    /// Whether to use streaming for model responses
+    streaming_enabled: bool,
 }
 
 impl Agent {
@@ -30,6 +38,8 @@ impl Agent {
             state: AgentState::Idle,
             event_sender: None,
             pending_tool_calls: None,
+            rollout: None,
+            streaming_enabled: true,
         }
     }
 
@@ -38,6 +48,63 @@ impl Agent {
         let (sender, stream) = EventStream::channel(100);
         self.event_sender = Some(sender);
         (self, stream)
+    }
+
+    /// Enable rollout recording for session persistence
+    pub fn with_rollout(mut self) -> Result<Self, AgentLoopError> {
+        let meta = SessionMetaLine::new(
+            self.session.id.to_string(),
+            self.session.client.model(),
+            self.session.client.provider(),
+            self.session.cwd.clone(),
+            format!("{:?}", self.session.config.sandbox_policy),
+        );
+
+        let recorder = RolloutRecorder::new(meta).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+
+        self.rollout = Some(recorder);
+        Ok(self)
+    }
+
+    /// Disable streaming (use blocking chat instead)
+    pub fn with_streaming(mut self, enabled: bool) -> Self {
+        self.streaming_enabled = enabled;
+        self
+    }
+
+    /// Resume from a rollout file
+    pub fn resume_from_rollout(
+        config: AgentConfig,
+        client: Arc<dyn ModelClient>,
+        rollout_path: PathBuf,
+    ) -> Result<Self, AgentLoopError> {
+        // Load items from rollout
+        let items =
+            RolloutRecorder::load(&rollout_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+
+        // Create agent
+        let mut agent = Self::new(config, client);
+
+        // Restore messages to context
+        let messages = extract_messages(&items);
+        for msg in messages {
+            agent
+                .session
+                .context
+                .add_message(msg)
+                .map_err(AgentLoopError::Context)?;
+        }
+
+        // Restore turn count and usage
+        agent.session.turn = get_last_turn(&items);
+        agent.session.usage = get_total_usage(&items);
+
+        // Open rollout for appending
+        let recorder =
+            RolloutRecorder::open(rollout_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+        agent.rollout = Some(recorder);
+
+        Ok(agent)
     }
 
     /// Get the agent control handle
@@ -55,6 +122,11 @@ impl Agent {
         &self.session
     }
 
+    /// Get the rollout path if recording is enabled
+    pub fn rollout_path(&self) -> Option<&PathBuf> {
+        self.rollout.as_ref().map(|r| r.path())
+    }
+
     /// Run the agent with the given prompt
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
         self.state = AgentState::Thinking;
@@ -67,6 +139,7 @@ impl Agent {
 
         // Add user message
         let user_message = Message::user(prompt);
+        self.record_message(user_message.clone());
         self.session
             .context
             .add_message(user_message)
@@ -77,6 +150,7 @@ impl Agent {
             // Check for cancellation
             if self.control.is_cancelled() {
                 self.state = AgentState::Cancelled;
+                self.record_event(ThreadEvent::ThreadCancelled);
                 return Err(AgentLoopError::Cancelled);
             }
 
@@ -97,20 +171,25 @@ impl Agent {
             self.emit_event(ThreadEvent::TurnStarted { turn_number })
                 .await;
 
-            // Get model response
-            let response = self
-                .session
-                .client
-                .chat(self.session.context.messages(), &[])
-                .await
-                .map_err(AgentLoopError::Provider)?;
+            // Get model response (streaming or blocking)
+            let response = if self.streaming_enabled {
+                self.get_response_streaming().await?
+            } else {
+                self.session
+                    .client
+                    .chat(self.session.context.messages(), &[])
+                    .await
+                    .map_err(AgentLoopError::Provider)?
+            };
 
             // Record usage
             self.session.record_usage(response.usage.clone());
+            self.record_turn(turn_number, response.usage.clone());
 
             // Add assistant message to context
             let assistant_message =
                 Message::with_blocks(uira_protocol::Role::Assistant, response.content.clone());
+            self.record_message(assistant_message.clone());
             self.session
                 .context
                 .add_message(assistant_message)
@@ -133,6 +212,7 @@ impl Agent {
 
                 // Add tool results to context
                 let tool_result_message = Message::with_blocks(Role::User, tool_results);
+                self.record_message(tool_result_message.clone());
                 self.session
                     .context
                     .add_message(tool_result_message)
@@ -156,6 +236,36 @@ impl Agent {
         }
     }
 
+    /// Get model response with streaming, emitting ContentDelta events
+    async fn get_response_streaming(
+        &mut self,
+    ) -> Result<uira_protocol::ModelResponse, AgentLoopError> {
+        let stream = self
+            .session
+            .client
+            .chat_stream(self.session.context.messages(), &[])
+            .await
+            .map_err(AgentLoopError::Provider)?;
+
+        let mut controller = StreamController::new();
+        let mut stream = std::pin::pin!(stream);
+
+        while let Some(result) = stream.next().await {
+            let chunk = result.map_err(AgentLoopError::Provider)?;
+            let new_lines = controller.push(chunk);
+
+            // Emit each committed line as ContentDelta
+            for line in new_lines {
+                self.emit_event(ThreadEvent::ContentDelta {
+                    delta: format!("{}\n", line),
+                })
+                .await;
+            }
+        }
+
+        Ok(controller.into_response())
+    }
+
     /// Execute a single step of the agent loop
     ///
     /// This allows fine-grained control over execution - useful for TUI/debugging.
@@ -170,6 +280,7 @@ impl Agent {
                 // Check for cancellation
                 if self.control.is_cancelled() {
                     self.state = AgentState::Cancelled;
+                    self.record_event(ThreadEvent::ThreadCancelled);
                     return Ok(AgentState::Cancelled);
                 }
 
@@ -184,20 +295,25 @@ impl Agent {
                 self.emit_event(ThreadEvent::TurnStarted { turn_number })
                     .await;
 
-                // Get model response
-                let response = self
-                    .session
-                    .client
-                    .chat(self.session.context.messages(), &[])
-                    .await
-                    .map_err(AgentLoopError::Provider)?;
+                // Get model response (streaming or blocking)
+                let response = if self.streaming_enabled {
+                    self.get_response_streaming().await?
+                } else {
+                    self.session
+                        .client
+                        .chat(self.session.context.messages(), &[])
+                        .await
+                        .map_err(AgentLoopError::Provider)?
+                };
 
                 // Record usage
                 self.session.record_usage(response.usage.clone());
+                self.record_turn(turn_number, response.usage.clone());
 
                 // Add assistant message to context
                 let assistant_message =
                     Message::with_blocks(Role::Assistant, response.content.clone());
+                self.record_message(assistant_message.clone());
                 self.session
                     .context
                     .add_message(assistant_message)
@@ -234,6 +350,7 @@ impl Agent {
 
                     // Add tool results to context
                     let tool_result_message = Message::with_blocks(Role::User, tool_results);
+                    self.record_message(tool_result_message.clone());
                     self.session
                         .context
                         .add_message(tool_result_message)
@@ -276,6 +393,7 @@ impl Agent {
 
         // Add user message
         let user_message = Message::user(prompt);
+        self.record_message(user_message.clone());
         self.session
             .context
             .add_message(user_message)
@@ -352,11 +470,57 @@ impl Agent {
     pub fn cancel(&mut self) {
         self.control.cancel();
         self.state = AgentState::Cancelled;
+        self.record_event(ThreadEvent::ThreadCancelled);
     }
 
     async fn emit_event(&self, event: ThreadEvent) {
         if let Some(ref sender) = self.event_sender {
             let _ = sender.send(event).await;
+        }
+    }
+
+    /// Record a message to the rollout
+    fn record_message(&mut self, message: Message) {
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_message(message) {
+                tracing::warn!("Failed to record message to rollout: {}", e);
+            }
+        }
+    }
+
+    /// Record a tool call to the rollout
+    fn record_tool_call(&mut self, id: &str, name: &str, input: &serde_json::Value) {
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_tool_call(id, name, input.clone()) {
+                tracing::warn!("Failed to record tool call to rollout: {}", e);
+            }
+        }
+    }
+
+    /// Record a tool result to the rollout
+    fn record_tool_result(&mut self, id: &str, output: &str, is_error: bool) {
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_tool_result(id, output, is_error) {
+                tracing::warn!("Failed to record tool result to rollout: {}", e);
+            }
+        }
+    }
+
+    /// Record turn context to the rollout
+    fn record_turn(&mut self, turn: usize, usage: uira_protocol::TokenUsage) {
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_turn(turn, usage) {
+                tracing::warn!("Failed to record turn to rollout: {}", e);
+            }
+        }
+    }
+
+    /// Record a thread event to the rollout
+    fn record_event(&mut self, event: ThreadEvent) {
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_event(event) {
+                tracing::warn!("Failed to record event to rollout: {}", e);
+            }
         }
     }
 
@@ -371,7 +535,8 @@ impl Agent {
         let ctx = self.session.tool_context();
 
         for call in tool_calls {
-            // Emit tool start event
+            // Record and emit tool start
+            self.record_tool_call(&call.id, &call.name, &call.input);
             self.emit_event(ThreadEvent::ItemStarted {
                 item: Item::ToolCall {
                     id: call.id.clone(),
@@ -393,6 +558,8 @@ impl Agent {
                     let content = output.as_text().unwrap_or("").to_string();
                     results.push(ContentBlock::tool_result(&call.id, &content));
 
+                    // Record and emit tool result
+                    self.record_tool_result(&call.id, &content, false);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {
                             tool_call_id: call.id.clone(),
@@ -406,6 +573,8 @@ impl Agent {
                     let error_msg = e.to_string();
                     results.push(ContentBlock::tool_error(&call.id, &error_msg));
 
+                    // Record and emit tool error
+                    self.record_tool_result(&call.id, &error_msg, true);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {
                             tool_call_id: call.id.clone(),

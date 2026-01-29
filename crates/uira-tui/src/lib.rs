@@ -8,8 +8,9 @@
 
 mod app;
 mod events;
-mod views;
+pub mod views;
 mod widgets;
 
 pub use app::App;
 pub use events::AppEvent;
+pub use views::{ApprovalOverlay, ApprovalRequest, ApprovalView};

@@ -22,7 +22,12 @@ futures = { workspace = true }
 async-trait = "0.1"
 tracing = "0.1"
 indexmap = { version = "2", features = ["serde"] }
+chrono = { workspace = true }
+dirs = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+futures = { workspace = true }
+chrono = { workspace = true }

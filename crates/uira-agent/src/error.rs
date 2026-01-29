@@ -23,6 +23,9 @@ pub enum AgentLoopError {
     #[error("configuration error: {0}")]
     Configuration(String),
 
+    #[error("IO error: {0}")]
+    Io(String),
+
     #[error("cancelled")]
     Cancelled,
 }

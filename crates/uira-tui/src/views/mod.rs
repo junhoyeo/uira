@@ -2,6 +2,4 @@
 
 mod approval;
 
-// Re-export when TUI is complete
-#[allow(unused_imports)]
-pub use approval::ApprovalView;
+pub use approval::{ApprovalOverlay, ApprovalRequest, ApprovalView};

@@ -4208,6 +4208,8 @@ name = "uira-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
+ "dirs",
  "futures",
  "indexmap",
  "serde",
@@ -4222,6 +4224,7 @@ dependencies = [
  "uira-providers",
  "uira-sandbox",
  "uira-tools",
+ "uuid",
 ]
 
 [[package]]
