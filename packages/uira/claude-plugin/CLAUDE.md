@@ -40,7 +40,7 @@ These agents use non-Anthropic models and require the `delegate_task` MCP tool:
 
 **Usage:**
 ```
-mcp__plugin_uira_uira-tools__delegate_task(
+mcp__plugin_uira_t__delegate_task(
   agent="librarian",
   prompt="Find React hooks documentation"
 )

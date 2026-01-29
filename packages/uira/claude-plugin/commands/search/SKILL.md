@@ -20,6 +20,6 @@ Maximize search effort with parallel agents:
   - `explore`: Codebase patterns, file structures
   - `librarian`: Remote repos, official docs
 
-Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for agent delegation.
+Use `mcp__plugin_uira_t__delegate_task(agent="explore", prompt="...")` for agent delegation.
 
 NEVER stop at first result - be exhaustive.

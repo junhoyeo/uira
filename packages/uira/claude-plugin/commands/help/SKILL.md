@@ -47,5 +47,5 @@ Use `-low`, `-medium`, `-high` suffixes for tier control (e.g., `executor-low`, 
 - **librarian**: External docs, multi-repo (opencode/big-pickle)
 
 ```
-mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")
+mcp__plugin_uira_t__delegate_task(agent="explore", prompt="...")
 ```

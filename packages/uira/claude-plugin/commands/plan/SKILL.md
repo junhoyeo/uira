@@ -20,7 +20,7 @@ Strategic planning mode with interview workflow.
 4. Create comprehensive implementation plan
 5. Get user approval before proceeding
 
-**Note:** Use `mcp__plugin_uira_uira-tools__delegate_task(agent="explore", prompt="...")` for explore agents.
+**Note:** Use `mcp__plugin_uira_t__delegate_task(agent="explore", prompt="...")` for explore agents.
 
 ## Planning Approach
 

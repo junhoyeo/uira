@@ -34,7 +34,7 @@ Use `Task` tool with `subagent_type="uira:<agent>"`:
 
 ### Custom-Routed Agents (delegate_task MCP tool)
 
-Use `mcp__plugin_uira_uira-tools__delegate_task(agent="...", prompt="...")`:
+Use `mcp__plugin_uira_t__delegate_task(agent="...", prompt="...")`:
 
 | Agent | Model | Use For |
 |-------|-------|---------|
