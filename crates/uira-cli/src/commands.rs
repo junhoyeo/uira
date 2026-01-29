@@ -15,7 +15,7 @@ pub struct Cli {
     #[arg(short, long)]
     pub model: Option<String>,
 
-    /// Provider to use (anthropic, openai, ollama)
+    /// Provider to use (anthropic, openai, ollama, opencode)
     #[arg(short, long)]
     pub provider: Option<String>,
 

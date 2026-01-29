@@ -7,7 +7,8 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use uira_agent::{Agent, AgentConfig};
 use uira_protocol::ExecutionResult;
 use uira_providers::{
-    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, ProviderConfig,
+    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
+    ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
 
@@ -655,12 +656,13 @@ fn create_client(
 
     match provider {
         "anthropic" => {
-            let api_key =
-                std::env::var("ANTHROPIC_API_KEY").map_err(|_| "ANTHROPIC_API_KEY not set")?;
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .map(SecretString::from);
 
             let provider_config = ProviderConfig {
                 provider: Provider::Anthropic,
-                api_key: Some(SecretString::from(api_key)),
+                api_key,
                 model: model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
                 ..Default::default()
             };
@@ -669,11 +671,11 @@ fn create_client(
             Ok(Arc::new(client))
         }
         "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set")?;
+            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
 
             let provider_config = ProviderConfig {
                 provider: Provider::OpenAI,
-                api_key: Some(SecretString::from(api_key)),
+                api_key,
                 model: model.unwrap_or_else(|| "gpt-4o".to_string()),
                 ..Default::default()
             };
@@ -709,6 +711,21 @@ fn create_client(
             };
 
             let client = OllamaClient::new(provider_config)?;
+            Ok(Arc::new(client))
+        }
+        "opencode" => {
+            let api_key = std::env::var("OPENCODE_API_KEY")
+                .ok()
+                .map(SecretString::from);
+
+            let provider_config = ProviderConfig {
+                provider: Provider::OpenCode,
+                api_key,
+                model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
+                ..Default::default()
+            };
+
+            let client = OpenCodeClient::new(provider_config)?;
             Ok(Arc::new(client))
         }
         _ => Err(format!("Unknown provider: {}", provider).into()),

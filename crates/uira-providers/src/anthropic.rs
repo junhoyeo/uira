@@ -243,13 +243,18 @@ impl AnthropicClient {
         Ok(())
     }
 
-    async fn get_current_api_key(&self) -> Result<SecretString, ProviderError> {
+    async fn get_auth_headers(&self) -> Result<Vec<(&'static str, String)>, ProviderError> {
         self.refresh_token_if_needed().await?;
 
         let credential = self.credential.read().await;
         match &*credential {
-            CredentialSource::OAuth { access_token, .. } => Ok(access_token.clone()),
-            CredentialSource::ApiKey(key) => Ok(key.clone()),
+            CredentialSource::OAuth { access_token, .. } => Ok(vec![(
+                "Authorization",
+                format!("Bearer {}", access_token.expose_secret()),
+            )]),
+            CredentialSource::ApiKey(key) => {
+                Ok(vec![("x-api-key", key.expose_secret().to_string())])
+            }
         }
     }
 
@@ -362,17 +367,15 @@ impl AnthropicClient {
 #[async_trait]
 impl ModelClient for AnthropicClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
-        let api_key = self.get_current_api_key().await?;
+        let auth_headers = self.get_auth_headers().await?;
         let request = self.build_request(messages, tools, false);
         let url = format!("{}/v1/messages", self.base_url());
 
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", api_key.expose_secret())
-            .json(&request)
-            .send()
-            .await?;
+        let mut req = self.client.post(&url);
+        for (key, value) in auth_headers {
+            req = req.header(key, value);
+        }
+        let response = req.json(&request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -399,17 +402,15 @@ impl ModelClient for AnthropicClient {
         messages: &[Message],
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
-        let api_key = self.get_current_api_key().await?;
+        let auth_headers = self.get_auth_headers().await?;
         let request = self.build_request(messages, tools, true);
         let url = format!("{}/v1/messages", self.base_url());
 
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", api_key.expose_secret())
-            .json(&request)
-            .send()
-            .await?;
+        let mut req = self.client.post(&url);
+        for (key, value) in auth_headers {
+            req = req.header(key, value);
+        }
+        let response = req.json(&request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
