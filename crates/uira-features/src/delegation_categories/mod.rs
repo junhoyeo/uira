@@ -325,7 +325,6 @@ pub fn get_category_for_task(context: &CategoryContext) -> ResolvedCategory {
     resolve_category(DelegationCategory::UnspecifiedHigh)
 }
 
-/// Get tier from category (for backward compatibility)
 pub fn get_category_tier(category: DelegationCategory) -> ComplexityTier {
     let configs = category_configs();
     configs

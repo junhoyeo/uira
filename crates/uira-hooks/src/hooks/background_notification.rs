@@ -49,7 +49,6 @@ impl Default for BackgroundNotificationHookConfig {
 #[serde(rename_all = "lowercase")]
 pub enum BackgroundTaskStatus {
     Queued,
-    /// @deprecated in TS implementation (kept for backward compat)
     Pending,
     Running,
     Completed,

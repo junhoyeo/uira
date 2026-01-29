@@ -450,7 +450,6 @@ fn file_ext_with_dot(file_path: &str) -> String {
 }
 
 fn run_shell_command(command: &str, cwd: Option<&str>) -> Result<ToolRunResult, String> {
-    // Backwards-compat helper used by TS ports: only success is relevant.
     run_shell_raw(command, cwd).map(|_| ToolRunResult {
         success: true,
         message: String::new(),

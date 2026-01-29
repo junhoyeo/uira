@@ -32,7 +32,6 @@ pub struct SessionStorage {
     sessions_dir: PathBuf,
 }
 
-#[allow(dead_code)]
 impl SessionStorage {
     /// Create a new session storage
     pub fn new() -> std::io::Result<Self> {
@@ -47,14 +46,6 @@ impl SessionStorage {
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No data dir"))?;
 
         Ok(data_dir.join("uira").join("sessions"))
-    }
-
-    /// Save a session to disk
-    pub fn save(&self, session: &StoredSession) -> std::io::Result<()> {
-        let session_path = self.sessions_dir.join(format!("{}.json", session.meta.id));
-        let content = serde_json::to_string_pretty(session)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(session_path, content)
     }
 
     /// Load a session by ID
@@ -98,26 +89,6 @@ impl SessionStorage {
         sessions.truncate(limit);
         Ok(sessions)
     }
-
-    /// Delete a session
-    pub fn delete(&self, session_id: &str) -> std::io::Result<()> {
-        let session_path = self.sessions_dir.join(format!("{}.json", session_id));
-        std::fs::remove_file(session_path)
-    }
-
-    /// Clean up old sessions (keep only N most recent)
-    pub fn cleanup(&self, keep: usize) -> std::io::Result<usize> {
-        let sessions = self.list()?;
-        let mut deleted = 0;
-
-        for session in sessions.into_iter().skip(keep) {
-            if self.delete(&session.id).is_ok() {
-                deleted += 1;
-            }
-        }
-
-        Ok(deleted)
-    }
 }
 
 impl Default for SessionStorage {
@@ -125,51 +96,6 @@ impl Default for SessionStorage {
         Self::new().unwrap_or_else(|_| Self {
             sessions_dir: PathBuf::from(".uira-sessions"),
         })
-    }
-}
-
-/// Create a session from agent execution
-#[allow(dead_code)]
-pub fn create_session(
-    session_id: &str,
-    messages: Vec<Message>,
-    provider: &str,
-    model: &str,
-    turns: usize,
-    usage: TokenUsage,
-    working_directory: PathBuf,
-) -> StoredSession {
-    let summary = messages
-        .iter()
-        .find(|m| matches!(m.role, uira_protocol::Role::User))
-        .map(|m| match &m.content {
-            uira_protocol::MessageContent::Text(t) => {
-                let truncated: String = t.chars().take(100).collect();
-                if t.len() > 100 {
-                    format!("{}...", truncated)
-                } else {
-                    truncated
-                }
-            }
-            _ => "...".to_string(),
-        })
-        .unwrap_or_else(|| "Empty session".to_string());
-
-    let now = Utc::now();
-
-    StoredSession {
-        meta: SessionMeta {
-            id: session_id.to_string(),
-            created_at: now,
-            updated_at: now,
-            provider: provider.to_string(),
-            model: model.to_string(),
-            turns,
-            usage,
-            summary,
-        },
-        messages,
-        working_directory,
     }
 }
 
