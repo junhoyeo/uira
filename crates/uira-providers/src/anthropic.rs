@@ -24,6 +24,16 @@ const DEFAULT_MAX_TOKENS: usize = 8192;
 const PROVIDER_NAME: &str = "anthropic";
 /// Buffer time before token expiration to trigger refresh (5 minutes)
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
+/// OAuth client ID (same as Claude Code CLI)
+const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+/// Required beta features for OAuth
+const OAUTH_BETA_FEATURES: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14";
+/// User agent to masquerade as Claude Code CLI
+const OAUTH_USER_AGENT: &str = "claude-cli/2.1.2 (external, cli)";
+/// Tool name prefix for OAuth requests
+const TOOL_PREFIX: &str = "mcp_";
+/// System prompt prefix required for OAuth (masquerade as Claude Code)
+const CLAUDE_CODE_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Credential source for the client
 #[derive(Debug, Clone)]
@@ -170,13 +180,22 @@ impl AnthropicClient {
     }
 
     async fn do_token_refresh(&self, refresh_token: &SecretString) -> Result<(), ProviderError> {
+        #[derive(Serialize)]
+        struct TokenRefreshRequest<'a> {
+            grant_type: &'a str,
+            refresh_token: &'a str,
+            client_id: &'a str,
+        }
+
         let response = self
             .client
             .post("https://console.anthropic.com/v1/oauth/token")
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh_token.expose_secret()),
-            ])
+            .header("Content-Type", "application/json")
+            .json(&TokenRefreshRequest {
+                grant_type: "refresh_token",
+                refresh_token: refresh_token.expose_secret(),
+                client_id: OAUTH_CLIENT_ID,
+            })
             .send()
             .await
             .map_err(ProviderError::Network)?;
@@ -248,14 +267,23 @@ impl AnthropicClient {
 
         let credential = self.credential.read().await;
         match &*credential {
-            CredentialSource::OAuth { access_token, .. } => Ok(vec![(
-                "Authorization",
-                format!("Bearer {}", access_token.expose_secret()),
-            )]),
+            CredentialSource::OAuth { access_token, .. } => Ok(vec![
+                (
+                    "Authorization",
+                    format!("Bearer {}", access_token.expose_secret()),
+                ),
+                ("anthropic-beta", OAUTH_BETA_FEATURES.to_string()),
+                ("user-agent", OAUTH_USER_AGENT.to_string()),
+            ]),
             CredentialSource::ApiKey(key) => {
                 Ok(vec![("x-api-key", key.expose_secret().to_string())])
             }
         }
+    }
+
+    async fn is_using_oauth(&self) -> bool {
+        let credential = self.credential.read().await;
+        matches!(&*credential, CredentialSource::OAuth { .. })
     }
 
     fn build_request(
@@ -263,8 +291,18 @@ impl AnthropicClient {
         messages: &[Message],
         tools: &[ToolSpec],
         stream: bool,
+        is_oauth: bool,
     ) -> AnthropicRequest {
         let (system, messages) = Self::extract_system(messages);
+
+        let system = if is_oauth {
+            Some(match system {
+                Some(existing) => format!("{}\n\n{}", CLAUDE_CODE_IDENTITY, existing),
+                None => CLAUDE_CODE_IDENTITY.to_string(),
+            })
+        } else {
+            system
+        };
 
         AnthropicRequest {
             model: self.config.model.clone(),
@@ -362,14 +400,59 @@ impl AnthropicClient {
             .as_deref()
             .unwrap_or("https://api.anthropic.com")
     }
+
+    fn prefix_tool_names(tools: &[ToolSpec]) -> Vec<ToolSpec> {
+        tools
+            .iter()
+            .map(|tool| {
+                let mut prefixed = tool.clone();
+                prefixed.name = format!("{}{}", TOOL_PREFIX, tool.name);
+                prefixed
+            })
+            .collect()
+    }
+
+    fn strip_tool_prefix(name: &str) -> String {
+        name.strip_prefix(TOOL_PREFIX).unwrap_or(name).to_string()
+    }
+
+    fn strip_tool_prefix_from_response(response: &mut ModelResponse) {
+        for block in &mut response.content {
+            if let ContentBlock::ToolUse { name, .. } = block {
+                *name = Self::strip_tool_prefix(name);
+            }
+        }
+    }
+
+    fn strip_tool_prefix_from_sse(text: &str) -> String {
+        use regex::Regex;
+        lazy_static::lazy_static! {
+            static ref TOOL_NAME_RE: Regex = Regex::new(r#""name"\s*:\s*"mcp_([^"]+)""#).unwrap();
+        }
+        TOOL_NAME_RE
+            .replace_all(text, r#""name": "$1""#)
+            .to_string()
+    }
 }
 
 #[async_trait]
 impl ModelClient for AnthropicClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
         let auth_headers = self.get_auth_headers().await?;
-        let request = self.build_request(messages, tools, false);
-        let url = format!("{}/v1/messages", self.base_url());
+        let is_oauth = self.is_using_oauth().await;
+
+        let tools_for_request = if is_oauth {
+            Self::prefix_tool_names(tools)
+        } else {
+            tools.to_vec()
+        };
+
+        let request = self.build_request(messages, &tools_for_request, false, is_oauth);
+        let url = if is_oauth {
+            format!("{}/v1/messages?beta=true", self.base_url())
+        } else {
+            format!("{}/v1/messages", self.base_url())
+        };
 
         let mut req = self.client.post(&url);
         for (key, value) in auth_headers {
@@ -394,7 +477,13 @@ impl ModelClient for AnthropicClient {
         }
 
         let api_response: AnthropicResponse = response.json().await?;
-        Ok(self.convert_response(api_response))
+        let mut model_response = self.convert_response(api_response);
+
+        if is_oauth {
+            Self::strip_tool_prefix_from_response(&mut model_response);
+        }
+
+        Ok(model_response)
     }
 
     async fn chat_stream(
@@ -403,8 +492,20 @@ impl ModelClient for AnthropicClient {
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
         let auth_headers = self.get_auth_headers().await?;
-        let request = self.build_request(messages, tools, true);
-        let url = format!("{}/v1/messages", self.base_url());
+        let is_oauth = self.is_using_oauth().await;
+
+        let tools_for_request = if is_oauth {
+            Self::prefix_tool_names(tools)
+        } else {
+            tools.to_vec()
+        };
+
+        let request = self.build_request(messages, &tools_for_request, true, is_oauth);
+        let url = if is_oauth {
+            format!("{}/v1/messages?beta=true", self.base_url())
+        } else {
+            format!("{}/v1/messages", self.base_url())
+        };
 
         let mut req = self.client.post(&url);
         for (key, value) in auth_headers {
@@ -421,9 +522,14 @@ impl ModelClient for AnthropicClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| match result {
+        let stream = response.bytes_stream().map(move |result| match result {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes);
+                let text = if is_oauth {
+                    Self::strip_tool_prefix_from_sse(&text)
+                } else {
+                    text.to_string()
+                };
                 Self::parse_sse_event(&text)
             }
             Err(e) => Err(ProviderError::StreamError(e.to_string())),
