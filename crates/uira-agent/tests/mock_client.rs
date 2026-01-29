@@ -98,11 +98,13 @@ impl MockModelClient {
     }
 
     /// Clear recorded messages
+    #[allow(dead_code)]
     pub fn clear_recorded(&self) {
         self.recorded_messages.lock().unwrap().clear();
     }
 
     /// Check if there are queued responses
+    #[allow(dead_code)]
     pub fn has_responses(&self) -> bool {
         !self.responses.lock().unwrap().is_empty()
     }
