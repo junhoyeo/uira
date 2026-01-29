@@ -1,0 +1,27 @@
+[package]
+name = "uira-sandbox"
+description = "Platform-native sandboxing for Uira AI harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+nix = { version = "0.29", features = ["process", "signal"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS uses sandbox-exec which is built-in
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
