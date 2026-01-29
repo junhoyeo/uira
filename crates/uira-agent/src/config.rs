@@ -41,6 +41,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub ralph_mode: bool,
 
+    /// Goal verification configuration
+    #[serde(default)]
+    pub goals: AgentGoalsConfig,
+
     /// Model to use
     #[serde(default)]
     pub model: Option<String>,
@@ -73,6 +77,7 @@ impl Default for AgentConfig {
             require_approval_for_writes: true,
             require_approval_for_commands: true,
             ralph_mode: false,
+            goals: AgentGoalsConfig::default(),
             model: None,
             system_prompt: None,
         }
@@ -114,13 +119,14 @@ impl AgentConfig {
         self.ralph_mode = enabled;
         self
     }
+
+    pub fn with_goals(mut self, goals: AgentGoalsConfig) -> Self {
+        self.goals = goals;
+        self
+    }
 }
 
 /// Configuration for agent goal verification
-///
-/// This struct is prepared for future goal-based agent execution.
-/// Currently not wired into the main agent loop.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentGoalsConfig {
     /// List of goals to verify
@@ -139,17 +145,14 @@ pub struct AgentGoalsConfig {
     pub parallel_check: bool,
 }
 
-#[allow(dead_code)]
 fn default_auto_verify() -> bool {
     true
 }
 
-#[allow(dead_code)]
 fn default_verify_on_tool_complete() -> bool {
     false
 }
 
-#[allow(dead_code)]
 fn default_parallel_check() -> bool {
     true
 }
@@ -165,7 +168,6 @@ impl Default for AgentGoalsConfig {
     }
 }
 
-#[allow(dead_code)]
 impl AgentGoalsConfig {
     pub fn new() -> Self {
         Self::default()

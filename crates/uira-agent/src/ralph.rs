@@ -2,8 +2,11 @@
 //!
 //! Wraps uira-hooks Ralph implementation with event streaming.
 
+use crate::config::AgentGoalsConfig;
 use crate::events::EventSender;
+use crate::goals::GoalVerifier;
 use chrono::Utc;
+use std::path::Path;
 use uira_goals::VerificationResult;
 use uira_hooks::hooks::circuit_breaker::CircuitBreakerConfig;
 use uira_hooks::hooks::ralph::{RalphHook, RalphOptions, RalphState};
@@ -235,5 +238,45 @@ impl RalphController {
     /// Get max iterations
     pub fn max_iterations(&self) -> u32 {
         self.state.max_iterations
+    }
+
+    /// Create a GoalVerifier from agent goals config
+    pub fn create_goal_verifier(&self, goals_config: &AgentGoalsConfig) -> Option<GoalVerifier> {
+        if !goals_config.has_goals() {
+            return None;
+        }
+
+        let verifier = GoalVerifier::new(Path::new(&self.directory), goals_config.goals.clone())
+            .with_parallel(goals_config.parallel_check);
+
+        // Add events if we have a sender
+        if let Some(ref tx) = self.event_tx {
+            Some(verifier.with_events(tx.clone()))
+        } else {
+            Some(verifier)
+        }
+    }
+
+    /// Check completion with automatic goal verification
+    ///
+    /// This is a convenience method that runs goal verification if configured,
+    /// then checks ralph completion.
+    pub async fn check_completion_with_goals(
+        &mut self,
+        response_text: &str,
+        goals_config: &AgentGoalsConfig,
+    ) -> RalphDecision {
+        let goals_result = if goals_config.has_goals() && goals_config.auto_verify {
+            if let Some(verifier) = self.create_goal_verifier(goals_config) {
+                Some(verifier.verify_all().await)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        self.check_completion(response_text, goals_result.as_ref())
+            .await
     }
 }
