@@ -154,6 +154,20 @@ The plugin uses native Rust NAPI bindings for performance-critical operations:
 | **uira-core** | Shared types and utilities |
 | **uira-config** | Configuration loading and management |
 
+### Agent Harness Crates
+
+The native agent harness provides a standalone agent execution environment:
+
+| Crate | Description |
+|-------|-------------|
+| **uira-protocol** | Shared types, events, streaming chunks, and protocol definitions |
+| **uira-providers** | Model provider clients (Anthropic, OpenAI) with streaming support |
+| **uira-agent** | Core agent loop with state machine, session persistence, and streaming |
+| **uira-sandbox** | Platform-native sandboxing (macOS sandbox-exec, Linux Landlock) |
+| **uira-context** | Context management and conversation history |
+| **uira-tui** | Ratatui-based terminal UI with approval overlay and syntax highlighting |
+| **uira-cli** | Command-line interface with session management and multi-provider support |
+
 ## Model Routing Architecture
 
 `delegate_task` provides multi-provider model routing:

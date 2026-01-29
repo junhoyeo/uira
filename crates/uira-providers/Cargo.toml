@@ -1,6 +1,6 @@
 [package]
 name = "uira-providers"
-description = "Model provider clients for Uira AI harness"
+description = "Model provider clients (Anthropic, OpenAI) with streaming support for Uira agent harness"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

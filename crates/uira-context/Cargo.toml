@@ -1,6 +1,6 @@
 [package]
 name = "uira-context"
-description = "Context management for Uira AI harness"
+description = "Context management and conversation history for Uira agent harness"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

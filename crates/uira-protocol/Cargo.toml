@@ -1,6 +1,6 @@
 [package]
 name = "uira-protocol"
-description = "Shared types, events, and protocol definitions for Uira AI harness"
+description = "Shared types, events, streaming chunks, tool definitions, and protocol messages for Uira agent harness"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

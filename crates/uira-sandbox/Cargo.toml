@@ -1,6 +1,6 @@
 [package]
 name = "uira-sandbox"
-description = "Platform-native sandboxing for Uira AI harness"
+description = "Platform-native sandboxing (macOS sandbox-exec, Linux Landlock) for Uira agent harness"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
