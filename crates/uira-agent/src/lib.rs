@@ -9,20 +9,28 @@
 //! - Session persistence (JSONL rollout)
 
 mod agent;
+pub mod approval;
 mod config;
 mod control;
 mod error;
 pub mod events;
+pub mod goals;
+pub mod ralph;
 pub mod rollout;
 mod session;
 pub mod streaming;
 mod turn;
 
 pub use agent::Agent;
+pub use approval::{
+    approval_channel, ApprovalError, ApprovalPending, ApprovalReceiver, ApprovalSender,
+};
 pub use config::AgentConfig;
 pub use control::AgentControl;
 pub use error::AgentLoopError;
 pub use events::{EventSender, EventStream};
+pub use goals::GoalVerifier;
+pub use ralph::{RalphConfig, RalphController, RalphDecision};
 pub use rollout::{EventWrapper, RolloutItem, RolloutRecorder, SessionMetaLine};
 pub use session::Session;
 pub use streaming::StreamController;

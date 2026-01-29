@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,7 +46,7 @@ pub struct TaskProgress {
     pub last_message_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackgroundTask {
     pub id: String,
     pub session_id: String,
@@ -69,7 +70,32 @@ pub struct BackgroundTask {
     pub concurrency_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_model: Option<String>,
+    #[serde(skip)]
+    pub cancel_signal: Option<Arc<AtomicBool>>,
 }
+
+impl PartialEq for BackgroundTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.session_id == other.session_id
+            && self.parent_session_id == other.parent_session_id
+            && self.description == other.description
+            && self.prompt == other.prompt
+            && self.agent == other.agent
+            && self.status == other.status
+            && self.queued_at == other.queued_at
+            && self.started_at == other.started_at
+            && self.completed_at == other.completed_at
+            && self.result == other.result
+            && self.error == other.error
+            && self.progress == other.progress
+            && self.concurrency_key == other.concurrency_key
+            && self.parent_model == other.parent_model
+        // Explicitly skip cancel_signal in comparison
+    }
+}
+
+impl Eq for BackgroundTask {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchInput {
@@ -398,6 +424,7 @@ impl BackgroundManager {
             }),
             concurrency_key: Some(concurrency_key.clone()),
             parent_model: input.model,
+            cancel_signal: None,
         };
 
         {
@@ -534,6 +561,12 @@ impl BackgroundManager {
             }
             task.status = BackgroundTaskStatus::Cancelled;
             task.completed_at = Some(Utc::now());
+
+            // Signal cancellation to the running task
+            if let Some(ref signal) = task.cancel_signal {
+                signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+
             // Use take() to atomically clear the key, preventing double-release
             if let Some(key) = task.concurrency_key.take() {
                 self.concurrency.release(&key);

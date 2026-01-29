@@ -15,7 +15,7 @@ mod commands;
 mod config;
 mod session;
 
-use commands::{AuthCommands, Cli, Commands, ConfigCommands};
+use commands::{AuthCommands, Cli, Commands, ConfigCommands, GoalsCommands, TasksCommands};
 use config::CliConfig;
 use session::SessionStorage;
 
@@ -35,6 +35,8 @@ async fn main() {
         Some(Commands::Resume { session_id }) => run_resume(session_id.as_deref()).await,
         Some(Commands::Auth { command }) => run_auth(command, &config).await,
         Some(Commands::Config { command }) => run_config(command, &config).await,
+        Some(Commands::Goals { command }) => run_goals(command).await,
+        Some(Commands::Tasks { command }) => run_tasks(command).await,
         None => {
             if let Some(prompt) = cli.get_prompt() {
                 run_exec(&cli, &config, &prompt, false).await
@@ -261,6 +263,266 @@ async fn run_config(
     Ok(())
 }
 
+async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_config::loader::load_config;
+    use uira_goals::GoalRunner;
+
+    match command {
+        GoalsCommands::Check => {
+            println!("{}", "Running goal verification...".cyan().bold());
+            println!("{}", "─".repeat(50).dimmed());
+
+            let config = load_config(None)?;
+            let goals_config = &config.goals;
+
+            if goals_config.goals.is_empty() {
+                println!("{}", "No goals configured.".yellow());
+                println!("Add goals to your uira.jsonc configuration file.");
+                return Ok(());
+            }
+
+            let runner = GoalRunner::new(std::env::current_dir()?);
+            let result = runner.check_all(&goals_config.goals).await;
+
+            println!();
+            for goal_result in &result.results {
+                let status = if goal_result.passed {
+                    "✓".green()
+                } else {
+                    "✗".red()
+                };
+
+                println!(
+                    "{} {} {:.1}/{:.1} ({}ms)",
+                    status,
+                    goal_result.name.bold(),
+                    goal_result.score.to_string().cyan(),
+                    goal_result.target.to_string().dimmed(),
+                    goal_result.duration_ms
+                );
+
+                if let Some(ref error) = goal_result.error {
+                    println!("  {} {}", "Error:".red(), error.dimmed());
+                }
+            }
+
+            println!("{}", "─".repeat(50).dimmed());
+
+            let passed = result.results.iter().filter(|r| r.passed).count();
+            let total = result.results.len();
+
+            if result.all_passed {
+                println!(
+                    "{} All goals passed ({}/{})",
+                    "✓".green().bold(),
+                    passed,
+                    total
+                );
+            } else {
+                println!(
+                    "{} Some goals failed ({}/{})",
+                    "✗".red().bold(),
+                    passed,
+                    total
+                );
+                std::process::exit(1);
+            }
+        }
+        GoalsCommands::List => {
+            println!("{}", "Configured goals:".cyan().bold());
+            println!("{}", "─".repeat(80).dimmed());
+
+            let config = load_config(None)?;
+            let goals_config = &config.goals;
+
+            if goals_config.goals.is_empty() {
+                println!("{}", "No goals configured.".yellow());
+                println!("Add goals to your uira.jsonc configuration file.");
+                return Ok(());
+            }
+
+            for goal in &goals_config.goals {
+                let status = if goal.enabled {
+                    "enabled".green()
+                } else {
+                    "disabled".dimmed()
+                };
+
+                println!("{} ({})", goal.name.bold(), status);
+                if let Some(desc) = &goal.description {
+                    println!("  {}", desc.dimmed());
+                }
+                println!("  Command: {}", goal.command.cyan());
+                println!("  Target:  {:.1}", goal.target);
+                println!("  Timeout: {}s", goal.timeout_secs);
+                if let Some(workspace) = &goal.workspace {
+                    println!("  Workspace: {}", workspace.yellow());
+                }
+                println!();
+            }
+        }
+        GoalsCommands::Status => {
+            println!("{}", "Goal verification status:".cyan().bold());
+            println!("{}", "─".repeat(50).dimmed());
+
+            let config = load_config(None)?;
+            let goals_config = &config.goals;
+
+            if goals_config.goals.is_empty() {
+                println!("{}", "No goals configured.".yellow());
+                return Ok(());
+            }
+
+            let enabled = goals_config.goals.iter().filter(|g| g.enabled).count();
+            let total = goals_config.goals.len();
+
+            println!("Total goals:   {}", total);
+            println!("Enabled goals: {}", enabled.to_string().green());
+            println!("Disabled goals: {}", (total - enabled).to_string().dimmed());
+
+            if enabled > 0 {
+                println!();
+                println!("Run 'uira goals check' to verify all goals.");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_features::background_agent::{BackgroundManager, BackgroundTaskConfig};
+
+    let config = BackgroundTaskConfig::default();
+    let manager = BackgroundManager::new(config);
+
+    match command {
+        TasksCommands::List => {
+            println!("{}", "Background tasks:".cyan().bold());
+            println!("{}", "─".repeat(80).dimmed());
+
+            let tasks = manager.get_all_tasks();
+
+            if tasks.is_empty() {
+                println!("{}", "No background tasks.".dimmed());
+                return Ok(());
+            }
+
+            for task in tasks {
+                let status_str = match task.status {
+                    uira_features::background_agent::BackgroundTaskStatus::Queued => {
+                        "queued".yellow()
+                    }
+                    uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                        "pending".yellow()
+                    }
+                    uira_features::background_agent::BackgroundTaskStatus::Running => {
+                        "running".cyan()
+                    }
+                    uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                        "completed".green()
+                    }
+                    uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
+                    uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                        "cancelled".dimmed()
+                    }
+                };
+
+                println!(
+                    "{} {} {}",
+                    task.id[..12].yellow(),
+                    status_str,
+                    task.description
+                );
+                println!("  Agent: {}", task.agent.cyan());
+
+                if let Some(ref progress) = task.progress {
+                    println!("  Progress: {} tool calls", progress.tool_calls);
+                    if let Some(ref last_tool) = progress.last_tool {
+                        println!("  Last tool: {}", last_tool.dimmed());
+                    }
+                }
+
+                let elapsed = if let Some(completed) = task.completed_at {
+                    completed.signed_duration_since(task.started_at)
+                } else {
+                    chrono::Utc::now().signed_duration_since(task.started_at)
+                };
+
+                let elapsed_secs = elapsed.num_seconds();
+                if elapsed_secs > 0 {
+                    println!("  Elapsed: {}s", elapsed_secs);
+                }
+
+                println!();
+            }
+        }
+        TasksCommands::Status { task_id } => {
+            let task = manager
+                .get_task(task_id)
+                .ok_or_else(|| format!("Task not found: {}", task_id))?;
+
+            println!("{}", "Task details:".cyan().bold());
+            println!("{}", "─".repeat(50).dimmed());
+            println!("{}: {}", "ID".cyan(), task.id.yellow());
+            println!("{}: {}", "Description".cyan(), task.description);
+            println!("{}: {}", "Agent".cyan(), task.agent.cyan());
+
+            let status_str = match task.status {
+                uira_features::background_agent::BackgroundTaskStatus::Queued => "queued".yellow(),
+                uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                    "pending".yellow()
+                }
+                uira_features::background_agent::BackgroundTaskStatus::Running => "running".cyan(),
+                uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                    "completed".green()
+                }
+                uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
+                uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                    "cancelled".dimmed()
+                }
+            };
+
+            println!("{}: {}", "Status".cyan(), status_str);
+
+            if let Some(ref progress) = task.progress {
+                println!("{}: {}", "Tool calls".cyan(), progress.tool_calls);
+                if let Some(ref last_tool) = progress.last_tool {
+                    println!("{}: {}", "Last tool".cyan(), last_tool);
+                }
+                if let Some(ref last_message) = progress.last_message {
+                    println!("{}: {}", "Last message".cyan(), last_message);
+                }
+            }
+
+            if let Some(ref result) = task.result {
+                println!("{}: {}", "Result".cyan(), result.green());
+            }
+
+            if let Some(ref error) = task.error {
+                println!("{}: {}", "Error".red().bold(), error.red());
+            }
+
+            println!("{}: {}", "Started".cyan(), task.started_at);
+            if let Some(completed) = task.completed_at {
+                println!("{}: {}", "Completed".cyan(), completed);
+            }
+        }
+        TasksCommands::Cancel { task_id } => {
+            println!("{} {}", "Cancelling task:".cyan().bold(), task_id.yellow());
+
+            let _task = manager
+                .cancel_task(task_id)
+                .ok_or_else(|| format!("Task not found: {}", task_id))?;
+
+            println!("{} Task cancelled", "✓".green().bold());
+            println!("Status: {}", "cancelled".dimmed());
+        }
+    }
+
+    Ok(())
+}
+
 async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::{
         execute,
@@ -386,6 +648,10 @@ fn create_agent_config(cli: &Cli, _config: &CliConfig) -> AgentConfig {
 
     if cli.full_auto {
         config = config.full_auto();
+    }
+
+    if cli.ralph {
+        config = config.with_ralph_mode(true);
     }
 
     if let Some(ref model) = cli.model {

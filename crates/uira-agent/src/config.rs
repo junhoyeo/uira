@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use uira_config::schema::GoalConfig;
 use uira_protocol::SandboxPreference;
 use uira_sandbox::SandboxPolicy;
 
@@ -36,6 +37,10 @@ pub struct AgentConfig {
     #[serde(default = "default_true")]
     pub require_approval_for_commands: bool,
 
+    /// Enable ralph mode for persistent task completion
+    #[serde(default)]
+    pub ralph_mode: bool,
+
     /// Model to use
     #[serde(default)]
     pub model: Option<String>,
@@ -67,6 +72,7 @@ impl Default for AgentConfig {
             working_directory: None,
             require_approval_for_writes: true,
             require_approval_for_commands: true,
+            ralph_mode: false,
             model: None,
             system_prompt: None,
         }
@@ -102,5 +108,90 @@ impl AgentConfig {
         self.require_approval_for_writes = false;
         self.require_approval_for_commands = false;
         self
+    }
+
+    pub fn with_ralph_mode(mut self, enabled: bool) -> Self {
+        self.ralph_mode = enabled;
+        self
+    }
+}
+
+/// Configuration for agent goal verification
+///
+/// This struct is prepared for future goal-based agent execution.
+/// Currently not wired into the main agent loop.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentGoalsConfig {
+    /// List of goals to verify
+    pub goals: Vec<GoalConfig>,
+
+    /// Automatically verify goals at end of each iteration
+    #[serde(default = "default_auto_verify")]
+    pub auto_verify: bool,
+
+    /// Verify goals when a tool completes successfully
+    #[serde(default = "default_verify_on_tool_complete")]
+    pub verify_on_tool_complete: bool,
+
+    /// Run goal checks in parallel
+    #[serde(default = "default_parallel_check")]
+    pub parallel_check: bool,
+}
+
+#[allow(dead_code)]
+fn default_auto_verify() -> bool {
+    true
+}
+
+#[allow(dead_code)]
+fn default_verify_on_tool_complete() -> bool {
+    false
+}
+
+#[allow(dead_code)]
+fn default_parallel_check() -> bool {
+    true
+}
+
+impl Default for AgentGoalsConfig {
+    fn default() -> Self {
+        Self {
+            goals: Vec::new(),
+            auto_verify: default_auto_verify(),
+            verify_on_tool_complete: default_verify_on_tool_complete(),
+            parallel_check: default_parallel_check(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl AgentGoalsConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_goals(mut self, goals: Vec<GoalConfig>) -> Self {
+        self.goals = goals;
+        self
+    }
+
+    pub fn with_auto_verify(mut self, auto_verify: bool) -> Self {
+        self.auto_verify = auto_verify;
+        self
+    }
+
+    pub fn with_verify_on_tool_complete(mut self, verify: bool) -> Self {
+        self.verify_on_tool_complete = verify;
+        self
+    }
+
+    pub fn with_parallel_check(mut self, parallel: bool) -> Self {
+        self.parallel_check = parallel;
+        self
+    }
+
+    pub fn has_goals(&self) -> bool {
+        !self.goals.is_empty()
     }
 }

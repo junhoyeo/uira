@@ -2,4 +2,4 @@
 
 pub mod chat;
 
-pub use chat::{ChatMessage, ChatWidget};
+pub use chat::ChatMessage;

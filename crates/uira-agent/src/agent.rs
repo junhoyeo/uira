@@ -3,17 +3,26 @@
 use futures::StreamExt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::timeout;
 use uira_protocol::{
-    AgentError, AgentState, ContentBlock, ExecutionResult, Message, Role, ThreadEvent, ToolCall,
+    AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
+    Role, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
+use uira_tools::RunOptions;
 
 use crate::{
+    approval::{approval_channel, ApprovalReceiver, ApprovalSender},
     events::{EventSender, EventStream},
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
     AgentConfig, AgentControl, AgentLoopError, Session,
 };
+
+/// Timeout for approval requests (5 minutes)
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The main agent that orchestrates the conversation loop
 pub struct Agent {
@@ -27,6 +36,10 @@ pub struct Agent {
     rollout: Option<RolloutRecorder>,
     /// Whether to use streaming for model responses
     streaming_enabled: bool,
+    /// Channel to receive user input (for interactive mode)
+    input_rx: Option<mpsc::Receiver<String>>,
+    /// Channel to send approval requests (for interactive mode)
+    approval_tx: Option<ApprovalSender>,
 }
 
 impl Agent {
@@ -40,6 +53,8 @@ impl Agent {
             pending_tool_calls: None,
             rollout: None,
             streaming_enabled: true,
+            input_rx: None,
+            approval_tx: None,
         }
     }
 
@@ -70,6 +85,93 @@ impl Agent {
     pub fn with_streaming(mut self, enabled: bool) -> Self {
         self.streaming_enabled = enabled;
         self
+    }
+
+    /// Enable interactive mode with input and approval channels
+    ///
+    /// Returns the input sender and approval receiver for the TUI to use.
+    pub fn with_interactive(mut self) -> (Self, mpsc::Sender<String>, ApprovalReceiver) {
+        // Create input channel (user prompts)
+        let (input_tx, input_rx) = mpsc::channel(10);
+        self.input_rx = Some(input_rx);
+
+        // Create approval channel
+        let (approval_tx, approval_rx) = approval_channel(10);
+        self.approval_tx = Some(approval_tx);
+
+        (self, input_tx, approval_rx)
+    }
+
+    /// Run in interactive mode, waiting for user input from channel
+    ///
+    /// This method loops forever, waiting for user prompts and processing them.
+    /// It emits events for the TUI to display and handles approvals via the approval channel.
+    pub async fn run_interactive(&mut self) -> Result<(), AgentLoopError> {
+        // Take the input receiver
+        let mut input_rx = self
+            .input_rx
+            .take()
+            .ok_or_else(|| AgentLoopError::Io("No input channel configured".to_string()))?;
+
+        // Emit that we're ready
+        self.state = AgentState::WaitingForUser;
+        self.emit_event(ThreadEvent::WaitingForInput {
+            prompt: "Ready for input...".to_string(),
+        })
+        .await;
+
+        // Main interactive loop
+        loop {
+            // Wait for user input
+            let prompt = match input_rx.recv().await {
+                Some(p) => p,
+                None => {
+                    // Channel closed, exit gracefully
+                    tracing::info!("Input channel closed, exiting interactive mode");
+                    break;
+                }
+            };
+
+            // Check for quit command
+            if prompt.trim().eq_ignore_ascii_case("/quit")
+                || prompt.trim().eq_ignore_ascii_case("/exit")
+            {
+                tracing::info!("Quit command received");
+                break;
+            }
+
+            // Run a single conversation turn
+            match self.run(&prompt).await {
+                Ok(result) => {
+                    tracing::debug!(
+                        "Turn completed: {} turns, success={}",
+                        result.turns,
+                        result.success
+                    );
+                }
+                Err(AgentLoopError::Cancelled) => {
+                    tracing::info!("Agent cancelled");
+                    self.emit_event(ThreadEvent::ThreadCancelled).await;
+                }
+                Err(e) => {
+                    tracing::error!("Agent error: {}", e);
+                    self.emit_event(ThreadEvent::Error {
+                        message: e.to_string(),
+                        recoverable: true,
+                    })
+                    .await;
+                }
+            }
+
+            // Reset state for next input
+            self.state = AgentState::WaitingForUser;
+            self.emit_event(ThreadEvent::WaitingForInput {
+                prompt: "Ready for input...".to_string(),
+            })
+            .await;
+        }
+
+        Ok(())
     }
 
     /// Resume from a rollout file
@@ -525,16 +627,111 @@ impl Agent {
     }
 
     /// Execute tool calls and return results as content blocks
+    ///
+    /// This method handles approval flow at the Agent level:
+    /// 1. Check cancellation between tools
+    /// 2. Check approval requirement (unless full_auto mode)
+    /// 3. Request approval via the approval channel if needed
+    /// 4. Execute with skip_approval since we handled it here
     async fn execute_tool_calls(
         &mut self,
         tool_calls: &[ToolCall],
     ) -> Result<Vec<ContentBlock>, AgentLoopError> {
-        use uira_protocol::Item;
-
         let mut results = Vec::new();
         let ctx = self.session.tool_context();
 
         for call in tool_calls {
+            // 1. Check for cancellation between tools
+            if self.control.is_cancelled() {
+                return Err(AgentLoopError::Cancelled);
+            }
+
+            // 2. Handle approval at Agent level (unless full_auto)
+            if !ctx.full_auto {
+                if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
+                    let requirement = tool.approval_requirement(&call.input);
+
+                    match requirement {
+                        ApprovalRequirement::NeedsApproval { reason } => {
+                            if let Some(ref approval_tx) = self.approval_tx {
+                                // Emit approval request event for TUI display
+                                self.emit_event(ThreadEvent::ItemStarted {
+                                    item: Item::ApprovalRequest {
+                                        id: call.id.clone(),
+                                        tool_name: call.name.clone(),
+                                        input: call.input.clone(),
+                                        reason: reason.clone(),
+                                    },
+                                })
+                                .await;
+
+                                // Request approval with timeout via the Agent's channel
+                                let decision = timeout(
+                                    APPROVAL_TIMEOUT,
+                                    approval_tx.request_approval(
+                                        &call.id,
+                                        &call.name,
+                                        call.input.clone(),
+                                        &reason,
+                                    ),
+                                )
+                                .await
+                                .map_err(|_| {
+                                    AgentLoopError::ApprovalTimeout {
+                                        tool: call.name.clone(),
+                                        timeout_secs: APPROVAL_TIMEOUT.as_secs(),
+                                    }
+                                })??;
+
+                                // Emit approval decision event
+                                self.emit_event(ThreadEvent::ItemCompleted {
+                                    item: Item::ApprovalDecision {
+                                        request_id: call.id.clone(),
+                                        approved: decision.is_approved(),
+                                    },
+                                })
+                                .await;
+
+                                // If denied, add error result and continue to next tool
+                                if decision.is_denied() {
+                                    let deny_reason =
+                                        if let uira_protocol::ReviewDecision::Deny { reason } =
+                                            &decision
+                                        {
+                                            reason.clone().unwrap_or_default()
+                                        } else {
+                                            String::new()
+                                        };
+
+                                    let error_msg =
+                                        format!("Tool execution denied: {}", deny_reason);
+                                    results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                                    self.record_tool_result(&call.id, &error_msg, true);
+                                    self.emit_event(ThreadEvent::ItemCompleted {
+                                        item: Item::ToolResult {
+                                            tool_call_id: call.id.clone(),
+                                            output: error_msg,
+                                            is_error: true,
+                                        },
+                                    })
+                                    .await;
+                                    continue;
+                                }
+                            }
+                        }
+                        ApprovalRequirement::Forbidden { reason } => {
+                            return Err(AgentLoopError::ToolForbidden {
+                                tool: call.name.clone(),
+                                reason,
+                            });
+                        }
+                        ApprovalRequirement::Skip { .. } => {
+                            // No approval needed
+                        }
+                    }
+                }
+            }
+
             // Record and emit tool start
             self.record_tool_call(&call.id, &call.name, &call.input);
             self.emit_event(ThreadEvent::ItemStarted {
@@ -546,11 +743,16 @@ impl Agent {
             })
             .await;
 
-            // Execute the tool
+            // 3. Execute the tool with skip_approval since we handled it above
             let result = self
                 .session
                 .orchestrator
-                .run(&call.name, call.input.clone(), &ctx)
+                .run_with_options(
+                    &call.name,
+                    call.input.clone(),
+                    &ctx,
+                    RunOptions::skip_approval(),
+                )
                 .await;
 
             match result {

@@ -314,3 +314,93 @@ async fn test_recorded_messages_context() {
     // Second call: user + assistant (tool call) + user (tool result)
     assert!(recorded[1].len() >= 2);
 }
+
+#[tokio::test]
+async fn test_interactive_mode() {
+    let client = Arc::new(MockModelClient::new());
+    client.queue_text("First response");
+    client.queue_text("Second response");
+
+    let (agent, event_stream) = Agent::new(make_config(), client.clone()).with_event_stream();
+    let (mut agent, input_tx, _approval_rx) = agent.with_interactive();
+
+    // Spawn the interactive loop
+    let handle = tokio::spawn(async move {
+        let _ = agent.run_interactive().await;
+    });
+
+    // Spawn event collector
+    let events_handle = tokio::spawn(async move {
+        let mut events = Vec::new();
+        let mut stream = event_stream;
+        while let Some(event) = stream.next().await {
+            events.push(event);
+            // Stop after seeing completion
+            if matches!(&events.last(), Some(ThreadEvent::WaitingForInput { .. })) {
+                if events
+                    .iter()
+                    .filter(|e| matches!(e, ThreadEvent::ThreadCompleted { .. }))
+                    .count()
+                    >= 1
+                {
+                    break;
+                }
+            }
+        }
+        events
+    });
+
+    // Small delay to let agent initialize
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+    // Send first message
+    input_tx.send("Hello".to_string()).await.unwrap();
+
+    // Wait for processing
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    // Drop sender to close channel
+    drop(input_tx);
+
+    // Wait for agent to exit
+    let _ = tokio::time::timeout(tokio::time::Duration::from_millis(200), handle).await;
+    let events = tokio::time::timeout(tokio::time::Duration::from_millis(100), events_handle)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Should have: WaitingForInput (initial), ThreadStarted, TurnStarted, ContentDelta(s), TurnCompleted, ThreadCompleted, WaitingForInput
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, ThreadEvent::ThreadStarted { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, ThreadEvent::ThreadCompleted { .. })));
+    assert_eq!(client.call_count(), 1);
+}
+
+#[tokio::test]
+async fn test_interactive_quit_command() {
+    let client = Arc::new(MockModelClient::new());
+    // No responses needed, /quit should exit immediately
+
+    let (agent, _event_stream) = Agent::new(make_config(), client.clone()).with_event_stream();
+    let (mut agent, input_tx, _approval_rx) = agent.with_interactive();
+
+    // Spawn the interactive loop
+    let handle = tokio::spawn(async move { agent.run_interactive().await });
+
+    // Small delay to let agent initialize
+    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+    // Send quit command
+    input_tx.send("/quit".to_string()).await.unwrap();
+
+    // Should exit quickly
+    let result = tokio::time::timeout(tokio::time::Duration::from_millis(200), handle)
+        .await
+        .expect("Agent should exit on /quit");
+
+    assert!(result.is_ok());
+    assert_eq!(client.call_count(), 0); // No model calls made
+}

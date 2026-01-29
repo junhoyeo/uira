@@ -5,21 +5,50 @@ use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Terminal,
 };
 use std::io::Stdout;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uira_agent::{Agent, AgentConfig};
+use uira_agent::{Agent, AgentConfig, ApprovalReceiver};
 use uira_protocol::{AgentState, Item, ThreadEvent};
 use uira_providers::ModelClient;
 
-use crate::views::ApprovalOverlay;
-use crate::widgets::{ChatMessage, ChatWidget};
+use crate::views::{ApprovalOverlay, ApprovalRequest};
+use crate::widgets::ChatMessage;
 use crate::AppEvent;
+
+/// Maximum size for the streaming buffer (1MB)
+const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
+
+/// Spawn a task that handles approval requests from the agent
+fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sender<AppEvent>) {
+    tokio::spawn(async move {
+        while let Some(pending) = approval_rx.recv().await {
+            // Convert agent's ApprovalPending to TUI's ApprovalRequest
+            let request = ApprovalRequest {
+                id: pending.id,
+                tool_name: pending.tool_name,
+                input: pending.input,
+                reason: pending.reason,
+                response_tx: pending.response_tx,
+            };
+
+            // Send to app event loop
+            if event_tx
+                .send(AppEvent::ApprovalRequest(request))
+                .await
+                .is_err()
+            {
+                tracing::warn!("App event channel closed");
+                break;
+            }
+        }
+    });
+}
 
 /// Main TUI application state
 pub struct App {
@@ -47,6 +76,8 @@ pub struct App {
     streaming_buffer: Option<String>,
     /// Approval overlay for tool approvals
     approval_overlay: ApprovalOverlay,
+    /// Input sender to agent (for interactive mode)
+    agent_input_tx: Option<mpsc::Sender<String>>,
 }
 
 impl App {
@@ -65,6 +96,7 @@ impl App {
             input_focused: true,
             streaming_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
+            agent_input_tx: None,
         }
     }
 
@@ -108,15 +140,29 @@ impl App {
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
     ) -> std::io::Result<()> {
+        // Create agent with event streaming and interactive channels
         let (agent, event_stream) = Agent::new(config, client).with_event_stream();
-        let _agent = Arc::new(tokio::sync::Mutex::new(agent));
+        let (mut agent, input_tx, approval_rx) = agent.with_interactive();
 
-        // Spawn event handler
+        // Store input sender for sending user prompts
+        self.agent_input_tx = Some(input_tx);
+
+        // Spawn event handler - forwards agent events to app
         let event_tx = self.event_tx.clone();
         tokio::spawn(async move {
             let mut stream = event_stream;
             while let Some(event) = stream.next().await {
                 let _ = event_tx.send(AppEvent::Agent(event)).await;
+            }
+        });
+
+        // Spawn approval handler - forwards approval requests to app with oneshot channels
+        spawn_approval_handler(approval_rx, self.event_tx.clone());
+
+        // Spawn agent's interactive loop
+        tokio::spawn(async move {
+            if let Err(e) = agent.run_interactive().await {
+                tracing::error!("Agent error: {}", e);
             }
         });
 
@@ -157,8 +203,53 @@ impl App {
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Cyan));
 
-        let chat = ChatWidget::new(&self.messages).block(block);
-        frame.render_widget(chat, area);
+        // Build list items from messages
+        let mut items: Vec<ListItem> = self
+            .messages
+            .iter()
+            .map(|msg| {
+                let style = match msg.role.as_str() {
+                    "user" => Style::default().fg(Color::Green),
+                    "assistant" => Style::default().fg(Color::Cyan),
+                    "tool" => Style::default().fg(Color::Magenta),
+                    "error" => Style::default().fg(Color::Red),
+                    "system" => Style::default().fg(Color::Yellow),
+                    _ => Style::default(),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", msg.role),
+                        style.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(&msg.content, style),
+                ]))
+            })
+            .collect();
+
+        // Render streaming buffer as in-progress message with blinking cursor
+        if let Some(ref buffer) = self.streaming_buffer {
+            if !buffer.is_empty() {
+                let streaming_item = ListItem::new(Line::from(vec![
+                    Span::styled(
+                        "assistant: ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(buffer.as_str(), Style::default().fg(Color::Cyan)),
+                    Span::styled(
+                        "▌",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::SLOW_BLINK),
+                    ),
+                ]));
+                items.push(streaming_item);
+            }
+        }
+
+        let list = List::new(items).block(block);
+        frame.render_widget(list, area);
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -320,13 +411,19 @@ impl App {
             content: input.clone(),
         });
 
-        // Send input event
-        let tx = self.event_tx.clone();
-        tokio::spawn(async move {
-            let _ = tx.send(AppEvent::UserInput(input)).await;
-        });
-
-        self.status = "Processing...".to_string();
+        // Send input to agent if connected
+        if let Some(ref tx) = self.agent_input_tx {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if tx.send(input).await.is_err() {
+                    tracing::warn!("Agent input channel closed");
+                }
+            });
+            self.status = "Processing...".to_string();
+            self.agent_state = AgentState::Thinking;
+        } else {
+            self.status = "No agent connected".to_string();
+        }
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
@@ -370,9 +467,13 @@ impl App {
                 );
             }
             ThreadEvent::ContentDelta { delta } => {
-                // Accumulate streaming content
+                // Accumulate streaming content with size limit
                 if let Some(ref mut buffer) = self.streaming_buffer {
-                    buffer.push_str(&delta);
+                    // Only append if within size limit
+                    if buffer.len() + delta.len() <= MAX_STREAMING_BUFFER_SIZE {
+                        buffer.push_str(&delta);
+                    }
+                    // Silently drop if over limit (could truncate from front as alternative)
                 } else {
                     self.streaming_buffer = Some(delta);
                 }
@@ -389,13 +490,19 @@ impl App {
                 Item::ApprovalRequest {
                     id,
                     tool_name,
+                    input,
                     reason,
                 } => {
-                    // Note: In full implementation, this would be received via a separate channel
-                    // with a oneshot sender for the response
+                    // Note: Actual approval requests come via the approval channel with oneshot sender
+                    // This event is just for logging/display purposes
                     self.status = format!("Approval needed: {} - {}", tool_name, reason);
                     self.agent_state = AgentState::WaitingForApproval;
-                    tracing::debug!("Approval request: {} for {}", id, tool_name);
+                    tracing::debug!(
+                        "Approval request: {} for {} with input {:?}",
+                        id,
+                        tool_name,
+                        input
+                    );
                 }
                 _ => {}
             },
@@ -464,7 +571,95 @@ impl App {
                     content: message,
                 });
             }
-            _ => {}
+            // Goal Verification Events
+            ThreadEvent::GoalVerificationStarted { goals, .. } => {
+                self.status = format!("Verifying {} goals...", goals.len());
+            }
+            ThreadEvent::GoalVerificationResult {
+                goal,
+                passed,
+                score,
+                target,
+                ..
+            } => {
+                let icon = if passed { "[PASS]" } else { "[FAIL]" };
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "{} Goal '{}': {:.1}% (target: {:.1}%)",
+                        icon, goal, score, target
+                    ),
+                });
+            }
+            ThreadEvent::GoalVerificationCompleted {
+                all_passed,
+                passed_count,
+                total_count,
+            } => {
+                if all_passed {
+                    self.status = format!("All {}/{} goals passed", passed_count, total_count);
+                } else {
+                    self.status = format!("Goals: {}/{} passed", passed_count, total_count);
+                }
+            }
+            // Ralph Mode Events
+            ThreadEvent::RalphIterationStarted {
+                iteration,
+                max_iterations,
+                ..
+            } => {
+                self.status = format!("Ralph iteration {}/{}", iteration, max_iterations);
+            }
+            ThreadEvent::RalphContinuation {
+                reason, confidence, ..
+            } => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
+                });
+            }
+            ThreadEvent::RalphCircuitBreak { reason, iteration } => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Ralph stopped at iteration {}: {}", iteration, reason),
+                });
+                self.agent_state = AgentState::Complete;
+            }
+            // Background Task Events
+            ThreadEvent::BackgroundTaskSpawned {
+                task_id,
+                description,
+                ..
+            } => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Background task started: {} ({})", description, task_id),
+                });
+            }
+            ThreadEvent::BackgroundTaskProgress {
+                task_id,
+                status,
+                message,
+            } => {
+                let msg = message.map(|m| format!(": {}", m)).unwrap_or_default();
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Background task {} - {}{}", task_id, status, msg),
+                });
+            }
+            ThreadEvent::BackgroundTaskCompleted {
+                task_id, success, ..
+            } => {
+                let status = if success { "completed" } else { "failed" };
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Background task {}: {}", task_id, status),
+                });
+            }
+            // Catch-all for unknown variants (due to #[non_exhaustive])
+            _ => {
+                tracing::debug!("Unknown ThreadEvent variant");
+            }
         }
     }
 

@@ -27,6 +27,10 @@ pub struct Cli {
     #[arg(long)]
     pub full_auto: bool,
 
+    /// Enable ralph mode for persistent task completion
+    #[arg(long)]
+    pub ralph: bool,
+
     /// Output format (text, json, jsonl)
     #[arg(long, default_value = "text")]
     pub output: String,
@@ -64,6 +68,18 @@ pub enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+
+    /// Goal verification commands
+    Goals {
+        #[command(subcommand)]
+        command: GoalsCommands,
+    },
+
+    /// Background task management
+    Tasks {
+        #[command(subcommand)]
+        command: TasksCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -100,6 +116,32 @@ pub enum ConfigCommands {
     },
     /// Reset configuration to defaults
     Reset,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GoalsCommands {
+    /// Run goal verification
+    Check,
+    /// List configured goals
+    List,
+    /// Show goal verification status
+    Status,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TasksCommands {
+    /// List all background tasks
+    List,
+    /// Get task status
+    Status {
+        /// Task ID to check
+        task_id: String,
+    },
+    /// Cancel a task
+    Cancel {
+        /// Task ID to cancel
+        task_id: String,
+    },
 }
 
 impl Cli {

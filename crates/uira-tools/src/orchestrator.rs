@@ -8,6 +8,33 @@ use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 use crate::comment_hook::CommentChecker;
 use crate::{BoxedTool, ToolContext, ToolError, ToolRouter};
 
+/// Options for tool execution
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    /// Skip approval check (approval already handled by caller)
+    pub skip_approval: bool,
+    /// Skip sandbox (run directly)
+    pub skip_sandbox: bool,
+}
+
+impl RunOptions {
+    /// Create options that skip approval (for when caller handles it)
+    pub fn skip_approval() -> Self {
+        Self {
+            skip_approval: true,
+            skip_sandbox: false,
+        }
+    }
+
+    /// Create options that skip both approval and sandbox
+    pub fn skip_all() -> Self {
+        Self {
+            skip_approval: true,
+            skip_sandbox: true,
+        }
+    }
+}
+
 /// Request for user approval
 #[derive(Debug)]
 pub struct PendingApproval {
@@ -67,6 +94,20 @@ impl ToolOrchestrator {
         input: serde_json::Value,
         ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
+        self.run_with_options(tool_name, input, ctx, RunOptions::default())
+            .await
+    }
+
+    /// Run a tool with custom options
+    ///
+    /// Use this when the caller has already handled approval (e.g., Agent layer).
+    pub async fn run_with_options(
+        &self,
+        tool_name: &str,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+        options: RunOptions,
+    ) -> Result<ToolOutput, ToolError> {
         let tool = self
             .router
             .get(tool_name)
@@ -74,40 +115,47 @@ impl ToolOrchestrator {
                 name: tool_name.to_string(),
             })?;
 
-        // 1. Check approval requirement
-        let requirement = tool.approval_requirement(&input);
+        // 1. Check approval requirement (unless skipped by options)
+        if !options.skip_approval {
+            let requirement = tool.approval_requirement(&input);
 
-        match requirement {
-            ApprovalRequirement::Skip { bypass_sandbox } => {
-                // Proceed directly
-                if bypass_sandbox {
-                    return self.execute_without_sandbox(tool, input, ctx).await;
-                }
-            }
-            ApprovalRequirement::NeedsApproval { reason } => {
-                if !self.full_auto && !ctx.full_auto {
-                    // Request approval
-                    let decision = self.request_approval(tool_name, &input, &reason).await?;
-                    if decision.is_denied() {
-                        return Err(ToolError::ExecutionFailed {
-                            message: "Approval denied by user".to_string(),
-                        });
-                    }
-                    // If edited, use the new input
-                    if let ReviewDecision::Edit { new_input } = decision {
-                        return self.execute_with_sandbox(tool, new_input, ctx).await;
+            match requirement {
+                ApprovalRequirement::Skip { bypass_sandbox } => {
+                    // Proceed directly
+                    if bypass_sandbox || options.skip_sandbox {
+                        return self.execute_without_sandbox(tool, input, ctx).await;
                     }
                 }
-            }
-            ApprovalRequirement::Forbidden { reason } => {
-                return Err(ToolError::ExecutionFailed {
-                    message: format!("Tool execution forbidden: {}", reason),
-                });
+                ApprovalRequirement::NeedsApproval { reason } => {
+                    if !self.full_auto && !ctx.full_auto {
+                        // Request approval
+                        let decision = self.request_approval(tool_name, &input, &reason).await?;
+                        if decision.is_denied() {
+                            return Err(ToolError::ExecutionFailed {
+                                message: "Approval denied by user".to_string(),
+                            });
+                        }
+                        // If edited, use the new input
+                        if let ReviewDecision::Edit { new_input } = decision {
+                            return self.execute_with_sandbox(tool, new_input, ctx).await;
+                        }
+                    }
+                }
+                ApprovalRequirement::Forbidden { reason } => {
+                    return Err(ToolError::ExecutionFailed {
+                        message: format!("Tool execution forbidden: {}", reason),
+                    });
+                }
             }
         }
 
-        // 2. Select sandbox and execute
-        let mut output = self.execute_with_sandbox(tool, input.clone(), ctx).await?;
+        // 2. Select sandbox and execute (or skip sandbox if requested)
+        let mut output = if options.skip_sandbox {
+            self.execute_without_sandbox(tool, input.clone(), ctx)
+                .await?
+        } else {
+            self.execute_with_sandbox(tool, input.clone(), ctx).await?
+        };
 
         // 3. Post-execution: Check for comments in write operations
         if self.enable_comment_warnings {
@@ -124,6 +172,11 @@ impl ToolOrchestrator {
         }
 
         Ok(output)
+    }
+
+    /// Get the router for direct tool access (e.g., for approval checks)
+    pub fn router(&self) -> &Arc<ToolRouter> {
+        &self.router
     }
 
     async fn execute_with_sandbox(

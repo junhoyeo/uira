@@ -4,17 +4,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uira_protocol::ToolOutput;
 
+use crate::provider::ToolProvider;
 use crate::{BoxedTool, Tool, ToolContext, ToolError};
 
 /// Router for dispatching tool calls to the appropriate tool
 pub struct ToolRouter {
     tools: HashMap<String, BoxedTool>,
+    providers: Vec<Arc<dyn ToolProvider>>,
 }
 
 impl ToolRouter {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            providers: Vec::new(),
         }
     }
 
@@ -28,6 +31,11 @@ impl ToolRouter {
     pub fn register_boxed(&mut self, tool: BoxedTool) {
         let name = tool.name().to_string();
         self.tools.insert(name, tool);
+    }
+
+    /// Register a tool provider
+    pub fn register_provider(&mut self, provider: Arc<dyn ToolProvider>) {
+        self.providers.push(provider);
     }
 
     /// Get a tool by name
@@ -55,11 +63,21 @@ impl ToolRouter {
         input: serde_json::Value,
         ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
-        let tool = self.tools.get(name).ok_or_else(|| ToolError::NotFound {
-            name: name.to_string(),
-        })?;
+        // First, try direct tools
+        if let Some(tool) = self.tools.get(name) {
+            return tool.execute(input, ctx).await;
+        }
 
-        tool.execute(input, ctx).await
+        // Then, check providers
+        for provider in &self.providers {
+            if provider.handles(name) {
+                return provider.execute(name, input, ctx).await;
+            }
+        }
+
+        Err(ToolError::NotFound {
+            name: name.to_string(),
+        })
     }
 
     /// Get all tool names
@@ -81,10 +99,18 @@ impl ToolRouter {
 
     /// Get tool specifications for model API
     pub fn specs(&self) -> Vec<uira_protocol::ToolSpec> {
-        self.tools
+        let mut specs: Vec<uira_protocol::ToolSpec> = self
+            .tools
             .values()
             .map(|t| uira_protocol::ToolSpec::new(t.name(), t.description(), t.schema()))
-            .collect()
+            .collect();
+
+        // Add provider specs
+        for provider in &self.providers {
+            specs.extend(provider.specs());
+        }
+
+        specs
     }
 }
 

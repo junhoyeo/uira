@@ -823,7 +823,7 @@ impl RalphHook {
         Some(runner.check_all(goals).await)
     }
 
-    fn build_verification_feedback(
+    pub fn build_verification_feedback(
         signals: &CompletionSignals,
         state: &RalphState,
         goals_result: &Option<uira_goals::VerificationResult>,
@@ -941,7 +941,7 @@ When ALL verifications pass, output: <promise>{}</promise>
         )
     }
 
-    fn get_continuation_prompt(state: &RalphState) -> String {
+    pub fn get_continuation_prompt(state: &RalphState) -> String {
         format!(
             r#"<ralph-continuation>
 

@@ -28,6 +28,15 @@ pub enum AgentLoopError {
 
     #[error("cancelled")]
     Cancelled,
+
+    #[error("approval timeout for tool '{tool}' after {timeout_secs}s")]
+    ApprovalTimeout { tool: String, timeout_secs: u64 },
+
+    #[error("tool '{tool}' forbidden: {reason}")]
+    ToolForbidden { tool: String, reason: String },
+
+    #[error("approval error: {0}")]
+    Approval(#[from] crate::approval::ApprovalError),
 }
 
 impl AgentLoopError {

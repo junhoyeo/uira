@@ -17,6 +17,8 @@ uira-agent = { workspace = true }
 uira-config = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
+uira-features = { path = "../uira-features" }
+uira-goals = { path = "../uira-goals" }
 uira-tui = { path = "../uira-tui" }
 secrecy = "0.10"
 clap = { workspace = true }
