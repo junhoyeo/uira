@@ -76,6 +76,7 @@ pub fn scan_for_blocked_panes(lines: usize) -> Vec<BlockedPane> {
     let mut blocked = Vec::new();
 
     // Patterns that indicate a blocked Claude session
+    // Note: "429" is intentionally broad to catch various rate limit error formats
     let blocking_patterns = [
         "Rate limit reached",
         "Please wait",

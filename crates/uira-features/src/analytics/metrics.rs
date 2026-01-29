@@ -78,41 +78,50 @@ impl MetricsCollector {
             return Ok(Vec::new());
         }
 
-        let file =
-            std::fs::File::open(&self.log_path).context("Failed to open metrics log file")?;
-        let reader = BufReader::new(file);
+        // Clone values needed for the blocking task
+        let log_path = self.log_path.clone();
 
-        let mut events = Vec::new();
-        let mut skipped = 0;
+        // Offload blocking I/O to a separate thread pool
+        let events = tokio::task::spawn_blocking(move || -> Result<Vec<MetricEvent>> {
+            let file = std::fs::File::open(&log_path).context("Failed to open metrics log file")?;
+            let reader = BufReader::new(file);
 
-        for line in reader.lines() {
-            let line = line.context("Failed to read line from metrics log")?;
-            if line.trim().is_empty() {
-                continue;
-            }
+            let mut events = Vec::new();
+            let mut skipped = 0;
 
-            let event: MetricEvent =
-                serde_json::from_str(&line).context("Failed to parse metric event")?;
-
-            if query.matches(&event) {
-                // Handle offset
-                if let Some(offset) = query.offset {
-                    if skipped < offset {
-                        skipped += 1;
-                        continue;
-                    }
+            for line in reader.lines() {
+                let line = line.context("Failed to read line from metrics log")?;
+                if line.trim().is_empty() {
+                    continue;
                 }
 
-                events.push(event);
+                let event: MetricEvent =
+                    serde_json::from_str(&line).context("Failed to parse metric event")?;
 
-                // Handle limit
-                if let Some(limit) = query.limit {
-                    if events.len() >= limit {
-                        break;
+                if query.matches(&event) {
+                    // Handle offset
+                    if let Some(offset) = query.offset {
+                        if skipped < offset {
+                            skipped += 1;
+                            continue;
+                        }
+                    }
+
+                    events.push(event);
+
+                    // Handle limit
+                    if let Some(limit) = query.limit {
+                        if events.len() >= limit {
+                            break;
+                        }
                     }
                 }
             }
-        }
+
+            Ok(events)
+        })
+        .await
+        .context("Failed to execute blocking query task")??;
 
         Ok(events)
     }
