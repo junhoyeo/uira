@@ -8,7 +8,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uira_auth::CredentialStore;
 use uira_protocol::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
@@ -44,6 +44,7 @@ pub struct AnthropicClient {
     config: ProviderConfig,
     /// Current credential source (wrapped in RwLock for token refresh)
     credential: Arc<RwLock<CredentialSource>>,
+    refresh_lock: Mutex<()>,
 }
 
 impl AnthropicClient {
@@ -65,6 +66,7 @@ impl AnthropicClient {
             client,
             config,
             credential: Arc::new(RwLock::new(credential)),
+            refresh_lock: Mutex::new(()),
         })
     }
 
@@ -123,6 +125,22 @@ impl AnthropicClient {
     }
 
     async fn refresh_token_if_needed(&self) -> Result<(), ProviderError> {
+        let might_need_refresh = {
+            let credential = self.credential.read().await;
+
+            if let CredentialSource::OAuth { expires_at, .. } = &*credential {
+                Self::is_token_expired(*expires_at)
+            } else {
+                false
+            }
+        };
+
+        if !might_need_refresh {
+            return Ok(());
+        }
+
+        let _guard = self.refresh_lock.lock().await;
+
         let (needs_refresh, refresh_token_opt) = {
             let credential = self.credential.read().await;
 
@@ -152,9 +170,8 @@ impl AnthropicClient {
     }
 
     async fn do_token_refresh(&self, refresh_token: &SecretString) -> Result<(), ProviderError> {
-        let client = reqwest::Client::new();
-
-        let response = client
+        let response = self
+            .client
             .post("https://console.anthropic.com/v1/oauth/token")
             .form(&[
                 ("grant_type", "refresh_token"),
@@ -199,6 +216,7 @@ impl AnthropicClient {
             expires_at,
         };
 
+        let old_refresh_token_str = refresh_token.expose_secret().to_string();
         if let Ok(mut store) = CredentialStore::load() {
             use uira_auth::StoredCredential;
             store.insert(
@@ -209,7 +227,13 @@ impl AnthropicClient {
                     ),
                     refresh_token: token_response
                         .refresh_token
-                        .map(uira_auth::secrecy::SecretString::from),
+                        .clone()
+                        .map(uira_auth::secrecy::SecretString::from)
+                        .or_else(|| {
+                            Some(uira_auth::secrecy::SecretString::from(
+                                old_refresh_token_str.clone(),
+                            ))
+                        }),
                     expires_at,
                 },
             );
