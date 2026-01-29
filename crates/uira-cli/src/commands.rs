@@ -31,6 +31,11 @@ pub struct Cli {
     #[arg(long)]
     pub ralph: bool,
 
+    /// Agent to use (e.g., architect, executor, explore, designer)
+    /// Each agent has specialized prompts and a default model tier
+    #[arg(short, long)]
+    pub agent: Option<String>,
+
     /// Output format (text, json, jsonl)
     #[arg(long, default_value = "text")]
     pub output: String,

@@ -5,6 +5,7 @@ use colored::Colorize;
 use std::sync::Arc;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use uira_agent::{Agent, AgentConfig};
+use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_protocol::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
@@ -59,8 +60,12 @@ async fn run_exec(
     prompt: &str,
     json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = create_client(cli, config)?;
-    let agent_config = create_agent_config(cli, config);
+    let uira_config = uira_config::loader::load_config(None).ok();
+    let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
+    let agent_defs = get_agent_definitions(None);
+    let registry = ModelRegistry::new();
+    let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let agent_config = create_agent_config(cli, config, &agent_defs);
 
     let mut agent = Agent::new(agent_config, client);
 
@@ -614,9 +619,12 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     use ratatui::Terminal;
     use std::io::stdout;
 
-    // Create model client
-    let client = create_client(cli, config)?;
-    let agent_config = create_agent_config(cli, config);
+    let uira_config = uira_config::loader::load_config(None).ok();
+    let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
+    let agent_defs = get_agent_definitions(None);
+    let registry = ModelRegistry::new();
+    let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let agent_config = create_agent_config(cli, config, &agent_defs);
 
     // Setup terminal
     enable_raw_mode()?;
@@ -639,9 +647,26 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     result.map_err(|e| e.into())
 }
 
+fn build_agent_model_overrides(
+    uira_config: Option<&uira_config::schema::UiraConfig>,
+) -> std::collections::HashMap<String, String> {
+    let mut overrides = std::collections::HashMap::new();
+    if let Some(config) = uira_config {
+        for (agent_name, agent_config) in &config.agents.agents {
+            if let Some(model) = &agent_config.model {
+                overrides.insert(agent_name.clone(), model.clone());
+            }
+        }
+    }
+    overrides
+}
+
 fn create_client(
     cli: &Cli,
     config: &CliConfig,
+    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
+    registry: &ModelRegistry,
+    agent_model_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<Arc<dyn ModelClient>, Box<dyn std::error::Error>> {
     use secrecy::SecretString;
     use uira_protocol::Provider;
@@ -652,7 +677,17 @@ fn create_client(
         .or(config.default_provider.as_deref())
         .unwrap_or("anthropic");
 
-    let model = cli.model.clone().or(config.default_model.clone());
+    let model_from_cli = cli.model.clone();
+    let model_from_agent = cli.agent.as_ref().and_then(|name| {
+        agent_model_overrides.get(name).cloned().or_else(|| {
+            agent_defs.get(name).and_then(|def| {
+                def.default_model
+                    .map(|tier| registry.resolve(tier, Some(provider)))
+            })
+        })
+    });
+    let model_from_config = config.default_model.clone();
+    let model = model_from_cli.or(model_from_agent).or(model_from_config);
 
     match provider {
         "anthropic" => {
@@ -732,7 +767,11 @@ fn create_client(
     }
 }
 
-fn create_agent_config(cli: &Cli, _config: &CliConfig) -> AgentConfig {
+fn create_agent_config(
+    cli: &Cli,
+    _config: &CliConfig,
+    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
+) -> AgentConfig {
     let sandbox_policy = match cli.sandbox.as_str() {
         "read-only" => SandboxPolicy::read_only(),
         "full-access" => SandboxPolicy::full_access(),
@@ -754,6 +793,12 @@ fn create_agent_config(cli: &Cli, _config: &CliConfig) -> AgentConfig {
 
     if let Some(ref model) = cli.model {
         config = config.with_model(model);
+    }
+
+    if let Some(ref agent_name) = cli.agent {
+        if let Some(agent_def) = agent_defs.get(agent_name) {
+            config = config.with_system_prompt(&agent_def.prompt);
+        }
     }
 
     config

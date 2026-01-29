@@ -4774,6 +4774,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uira-agent",
+ "uira-agents",
  "uira-auth",
  "uira-config",
  "uira-features",
