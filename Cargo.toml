@@ -15,6 +15,14 @@ members = [
   "crates/uira-mcp-server",
   "crates/uira-oxc",
   "crates/uira-goals",
+  # New agent harness crates
+  "crates/uira-protocol",
+  "crates/uira-providers",
+  "crates/uira-sandbox",
+  "crates/uira-context",
+  "crates/uira-agent",
+  "crates/uira-cli",
+  "crates/uira-tui",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -35,6 +43,12 @@ uira-features = { path = "crates/uira-features" }
 uira-hooks = { path = "crates/uira-hooks" }
 uira-goals = { path = "crates/uira-goals" }
 uira-config = { path = "crates/uira-config" }
+# New agent harness crates
+uira-protocol = { path = "crates/uira-protocol" }
+uira-providers = { path = "crates/uira-providers" }
+uira-sandbox = { path = "crates/uira-sandbox" }
+uira-context = { path = "crates/uira-context" }
+uira-agent = { path = "crates/uira-agent" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -81,6 +95,9 @@ regex = "1.12"
 
 # Directories
 dirs = "5.0"
+
+# Time/Date
+chrono = { version = "0.4", features = ["serde"] }
 
 # Testing
 tempfile = "3.14"
