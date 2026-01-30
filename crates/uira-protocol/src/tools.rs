@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn test_json_schema_builder() {
         let schema = JsonSchema::object()
-            .with_description("A test schema")
+            .description("A test schema")
             .with_properties(serde_json::json!({
                 "name": {"type": "string"}
             }))
