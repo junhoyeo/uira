@@ -83,17 +83,6 @@ impl Default for AiWorkflowConfig {
     }
 }
 
-impl AiWorkflowConfig {
-    #[allow(dead_code)] // Used by diagnostics and comments modules (Phase 2 & 3)
-    pub fn parse_model_string(model: &str) -> (String, String) {
-        if let Some((provider, model)) = model.split_once('/') {
-            (provider.to_string(), model.to_string())
-        } else {
-            ("anthropic".to_string(), model.to_string())
-        }
-    }
-}
-
 // ============ Decision Types ============
 
 /// Generic decision from AI
@@ -105,7 +94,6 @@ pub enum Decision {
 }
 
 /// Extended decision for diagnostics with confidence levels
-#[allow(dead_code)] // Used in Phase 2
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticsDecision {
     FixHigh,
@@ -114,7 +102,6 @@ pub enum DiagnosticsDecision {
 }
 
 /// Extended decision for comments
-#[allow(dead_code)] // Used in Phase 3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommentDecision {
     Remove,
@@ -126,7 +113,6 @@ pub enum CommentDecision {
 // ============ Trait for AI Prompts ============
 
 /// Trait for items that can be formatted into AI prompts
-#[allow(dead_code)]
 pub trait IntoAiPrompt {
     fn to_prompt_entry(&self, index: usize) -> String;
 }
@@ -156,22 +142,6 @@ impl AiDecisionClient {
             modified_files: HashSet::new(),
             auto_stage: false,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_auto_stage(mut self, auto_stage: bool) -> Self {
-        self.auto_stage = auto_stage;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn host(&self) -> &str {
-        &self.config.host
-    }
-
-    #[allow(dead_code)]
-    pub fn port(&self) -> u16 {
-        self.config.port
     }
 
     // ============ Server Management ============
@@ -365,7 +335,6 @@ impl AiDecisionClient {
         decisions
     }
 
-    #[allow(dead_code)]
     pub fn parse_diagnostics_decisions(
         &self,
         ai_text: &str,
@@ -404,7 +373,6 @@ impl AiDecisionClient {
         decisions
     }
 
-    #[allow(dead_code)]
     pub fn parse_comment_decisions(
         &self,
         ai_text: &str,
@@ -530,12 +498,19 @@ mod tests {
 
     #[test]
     fn test_parse_model_string() {
-        let (provider, model) =
-            AiWorkflowConfig::parse_model_string("anthropic/claude-sonnet-4-20250514");
+        fn parse_model(model: &str) -> (String, String) {
+            if let Some((provider, model)) = model.split_once('/') {
+                (provider.to_string(), model.to_string())
+            } else {
+                ("anthropic".to_string(), model.to_string())
+            }
+        }
+
+        let (provider, model) = parse_model("anthropic/claude-sonnet-4-20250514");
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "claude-sonnet-4-20250514");
 
-        let (provider, model) = AiWorkflowConfig::parse_model_string("gpt-4");
+        let (provider, model) = parse_model("gpt-4");
         assert_eq!(provider, "anthropic");
         assert_eq!(model, "gpt-4");
     }

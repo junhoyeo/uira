@@ -24,8 +24,6 @@ pub struct TypoEntry {
 
 pub struct TyposChecker {
     ai_client: AiDecisionClient,
-    #[allow(dead_code)]
-    config: TyposSettings,
     hook_executor: Option<AiHookExecutor>,
 }
 
@@ -58,7 +56,6 @@ impl TyposChecker {
 
         Self {
             ai_client: AiDecisionClient::new(ai_config),
-            config,
             hook_executor,
         }
     }
@@ -403,8 +400,6 @@ mod tests {
     fn test_typos_checker_creation() {
         let checker = TyposChecker::new(None);
         assert!(!checker.ai_client.auto_stage);
-        assert!(checker.config.ai.disable_tools);
-        assert!(checker.config.ai.disable_mcp);
 
         let config = TyposSettings {
             ai: TyposAiSettings {
@@ -414,12 +409,12 @@ mod tests {
                 ..Default::default()
             },
         };
-        let checker_with_config = TyposChecker::new(Some(config));
-        let (provider, model) = checker_with_config.config.ai.parse_model();
+        let (provider, model) = config.ai.parse_model();
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o");
-        assert!(!checker_with_config.config.ai.disable_tools);
-        assert!(checker_with_config.config.ai.disable_mcp);
+
+        let checker_with_config = TyposChecker::new(Some(config));
+        assert!(!checker_with_config.ai_client.auto_stage);
     }
 
     #[test]

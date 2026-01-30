@@ -91,11 +91,10 @@ enum Commands {
         stage: bool,
         #[arg(
             long,
-            default_value = "error",
             value_parser = clap::builder::PossibleValuesParser::new(["error", "warning", "all"]),
-            help = "Severity filter: error, warning, all"
+            help = "Severity filter: error, warning, all (default from config or 'error')"
         )]
-        severity: String,
+        severity: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
@@ -188,7 +187,7 @@ fn main() {
             stage,
             severity,
             files,
-        } => diagnostics_command(ai, staged, stage, &severity, &files),
+        } => diagnostics_command(ai, staged, stage, severity.as_deref(), &files),
         Commands::Comments {
             ai,
             staged,
@@ -819,7 +818,7 @@ fn diagnostics_command(
     ai: bool,
     staged: bool,
     stage: bool,
-    severity: &str,
+    severity: Option<&str>,
     files: &[String],
 ) -> anyhow::Result<()> {
     use anyhow::Context;
@@ -860,6 +859,8 @@ fn diagnostics_command(
         }
         return Ok(());
     }
+
+    let severity = severity.unwrap_or("error");
 
     let (js_ts_files, other_files): (Vec<_>, Vec<_>) = files_to_check.iter().partition(|f| {
         let ext = std::path::Path::new(f)

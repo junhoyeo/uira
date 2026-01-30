@@ -86,8 +86,6 @@ pub struct CommentsChecker {
     ai_client: AiDecisionClient,
     detector: CommentDetector,
     filter_chain: FilterChain,
-    #[allow(dead_code)]
-    config: CommentsSettings,
     pragma_format: String,
     include_docstrings: bool,
 }
@@ -113,7 +111,6 @@ impl CommentsChecker {
             ai_client: AiDecisionClient::new(ai_config),
             detector: CommentDetector::new(),
             filter_chain: FilterChain::new(),
-            config,
             pragma_format,
             include_docstrings,
         }

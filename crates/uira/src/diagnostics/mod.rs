@@ -100,9 +100,10 @@ Context:
 
 pub struct DiagnosticsChecker {
     ai_client: AiDecisionClient,
-    #[allow(dead_code)]
-    config: DiagnosticsSettings,
     linter: Linter,
+    default_severity: String,
+    confidence_threshold: f64,
+    languages: Vec<String>,
 }
 
 impl DiagnosticsChecker {
@@ -122,8 +123,10 @@ impl DiagnosticsChecker {
 
         Self {
             ai_client: AiDecisionClient::new(ai_config),
-            config,
             linter: Linter::new(LintRule::recommended()),
+            default_severity: config.ai.severity,
+            confidence_threshold: config.ai.confidence_threshold,
+            languages: config.ai.languages,
         }
     }
 
@@ -132,8 +135,10 @@ impl DiagnosticsChecker {
         self
     }
 
-    pub fn run(&mut self, files: &[String], severity_filter: &str) -> Result<bool> {
-        let diagnostics = self.detect_diagnostics(files, severity_filter)?;
+    pub fn run(&mut self, files: &[String], severity_filter: Option<&str>) -> Result<bool> {
+        let severity = severity_filter.unwrap_or(&self.default_severity);
+        let filtered_files = self.filter_by_language(files);
+        let diagnostics = self.detect_diagnostics(&filtered_files, severity)?;
 
         if diagnostics.is_empty() {
             println!("{} No diagnostics found", "✓".green().bold());
@@ -179,20 +184,34 @@ impl DiagnosticsChecker {
             );
 
             match decision {
-                DiagnosticsDecision::FixHigh | DiagnosticsDecision::FixLow => {
-                    let low_confidence = *decision == DiagnosticsDecision::FixLow;
-                    match self.apply_fix(diagnostic, low_confidence) {
-                        Ok(()) => {
-                            applied += 1;
-                            if low_confidence {
+                DiagnosticsDecision::FixHigh => match self.apply_fix(diagnostic) {
+                    Ok(()) => {
+                        applied += 1;
+                        println!("      {} Applied", "✓".green());
+                    }
+                    Err(e) => {
+                        eprintln!("      {} {}", "✗".red(), e);
+                        errors += 1;
+                    }
+                },
+                DiagnosticsDecision::FixLow => {
+                    if self.confidence_threshold > 0.5 {
+                        println!(
+                            "      {} Skipped (confidence below threshold {:.0}%)",
+                            "⊘".dimmed(),
+                            self.confidence_threshold * 100.0
+                        );
+                        skipped += 1;
+                    } else {
+                        match self.apply_fix(diagnostic) {
+                            Ok(()) => {
+                                applied += 1;
                                 println!("      {} Applied (low confidence)", "⚠".yellow());
-                            } else {
-                                println!("      {} Applied", "✓".green());
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("      {} {}", "✗".red(), e);
-                            errors += 1;
+                            Err(e) => {
+                                eprintln!("      {} {}", "✗".red(), e);
+                                errors += 1;
+                            }
                         }
                     }
                 }
@@ -222,6 +241,30 @@ impl DiagnosticsChecker {
         );
 
         Ok(errors == 0)
+    }
+
+    fn filter_by_language(&self, files: &[String]) -> Vec<String> {
+        if self.languages.is_empty() {
+            return files.to_vec();
+        }
+
+        files
+            .iter()
+            .filter(|f| {
+                let ext = std::path::Path::new(f)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("");
+                self.languages.iter().any(|lang| match lang.as_str() {
+                    "js" => ext == "js" || ext == "mjs" || ext == "cjs",
+                    "ts" => ext == "ts" || ext == "mts" || ext == "cts",
+                    "jsx" => ext == "jsx",
+                    "tsx" => ext == "tsx",
+                    _ => ext == lang,
+                })
+            })
+            .cloned()
+            .collect()
     }
 
     fn detect_diagnostics(
@@ -287,7 +330,7 @@ Each line must be EXACTLY one of: FIX:HIGH, FIX:LOW, or SKIP
             .parse_diagnostics_decisions(&response, diagnostics.len()))
     }
 
-    fn apply_fix(&mut self, diagnostic: &DiagnosticItem, _low_confidence: bool) -> Result<()> {
+    fn apply_fix(&mut self, diagnostic: &DiagnosticItem) -> Result<()> {
         let suggestion = diagnostic
             .suggestion
             .as_ref()
