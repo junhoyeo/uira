@@ -609,15 +609,20 @@ impl AnthropicClient {
     }
 
     fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        // Simple SSE parser - in production would use eventsource-stream
         for line in text.lines() {
             if let Some(data) = line.strip_prefix("data: ") {
                 if data == "[DONE]" {
                     return Ok(StreamChunk::MessageStop);
                 }
 
-                if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
-                    return Ok(event.into());
+                match serde_json::from_str::<AnthropicStreamEvent>(data) {
+                    Ok(event) => return Ok(event.into()),
+                    Err(e) => {
+                        if data.trim().is_empty() || data.starts_with(':') {
+                            continue;
+                        }
+                        tracing::debug!("SSE parse error (may be incomplete): {}", e);
+                    }
                 }
             }
         }

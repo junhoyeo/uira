@@ -168,7 +168,7 @@ impl ContentBlock {
     fn estimate_chars(&self) -> usize {
         match self {
             Self::Text { text } => text.len(),
-            Self::Image { .. } => 1000, // Images are ~1000 tokens
+            Self::Image { .. } => 4000,
             Self::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
             Self::ToolResult { content, .. } => content.len(),
             Self::Thinking { thinking, .. } => thinking.len(),

@@ -21,11 +21,29 @@ fn default_interval() -> u64 {
     5
 }
 
-/// Token response from device token endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RawTokenResponse {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<i64>,
+    pub token_type: String,
+}
+
+impl From<RawTokenResponse> for OAuthTokens {
+    fn from(raw: RawTokenResponse) -> Self {
+        OAuthTokens {
+            access_token: raw.access_token,
+            refresh_token: raw.refresh_token,
+            expires_at: raw.expires_in,
+            token_type: raw.token_type,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum DeviceTokenResponse {
-    Success(OAuthTokens),
+pub(crate) enum DeviceTokenResponse {
+    Success(RawTokenResponse),
     Pending(DeviceTokenError),
 }
 
@@ -89,8 +107,8 @@ pub async fn poll_for_token(
         }
 
         match serde_json::from_str::<DeviceTokenResponse>(&body) {
-            Ok(DeviceTokenResponse::Success(tokens)) => {
-                return Ok(tokens);
+            Ok(DeviceTokenResponse::Success(raw_tokens)) => {
+                return Ok(raw_tokens.into());
             }
             Ok(DeviceTokenResponse::Pending(error)) => {
                 match error.error.as_str() {

@@ -33,9 +33,8 @@ impl ModelClientBuilder {
             Provider::Ollama => Ok(Arc::new(OllamaClient::new(self.config)?)),
             Provider::OpenCode => Ok(Arc::new(OpenCodeClient::new(self.config)?)),
             Provider::OpenRouter => {
-                // OpenRouter uses OpenAI-compatible API
                 let mut config = self.config;
-                config.base_url = Some("https://openrouter.ai/api".to_string());
+                config.base_url = Some("https://openrouter.ai/api/v1".to_string());
                 Ok(Arc::new(OpenAIClient::new(config)?))
             }
             Provider::Custom => {
