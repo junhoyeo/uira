@@ -1,5 +1,6 @@
 mod ai_decision;
 mod config;
+mod diagnostics;
 mod hooks;
 mod linter;
 mod typos;
@@ -81,8 +82,12 @@ enum Commands {
     },
     /// Run diagnostics (lsp_diagnostics) on files
     Diagnostics {
+        #[arg(long, help = "Use AI to decide and apply fixes")]
+        ai: bool,
         #[arg(long, help = "Only check staged files")]
         staged: bool,
+        #[arg(long, help = "Automatically stage modified files after fixing")]
+        stage: bool,
         #[arg(
             long,
             default_value = "error",
@@ -166,10 +171,12 @@ fn main() {
         Commands::Skill { action } => skill_command(action),
         Commands::Goals { action } => goals_command(action),
         Commands::Diagnostics {
+            ai,
             staged,
+            stage,
             severity,
             files,
-        } => diagnostics_command(staged, &severity, &files),
+        } => diagnostics_command(ai, staged, stage, &severity, &files),
     };
 
     if let Err(e) = result {
@@ -790,9 +797,16 @@ fn goals_command(action: GoalsCommands) -> anyhow::Result<()> {
     rt.block_on(async { goals_command_async(action).await })
 }
 
-fn diagnostics_command(staged: bool, severity: &str, files: &[String]) -> anyhow::Result<()> {
+fn diagnostics_command(
+    ai: bool,
+    staged: bool,
+    stage: bool,
+    severity: &str,
+    files: &[String],
+) -> anyhow::Result<()> {
     use anyhow::Context;
     use colored::Colorize;
+    use diagnostics::DiagnosticsChecker;
     use std::process::Command;
     use uira_oxc::{LintRule, Linter, Severity};
 
@@ -815,6 +829,17 @@ fn diagnostics_command(staged: bool, severity: &str, files: &[String]) -> anyhow
 
     if files_to_check.is_empty() {
         println!("{} No files to check", "✓".green());
+        return Ok(());
+    }
+
+    if ai {
+        let config = uira_config::load_config(None).ok();
+        let diagnostics_config = config.map(|c| c.diagnostics);
+        let mut checker = DiagnosticsChecker::new(diagnostics_config).with_auto_stage(stage);
+        let success = checker.run(&files_to_check, severity)?;
+        if !success {
+            process::exit(1);
+        }
         return Ok(());
     }
 
