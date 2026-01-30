@@ -324,11 +324,18 @@ impl App {
 
         let inner = block.inner(area);
 
-        // Display input with cursor
-        let display_input = if self.cursor_pos >= self.input.len() {
+        // Display input with cursor (use char boundary for UTF-8 safety)
+        let char_count = self.input.chars().count();
+        let display_input = if self.cursor_pos >= char_count {
             format!("{}_", self.input)
         } else {
-            let (before, after) = self.input.split_at(self.cursor_pos);
+            let byte_pos = self
+                .input
+                .char_indices()
+                .nth(self.cursor_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input.len());
+            let (before, after) = self.input.split_at(byte_pos);
             format!("{}|{}", before, after)
         };
 
@@ -365,22 +372,41 @@ impl App {
             }
         }
 
-        // Input handling
+        // Input handling (cursor_pos is char index, not byte index for UTF-8 safety)
         if self.input_focused {
+            let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
-                    self.input.insert(self.cursor_pos, c);
+                    let byte_pos = self
+                        .input
+                        .char_indices()
+                        .nth(self.cursor_pos)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.input.len());
+                    self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
                 }
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
-                        self.input.remove(self.cursor_pos);
+                        let byte_pos = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.input.remove(byte_pos);
                     }
                 }
                 KeyCode::Delete => {
-                    if self.cursor_pos < self.input.len() {
-                        self.input.remove(self.cursor_pos);
+                    if self.cursor_pos < char_count {
+                        let byte_pos = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(self.input.len());
+                        self.input.remove(byte_pos);
                     }
                 }
                 KeyCode::Left => {
@@ -389,7 +415,7 @@ impl App {
                     }
                 }
                 KeyCode::Right => {
-                    if self.cursor_pos < self.input.len() {
+                    if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
                     }
                 }
@@ -397,7 +423,7 @@ impl App {
                     self.cursor_pos = 0;
                 }
                 KeyCode::End => {
-                    self.cursor_pos = self.input.len();
+                    self.cursor_pos = char_count;
                 }
                 KeyCode::Enter => {
                     if !self.input.is_empty() {
