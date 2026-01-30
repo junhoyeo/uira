@@ -10,6 +10,7 @@ keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+# Core crates
 uira-core = { workspace = true }
 uira-sdk = { workspace = true }
 uira-agents = { workspace = true }
@@ -18,7 +19,18 @@ uira-config = { path = "../uira-config" }
 uira-goals = { path = "../uira-goals" }
 uira-oxc = { path = "../uira-oxc" }
 uira-comment-checker = { path = "../uira-comment-checker" }
+
+# Agent harness crates (NEW)
+uira-agent = { workspace = true }
+uira-providers = { workspace = true }
+uira-protocol = { workspace = true }
+uira-tools = { workspace = true }
+uira-sandbox = { workspace = true }
+
+# Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# CLI and serialization
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -32,6 +44,7 @@ reqwest = { workspace = true }
 toml = { workspace = true }
 regex = { workspace = true }
 dirs = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
