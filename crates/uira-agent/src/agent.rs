@@ -281,12 +281,13 @@ impl Agent {
                 .await;
 
             // Get model response (streaming or blocking)
+            let tool_specs = self.session.tool_specs();
             let response = if self.streaming_enabled {
-                self.get_response_streaming().await?
+                self.get_response_streaming(&tool_specs).await?
             } else {
                 self.session
                     .client
-                    .chat(self.session.context.messages(), &[])
+                    .chat(self.session.context.messages(), &tool_specs)
                     .await
                     .map_err(AgentLoopError::Provider)?
             };
@@ -348,11 +349,12 @@ impl Agent {
     /// Get model response with streaming, emitting ContentDelta events
     async fn get_response_streaming(
         &mut self,
+        tool_specs: &[uira_protocol::ToolSpec],
     ) -> Result<uira_protocol::ModelResponse, AgentLoopError> {
         let stream = self
             .session
             .client
-            .chat_stream(self.session.context.messages(), &[])
+            .chat_stream(self.session.context.messages(), tool_specs)
             .await
             .map_err(AgentLoopError::Provider)?;
 
@@ -412,12 +414,13 @@ impl Agent {
                     .await;
 
                 // Get model response (streaming or blocking)
+                let tool_specs = self.session.tool_specs();
                 let response = if self.streaming_enabled {
-                    self.get_response_streaming().await?
+                    self.get_response_streaming(&tool_specs).await?
                 } else {
                     self.session
                         .client
-                        .chat(self.session.context.messages(), &[])
+                        .chat(self.session.context.messages(), &tool_specs)
                         .await
                         .map_err(AgentLoopError::Provider)?
                 };
