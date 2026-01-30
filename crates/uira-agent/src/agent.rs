@@ -720,6 +720,14 @@ impl Agent {
                                 );
                                 results.push(ContentBlock::tool_error(&call.id, &error_msg));
                                 self.record_tool_result(&call.id, &error_msg, true);
+                                self.emit_event(ThreadEvent::ItemCompleted {
+                                    item: Item::ToolResult {
+                                        tool_call_id: call.id.clone(),
+                                        output: error_msg,
+                                        is_error: true,
+                                    },
+                                })
+                                .await;
                                 continue;
                             }
                         }
