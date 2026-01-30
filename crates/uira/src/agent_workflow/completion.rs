@@ -8,7 +8,7 @@ pub struct CompletionDetector {
 impl CompletionDetector {
     pub fn new() -> Self {
         let pattern = Regex::new(r"<DONE\s*(?:/\s*>|>.*?</DONE>)").unwrap();
-        let summary_pattern = Regex::new(r"<DONE>(.*?)</DONE>").unwrap();
+        let summary_pattern = Regex::new(r"<DONE\s*>(.*?)</DONE>").unwrap();
         Self {
             pattern,
             summary_pattern,
@@ -57,6 +57,11 @@ mod tests {
         assert_eq!(
             detector.extract_summary("<DONE>Fixed 3 typos</DONE>"),
             Some("Fixed 3 typos".to_string())
+        );
+        // Whitespace after DONE should still extract summary
+        assert_eq!(
+            detector.extract_summary("<DONE >Fixed with whitespace</DONE>"),
+            Some("Fixed with whitespace".to_string())
         );
         assert_eq!(detector.extract_summary("<DONE/>"), None);
         assert_eq!(detector.extract_summary("<DONE></DONE>"), None);

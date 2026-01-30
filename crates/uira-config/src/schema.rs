@@ -118,6 +118,7 @@ fn default_opencode_auto_start() -> bool {
 /// Typos command settings for AI-assisted typo checking
 ///
 /// Configuration for the `uira typos --ai` command.
+/// The AI workflow uses an embedded agent with full tool access.
 ///
 /// # Example
 ///
@@ -125,10 +126,6 @@ fn default_opencode_auto_start() -> bool {
 /// typos:
 ///   ai:
 ///     model: "anthropic/claude-sonnet-4-20250514"
-///     host: "127.0.0.1"
-///     port: 4096
-///     disable_tools: true
-///     disable_mcp: true
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TyposSettings {
@@ -143,32 +140,12 @@ pub struct TyposAiSettings {
     /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
     #[serde(default = "default_typos_model")]
     pub model: String,
-
-    /// OpenCode server host (default: 127.0.0.1)
-    #[serde(default = "default_typos_host")]
-    pub host: String,
-
-    /// OpenCode server port (default: 4096)
-    #[serde(default = "default_typos_port")]
-    pub port: u16,
-
-    /// Disable built-in tools (default: true)
-    #[serde(default = "default_typos_disable_tools")]
-    pub disable_tools: bool,
-
-    /// Disable MCP servers (default: true)
-    #[serde(default = "default_typos_disable_mcp")]
-    pub disable_mcp: bool,
 }
 
 impl Default for TyposAiSettings {
     fn default() -> Self {
         Self {
             model: default_typos_model(),
-            host: default_typos_host(),
-            port: default_typos_port(),
-            disable_tools: default_typos_disable_tools(),
-            disable_mcp: default_typos_disable_mcp(),
         }
     }
 }
@@ -186,22 +163,6 @@ impl TyposAiSettings {
 
 fn default_typos_model() -> String {
     "anthropic/claude-sonnet-4-20250514".to_string()
-}
-
-fn default_typos_host() -> String {
-    "127.0.0.1".to_string()
-}
-
-fn default_typos_port() -> u16 {
-    4096
-}
-
-fn default_typos_disable_tools() -> bool {
-    true
-}
-
-fn default_typos_disable_mcp() -> bool {
-    true
 }
 
 // ============================================================================

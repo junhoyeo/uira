@@ -63,12 +63,16 @@ impl GitTracker {
             return Ok(());
         }
 
-        Command::new("git")
+        let status = Command::new("git")
             .arg("add")
             .arg("--")
             .args(files)
             .current_dir(&self.working_dir)
             .status()?;
+
+        if !status.success() {
+            anyhow::bail!("git add failed with exit code: {:?}", status.code());
+        }
 
         Ok(())
     }

@@ -55,10 +55,11 @@ impl WorkflowState {
 
     pub fn clear(task: WorkflowTask) -> anyhow::Result<()> {
         let path = task.state_file();
-        if Path::new(&path).exists() {
-            std::fs::remove_file(&path)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
         }
-        Ok(())
     }
 
     pub fn increment(&mut self) {

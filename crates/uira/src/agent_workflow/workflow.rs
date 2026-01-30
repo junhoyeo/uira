@@ -121,7 +121,7 @@ impl AgentWorkflow {
                     iterations: self.state.iteration,
                     files_modified,
                 };
-                WorkflowState::clear(self.task)?;
+                let _ = WorkflowState::clear(self.task);
                 return Ok(result);
             }
 
@@ -155,7 +155,7 @@ impl AgentWorkflow {
                                     summary,
                                 };
 
-                                WorkflowState::clear(self.task)?;
+                                let _ = WorkflowState::clear(self.task);
                                 return Ok(result);
                             }
                             VerificationResult::Fail {
@@ -170,7 +170,7 @@ impl AgentWorkflow {
                                         remaining_issues,
                                         details,
                                     };
-                                    WorkflowState::clear(self.task)?;
+                                    let _ = WorkflowState::clear(self.task);
                                     return Ok(result);
                                 }
                             }
@@ -184,7 +184,7 @@ impl AgentWorkflow {
                     return Ok(WorkflowResult::Cancelled);
                 }
                 Err(e) => {
-                    WorkflowState::clear(self.task)?;
+                    let _ = WorkflowState::clear(self.task);
                     return Ok(WorkflowResult::Failed {
                         error: e.to_string(),
                     });
