@@ -38,7 +38,6 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "postbuild": "node scripts/sync-plugin.cjs",
     "prepublishOnly": "napi prepublish -t npm",
     "artifacts": "napi artifacts"
   },

@@ -306,7 +306,6 @@ jobs:
             ### Subpath Exports
             - `uira` - Native NAPI bindings
             - `uira/hook` - Git hooks API
-            - `uira/claude-plugin` - Claude Code plugin
             
             ### CLI Binaries
             Download the appropriate binary for your platform from the assets below.
