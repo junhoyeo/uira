@@ -6,7 +6,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
@@ -23,6 +23,54 @@ use crate::AppEvent;
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
+
+fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> Vec<Line<'static>> {
+    let prefix_len = prefix.chars().count();
+    let content_width = max_width.saturating_sub(prefix_len);
+
+    if content_width == 0 {
+        return vec![Line::from(Span::styled(prefix.to_string(), style))];
+    }
+
+    let mut lines = Vec::new();
+    let mut first = true;
+
+    for paragraph in content.split('\n') {
+        let chars: Vec<char> = paragraph.chars().collect();
+        if chars.is_empty() {
+            let line_prefix = if first { prefix } else { "" };
+            lines.push(Line::from(Span::styled(line_prefix.to_string(), style)));
+            first = false;
+            continue;
+        }
+
+        let mut i = 0;
+        while i < chars.len() {
+            let width = if first { content_width } else { max_width };
+            let end = (i + width).min(chars.len());
+            let chunk: String = chars[i..end].iter().collect();
+
+            let line = if first {
+                Line::from(vec![
+                    Span::styled(prefix.to_string(), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(chunk, style),
+                ])
+            } else {
+                Line::from(Span::styled(chunk, style))
+            };
+
+            lines.push(line);
+            first = false;
+            i = end;
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(prefix.to_string(), style)));
+    }
+
+    lines
+}
 
 /// Spawn a task that handles approval requests from the agent
 fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sender<AppEvent>) {
@@ -205,77 +253,65 @@ impl App {
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Cyan));
 
+        let inner_width = area.width.saturating_sub(2) as usize;
+
         let mut items: Vec<ListItem> = self
             .messages
             .iter()
             .map(|msg| {
-                if msg.role == "thinking" {
-                    let style = Style::default()
-                        .fg(Color::DarkGray)
-                        .add_modifier(Modifier::ITALIC);
-                    return ListItem::new(Line::from(vec![
-                        Span::styled("thinking: ", style),
-                        Span::styled(&msg.content, style),
-                    ]));
-                }
-
-                let style = match msg.role.as_str() {
-                    "user" => Style::default().fg(Color::Green),
-                    "assistant" => Style::default().fg(Color::Cyan),
-                    "tool" => Style::default().fg(Color::Magenta),
-                    "error" => Style::default().fg(Color::Red),
-                    "system" => Style::default().fg(Color::Yellow),
-                    _ => Style::default(),
+                let (prefix, style) = if msg.role == "thinking" {
+                    (
+                        "thinking: ",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::ITALIC),
+                    )
+                } else {
+                    let s = match msg.role.as_str() {
+                        "user" => Style::default().fg(Color::Green),
+                        "assistant" => Style::default().fg(Color::Cyan),
+                        "tool" => Style::default().fg(Color::Magenta),
+                        "error" => Style::default().fg(Color::Red),
+                        "system" => Style::default().fg(Color::Yellow),
+                        _ => Style::default(),
+                    };
+                    ("", s)
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("{}: ", msg.role),
-                        style.add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(&msg.content, style),
-                ]))
+
+                let role_prefix = if prefix.is_empty() {
+                    format!("{}: ", msg.role)
+                } else {
+                    prefix.to_string()
+                };
+
+                let lines = wrap_message(&role_prefix, &msg.content, inner_width, style);
+                ListItem::new(Text::from(lines))
             })
             .collect();
 
         if let Some(ref buffer) = self.thinking_buffer {
             if !buffer.is_empty() {
-                let thinking_item = ListItem::new(Line::from(vec![
-                    Span::styled(
-                        "> Thinking: ",
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                    Span::styled(
-                        buffer.as_str(),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ]));
-                items.push(thinking_item);
+                let style = Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC);
+                let lines = wrap_message("> Thinking: ", buffer, inner_width, style);
+                items.push(ListItem::new(Text::from(lines)));
             }
         }
 
-        // Render streaming buffer as in-progress message with blinking cursor
         if let Some(ref buffer) = self.streaming_buffer {
             if !buffer.is_empty() {
-                let streaming_item = ListItem::new(Line::from(vec![
-                    Span::styled(
-                        "assistant: ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(buffer.as_str(), Style::default().fg(Color::Cyan)),
-                    Span::styled(
+                let style = Style::default().fg(Color::Cyan);
+                let mut lines = wrap_message("assistant: ", buffer, inner_width, style);
+                if let Some(last) = lines.last_mut() {
+                    last.spans.push(Span::styled(
                         "▌",
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::SLOW_BLINK),
-                    ),
-                ]));
-                items.push(streaming_item);
+                    ));
+                }
+                items.push(ListItem::new(Text::from(lines)));
             }
         }
 
