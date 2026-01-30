@@ -616,7 +616,10 @@ impl AnthropicClient {
                 }
 
                 match serde_json::from_str::<AnthropicStreamEvent>(data) {
-                    Ok(event) => return Ok(event.into()),
+                    Ok(event) => {
+                        tracing::trace!("Anthropic SSE event: {:?}", event);
+                        return Ok(event.into());
+                    }
                     Err(e) => {
                         if data.trim().is_empty() || data.starts_with(':') {
                             continue;
