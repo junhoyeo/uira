@@ -150,7 +150,6 @@ fn expand_opencode_settings(
 
 fn expand_typos_settings(mut typos: crate::schema::TyposSettings) -> crate::schema::TyposSettings {
     typos.ai.model = expand_env_string(&typos.ai.model);
-    typos.ai.host = expand_env_string(&typos.ai.host);
     typos
 }
 

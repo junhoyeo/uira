@@ -118,7 +118,7 @@ uira-agent --model claude-sonnet-4-20250514
 
 ## AI Agent Harness System
 
-Uira provides an AI-assisted workflow system that integrates with git hooks to automatically invoke AI agents at commit time. The system orchestrates coding agents through a CUI (Command User Interface) that can be triggered manually or automatically via git hooks.
+Uira provides an AI-assisted workflow system that integrates with git hooks to automatically invoke AI agents at commit time. The system uses an **embedded agent** that runs autonomously with full tool access until completion.
 
 ### Workflow Diagram
 
@@ -159,47 +159,41 @@ Uira provides an AI-assisted workflow system that integrates with git hooks to a
 │           │                    │                    │                           │
 │           └────────────────────┼────────────────────┘                           │
 │                                ▼                                                 │
-│                    ┌───────────────────────┐                                    │
-│                    │   AiDecisionClient    │                                    │
-│                    │  (Shared AI Infra)    │                                    │
-│                    └───────────┬───────────┘                                    │
-│                                │                                                 │
-└────────────────────────────────┼────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           OpenCode Server                                        │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                         Session Management                               │    │
-│  │  POST /session/new  →  Create AI session                                │    │
-│  │  POST /session/{id}/message  →  Send prompt, receive decision           │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
-│                                       │                                          │
-│                                       ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                           Model Providers                                │    │
-│  │                                                                          │    │
-│  │    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐             │    │
-│  │    │  Anthropic   │    │   OpenAI     │    │   Gemini     │             │    │
-│  │    │   Claude     │    │    GPT       │    │              │             │    │
-│  │    └──────────────┘    └──────────────┘    └──────────────┘             │    │
-│  │                                                                          │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │                         AgentWorkflow                                     │   │
+│  │                                                                           │   │
+│  │  • Embedded agent session (same harness as uira-agent)                   │   │
+│  │  • Full tool access: Read, Edit, Grep, Glob, Write, Bash                 │   │
+│  │  • Runs autonomously until <DONE/> is output                             │   │
+│  │  • Verification via re-detection (no remaining issues)                   │   │
+│  │  • Git diff-based modification tracking                                  │   │
+│  │                                                                           │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            AI Decision Flow                                      │
+│                           Model Providers                                        │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  1. Detect Issues         2. Present to AI          3. Apply Decision           │
+│    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                     │
+│    │  Anthropic   │    │   OpenAI     │    │   Gemini     │                     │
+│    │   Claude     │    │    GPT       │    │              │                     │
+│    └──────────────┘    └──────────────┘    └──────────────┘                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            Agent Workflow Loop                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Detect Issues         2. Agent Fixes            3. Verify & Complete        │
 │  ┌───────────────┐        ┌───────────────┐        ┌───────────────┐            │
-│  │ typos CLI     │───────▶│ "Should I fix │───────▶│ FIX → Apply   │            │
-│  │ lsp_diagnostics│       │  'teh'→'the'?│        │ IGNORE → Skip │            │
-│  │ comment-checker│       │  Context: ... │        │ SKIP → Next   │            │
+│  │ typos CLI     │───────▶│ Agent uses    │───────▶│ Re-detect     │            │
+│  │ lsp_diagnostics│       │ Read/Edit/Bash│        │ issues = 0?   │            │
+│  │ comment-checker│       │ to fix issues │        │ → <DONE/>     │            │
 │  └───────────────┘        └───────────────┘        └───────────────┘            │
 │                                                                                  │
 │  4. Stage Changes (--stage)    5. Continue/Fail Hook                            │
@@ -301,19 +295,16 @@ goals:
       target: 100.0
 
 # AI-Assisted Workflow Settings
+# The AgentWorkflow runs an embedded agent with full tool access.
+# Only model selection is needed - the agent handles everything autonomously.
 typos:
   ai:
     model: anthropic/claude-sonnet-4-20250514
-    host: 127.0.0.1
-    port: 4096
-    disable_tools: true    # Disable built-in tools for focused decisions
-    disable_mcp: true      # Disable MCP servers for faster responses
 
 diagnostics:
   ai:
     model: anthropic/claude-sonnet-4-20250514
-    severity: error                    # Default severity filter: error, warning, all
-    confidence_threshold: 0.8          # Skip FIX:LOW when threshold > 0.5
+    severity: error                    # Severity filter: error, warning, all
     languages: [js, ts, tsx, jsx, rs]  # Filter files by language
 
 comments:
@@ -325,16 +316,15 @@ comments:
 
 ### AI Workflow Configuration
 
+The AI workflow uses an embedded agent that runs autonomously until completion. Configuration is minimal - just specify the model and any task-specific options.
+
 | Section | Option | Default | Description |
 |---------|--------|---------|-------------|
-| `typos.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for typo decisions |
-| | `disable_tools` | `true` | Disable built-in tools |
-| | `disable_mcp` | `true` | Disable MCP servers |
-| `diagnostics.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for diagnostic decisions |
-| | `severity` | `error` | Default severity filter |
-| | `confidence_threshold` | `0.8` | Skip low-confidence fixes above threshold |
-| | `languages` | `[]` (all) | File extensions to check |
-| `comments.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for comment decisions |
+| `typos.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for typo fixing |
+| `diagnostics.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for diagnostic fixing |
+| | `severity` | `error` | Severity filter: error, warning, all |
+| | `languages` | `[js, ts, tsx, jsx]` | File extensions to check |
+| `comments.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for comment review |
 | | `pragma_format` | `@uira-allow` | Pragma for preserving comments |
 | | `include_docstrings` | `false` | Include docstrings in review |
 
