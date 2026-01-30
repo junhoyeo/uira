@@ -117,6 +117,7 @@ impl ToolCallRuntime {
         // Execute parallel tools concurrently
         if !parallel.is_empty() {
             let _guard = self.parallel_lock.read().await;
+            // Capture (idx, id) before spawning so we retain metadata if task panics
             let handles: Vec<_> = parallel
                 .into_iter()
                 .map(|(idx, (id, name, input))| {
@@ -127,17 +128,18 @@ impl ToolCallRuntime {
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
                     };
-                    tokio::spawn(async move {
-                        let result = router.dispatch(&name, input, &ctx).await;
-                        (idx, id, result)
-                    })
+                    let handle = tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
+                    (idx, id, handle)
                 })
                 .collect();
 
-            for handle in handles {
-                if let Ok((idx, id, result)) = handle.await {
-                    indexed_results.push((idx, id, result));
-                }
+            for (idx, id, handle) in handles {
+                let result = handle.await.unwrap_or_else(|e| {
+                    Err(ToolError::ExecutionFailed {
+                        message: format!("Task panicked: {}", e),
+                    })
+                });
+                indexed_results.push((idx, id, result));
             }
         }
 
