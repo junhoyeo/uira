@@ -6,7 +6,10 @@ use uira_context::ContextManager;
 use uira_protocol::{SessionId, TokenUsage};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
-use uira_tools::{create_builtin_router, ToolContext, ToolOrchestrator, ToolRouter};
+use uira_tools::{
+    create_builtin_router, AgentExecutor, AstToolProvider, DelegationToolProvider, LspToolProvider,
+    ToolContext, ToolOrchestrator, ToolRouter,
+};
 
 use crate::AgentConfig;
 
@@ -45,20 +48,46 @@ pub struct Session {
 
 impl Session {
     pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
+        Self::new_with_executor(config, client, None)
+    }
+
+    pub fn new_with_executor(
+        config: AgentConfig,
+        client: Arc<dyn ModelClient>,
+        executor: Option<Arc<dyn AgentExecutor>>,
+    ) -> Self {
         let cwd = config
             .working_directory
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-        let tool_router = Arc::new(create_builtin_router());
+        let mut tool_router = create_builtin_router();
+        tool_router.register_provider(Arc::new(LspToolProvider::new()));
+        tool_router.register_provider(Arc::new(AstToolProvider::new()));
+
+        let delegation_provider = match executor {
+            Some(exec) => DelegationToolProvider::with_executor(exec),
+            None => DelegationToolProvider::new(),
+        };
+        tool_router.register_provider(Arc::new(delegation_provider));
+
+        let tool_router = Arc::new(tool_router);
         let full_auto = Self::is_full_auto(&config);
         let orchestrator =
             ToolOrchestrator::new(tool_router.clone(), config.sandbox_policy.clone())
                 .with_full_auto(full_auto);
 
+        let mut context = ContextManager::new(client.max_tokens());
+
+        if let Some(ref system_prompt) = config.system_prompt {
+            if let Err(e) = context.add_message(uira_protocol::Message::system(system_prompt)) {
+                tracing::warn!("Failed to add system prompt: {}", e);
+            }
+        }
+
         Self {
             id: SessionId::new(),
-            context: ContextManager::new(client.max_tokens()),
+            context,
             sandbox: SandboxManager::new(config.sandbox_policy.clone()),
             tool_router,
             orchestrator,
@@ -105,5 +134,10 @@ impl Session {
     pub fn set_client(&mut self, client: Arc<dyn ModelClient>) {
         self.context = ContextManager::new(client.max_tokens());
         self.client = client;
+    }
+
+    /// Get tool specifications for the model API
+    pub fn tool_specs(&self) -> Vec<uira_protocol::ToolSpec> {
+        self.tool_router.specs()
     }
 }

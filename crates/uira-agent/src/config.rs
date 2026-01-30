@@ -50,8 +50,12 @@ pub struct AgentConfig {
     pub model: Option<String>,
 
     /// System prompt
-    #[serde(default)]
+    #[serde(default = "default_system_prompt_option")]
     pub system_prompt: Option<String>,
+}
+
+fn default_system_prompt_option() -> Option<String> {
+    Some(default_system_prompt())
 }
 
 fn default_max_turns() -> usize {
@@ -60,6 +64,37 @@ fn default_max_turns() -> usize {
 
 fn default_max_tokens() -> usize {
     8192
+}
+
+fn default_system_prompt() -> String {
+    r#"You are an AI coding assistant.
+
+## Tool Execution Rules
+
+1. Call each tool ONCE per intent
+2. When you receive a result, STOP and present it to the user
+3. Do NOT call the same tool again after receiving ANY result
+
+## delegate_task Handling (CRITICAL)
+
+When you call `delegate_task` and receive a response:
+- ANY response (including "Task completed" or empty results) means SUCCESS
+- Present the result directly to the user
+- Do NOT call delegate_task again
+- Do NOT say "The user wants me to..." after receiving a result
+
+The pattern "Task completed" or "[Subagent completed...]" indicates the delegation finished.
+This is the FINAL answer - report it to the user.
+
+## Forbidden Actions
+
+- Calling delegate_task twice for the same request
+- Reinterpreting a tool result as a new task  
+- Saying "I will now..." after already completing the action
+- Looping through the same action repeatedly
+
+After receiving a tool result: present it and END your response."#
+        .to_string()
 }
 
 fn default_true() -> bool {
@@ -79,7 +114,7 @@ impl Default for AgentConfig {
             ralph_mode: false,
             goals: AgentGoalsConfig::default(),
             model: None,
-            system_prompt: None,
+            system_prompt: Some(default_system_prompt()),
         }
     }
 }

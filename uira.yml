@@ -4,9 +4,9 @@ typos:
 
 agents:
   explore:
-    model: "opencode/gpt-5-nano"
+    model: "anthropic/claude-sonnet-4-20250514"
   librarian:
-    model: "opencode/big-pickle"
+    model: "anthropic/claude-sonnet-4-20250514"
 
 pre-commit:
   parallel: false  # fmt must run first to auto-fix before clippy checks

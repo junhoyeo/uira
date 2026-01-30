@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_protocol::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     Role, ThreadEvent, ToolCall,
@@ -36,12 +37,22 @@ pub struct Agent {
     input_rx: Option<mpsc::Receiver<String>>,
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
+    keyword_detector: KeywordDetectorHook,
+    last_tool_output: Option<String>,
 }
 
 impl Agent {
     pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
+        Self::new_with_executor(config, client, None)
+    }
+
+    pub fn new_with_executor(
+        config: AgentConfig,
+        client: Arc<dyn ModelClient>,
+        executor: Option<Arc<dyn uira_tools::AgentExecutor>>,
+    ) -> Self {
         Self {
-            session: Session::new(config, client),
+            session: Session::new_with_executor(config, client, executor),
             control: AgentControl::default(),
             state: AgentState::Idle,
             event_sender: None,
@@ -51,6 +62,8 @@ impl Agent {
             input_rx: None,
             approval_tx: None,
             command_rx: None,
+            keyword_detector: KeywordDetectorHook::new(),
+            last_tool_output: None,
         }
     }
 
@@ -236,18 +249,26 @@ impl Agent {
         self.rollout.as_ref().map(|r| r.path())
     }
 
-    /// Run the agent with the given prompt
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
         self.state = AgentState::Thinking;
 
-        // Emit thread started event
         self.emit_event(ThreadEvent::ThreadStarted {
             thread_id: self.session.id.to_string(),
         })
         .await;
 
-        // Add user message
-        let user_message = Message::user(prompt);
+        let effective_prompt =
+            if let Some(keyword_msg) = self.keyword_detector.detect_and_message(prompt) {
+                self.emit_event(ThreadEvent::ContentDelta {
+                    delta: format!("{}\n\n", keyword_msg),
+                })
+                .await;
+                format!("{}\n\n{}", keyword_msg, prompt)
+            } else {
+                prompt.to_string()
+            };
+
+        let user_message = Message::user(&effective_prompt);
         self.record_message(user_message.clone());
         self.session
             .context
@@ -281,12 +302,13 @@ impl Agent {
                 .await;
 
             // Get model response (streaming or blocking)
+            let tool_specs = self.session.tool_specs();
             let response = if self.streaming_enabled {
-                self.get_response_streaming().await?
+                self.get_response_streaming(&tool_specs).await?
             } else {
                 self.session
                     .client
-                    .chat(self.session.context.messages(), &[])
+                    .chat(self.session.context.messages(), &tool_specs)
                     .await
                     .map_err(AgentLoopError::Provider)?
             };
@@ -336,8 +358,17 @@ impl Agent {
                 })
                 .await;
 
+                let output = {
+                    let text = response.text();
+                    if text.is_empty() {
+                        self.last_tool_output.take().unwrap_or_default()
+                    } else {
+                        text
+                    }
+                };
+
                 return Ok(ExecutionResult::success(
-                    response.text(),
+                    output,
                     self.session.turn,
                     self.session.usage.clone(),
                 ));
@@ -348,11 +379,12 @@ impl Agent {
     /// Get model response with streaming, emitting ContentDelta events
     async fn get_response_streaming(
         &mut self,
+        tool_specs: &[uira_protocol::ToolSpec],
     ) -> Result<uira_protocol::ModelResponse, AgentLoopError> {
         let stream = self
             .session
             .client
-            .chat_stream(self.session.context.messages(), &[])
+            .chat_stream(self.session.context.messages(), tool_specs)
             .await
             .map_err(AgentLoopError::Provider)?;
 
@@ -412,12 +444,13 @@ impl Agent {
                     .await;
 
                 // Get model response (streaming or blocking)
+                let tool_specs = self.session.tool_specs();
                 let response = if self.streaming_enabled {
-                    self.get_response_streaming().await?
+                    self.get_response_streaming(&tool_specs).await?
                 } else {
                     self.session
                         .client
-                        .chat(self.session.context.messages(), &[])
+                        .chat(self.session.context.messages(), &tool_specs)
                         .await
                         .map_err(AgentLoopError::Provider)?
                 };
@@ -792,7 +825,10 @@ impl Agent {
                     let content = output.as_text().unwrap_or("").to_string();
                     results.push(ContentBlock::tool_result(&call.id, &content));
 
-                    // Record and emit tool result
+                    if !content.is_empty() {
+                        self.last_tool_output = Some(content.clone());
+                    }
+
                     self.record_tool_result(&call.id, &content, false);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {

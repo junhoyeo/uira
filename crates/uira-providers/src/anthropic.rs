@@ -284,6 +284,7 @@ impl AnthropicClient {
                     format!("Bearer {}", access_token.expose_secret()),
                 ),
                 ("anthropic-beta", OAUTH_BETA_FEATURES.to_string()),
+                ("anthropic-product", "claude-code".to_string()),
                 ("user-agent", OAUTH_USER_AGENT.to_string()),
             ]),
             CredentialSource::ApiKey(key) => {
@@ -306,13 +307,27 @@ impl AnthropicClient {
     ) -> AnthropicRequest {
         let (system, messages) = Self::extract_system(messages);
 
-        let system = if is_oauth {
-            Some(match system {
-                Some(existing) => format!("{}\n\n{}", CLAUDE_CODE_IDENTITY, existing),
-                None => CLAUDE_CODE_IDENTITY.to_string(),
-            })
+        let system_prompt = if is_oauth {
+            let mut blocks = vec![SystemBlock {
+                block_type: "text".to_string(),
+                text: CLAUDE_CODE_IDENTITY.to_string(),
+                cache_control: CacheControl {
+                    cache_type: "ephemeral".to_string(),
+                },
+            }];
+            if let Some(existing) = system {
+                let sanitized = Self::sanitize_system_for_oauth(&existing);
+                blocks.push(SystemBlock {
+                    block_type: "text".to_string(),
+                    text: sanitized,
+                    cache_control: CacheControl {
+                        cache_type: "ephemeral".to_string(),
+                    },
+                });
+            }
+            Some(SystemPrompt::Blocks(blocks))
         } else {
-            system
+            system.map(SystemPrompt::Text)
         };
 
         AnthropicRequest {
@@ -320,9 +335,9 @@ impl AnthropicClient {
             max_tokens: self.config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             messages: messages
                 .into_iter()
-                .map(|m| self.convert_message(m))
+                .map(|m| self.convert_message(m, is_oauth))
                 .collect(),
-            system,
+            system: system_prompt,
             tools: if tools.is_empty() {
                 None
             } else {
@@ -350,11 +365,19 @@ impl AnthropicClient {
         (system, rest)
     }
 
-    fn convert_message(&self, msg: &Message) -> AnthropicMessage {
+    fn convert_message(&self, msg: &Message, is_oauth: bool) -> AnthropicMessage {
         let role = match msg.role {
             Role::User | Role::Tool => "user",
             Role::Assistant => "assistant",
             Role::System => "user", // Should be filtered out
+        };
+
+        let maybe_prefix = |name: &str| -> String {
+            if is_oauth {
+                format!("{}{}", TOOL_PREFIX, name)
+            } else {
+                name.to_string()
+            }
         };
 
         let content = match &msg.content {
@@ -365,7 +388,7 @@ impl AnthropicClient {
                     ContentBlock::Text { text } => AnthropicContent::Text { text: text.clone() },
                     ContentBlock::ToolUse { id, name, input } => AnthropicContent::ToolUse {
                         id: id.clone(),
-                        name: name.clone(),
+                        name: maybe_prefix(name),
                         input: input.clone(),
                     },
                     ContentBlock::ToolResult {
@@ -393,7 +416,7 @@ impl AnthropicClient {
                 .iter()
                 .map(|c| AnthropicContent::ToolUse {
                     id: c.id.clone(),
-                    name: c.name.clone(),
+                    name: maybe_prefix(&c.name),
                     input: c.input.clone(),
                 })
                 .collect(),
@@ -444,6 +467,12 @@ impl AnthropicClient {
             .replace_all(text, r#""name": "$1""#)
             .to_string()
     }
+
+    fn sanitize_system_for_oauth(system: &str) -> String {
+        system
+            .replace("OpenCode", "Claude Code")
+            .replace("opencode", "Claude")
+    }
 }
 
 #[async_trait]
@@ -464,6 +493,13 @@ impl ModelClient for AnthropicClient {
         } else {
             format!("{}/v1/messages", self.base_url())
         };
+
+        tracing::debug!(
+            "AnthropicClient::chat: base_url={}, full_url={}, is_oauth={}",
+            self.base_url(),
+            url,
+            is_oauth
+        );
 
         let mut req = self.client.post(&url);
         for (key, value) in auth_headers {
@@ -675,13 +711,34 @@ struct AnthropicRequest {
     max_tokens: usize,
     messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<SystemPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ToolSpec>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum SystemPrompt {
+    Text(String),
+    Blocks(Vec<SystemBlock>),
+}
+
+#[derive(Debug, Serialize)]
+struct SystemBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    cache_control: CacheControl,
+}
+
+#[derive(Debug, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String,
 }
 
 #[derive(Debug, Serialize)]

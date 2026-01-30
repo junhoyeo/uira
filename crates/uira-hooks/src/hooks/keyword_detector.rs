@@ -143,6 +143,11 @@ impl KeywordDetectorHook {
 
         detected.first().cloned()
     }
+
+    pub fn detect_and_message(&self, text: &str) -> Option<&'static str> {
+        self.get_primary_keyword(text)
+            .map(|kw| kw.keyword_type.message())
+    }
 }
 
 impl Default for KeywordDetectorHook {

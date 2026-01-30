@@ -27,6 +27,10 @@ pub struct Cli {
     #[arg(long)]
     pub full_auto: bool,
 
+    /// Verbose output - show streaming events (tool calls, thinking, etc.)
+    #[arg(short, long)]
+    pub verbose: bool,
+
     /// Enable ralph mode for persistent task completion
     #[arg(long)]
     pub ralph: bool,

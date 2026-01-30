@@ -4,7 +4,7 @@ use clap::Parser;
 use colored::Colorize;
 use std::sync::Arc;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-use uira_agent::{Agent, AgentConfig};
+use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
 use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_protocol::ExecutionResult;
 use uira_providers::{
@@ -60,25 +60,109 @@ async fn run_exec(
     prompt: &str,
     json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    use futures::StreamExt;
+    use uira_protocol::{Item, ThreadEvent};
+
     let uira_config = uira_config::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, provider_config) =
+        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
     let agent_config = create_agent_config(cli, config, &agent_defs);
 
-    let mut agent = Agent::new(agent_config, client);
+    let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
+    let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
+    let agent = Agent::new_with_executor(agent_config, client, Some(executor));
 
     if !json_output {
         println!("{} {}", "Running:".cyan().bold(), prompt.dimmed());
+        println!();
     }
 
-    let result = agent.run(prompt).await?;
+    if cli.verbose {
+        let (mut agent, mut event_stream) = agent.with_event_stream();
 
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        let event_printer = tokio::spawn(async move {
+            while let Some(event) = event_stream.next().await {
+                match &event {
+                    ThreadEvent::TurnStarted { turn_number } => {
+                        println!("{}", format!("── Turn {} ──", turn_number).cyan());
+                    }
+                    ThreadEvent::ContentDelta { delta } => {
+                        print!("{}", delta);
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                    ThreadEvent::ThinkingDelta { thinking } => {
+                        print!("{} {}", "thinking:".magenta(), thinking.dimmed());
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                    ThreadEvent::ItemStarted {
+                        item: Item::ToolCall { name, .. },
+                    } => {
+                        println!("\n{} {}", "→".yellow(), name.yellow().bold());
+                    }
+                    ThreadEvent::ItemStarted { .. } => {}
+                    ThreadEvent::ItemCompleted {
+                        item: Item::ToolResult { output, .. },
+                    } => {
+                        println!("{}", output.dimmed());
+                    }
+                    ThreadEvent::ItemCompleted { .. } => {}
+                    ThreadEvent::TurnCompleted { turn_number, usage } => {
+                        println!(
+                            "\n{}\n",
+                            format!(
+                                "── Turn {} complete ({}in/{}out) ──",
+                                turn_number, usage.input_tokens, usage.output_tokens
+                            )
+                            .dimmed()
+                        );
+                    }
+                    ThreadEvent::Error { message, .. } => {
+                        println!("{}: {}", "Error".red().bold(), message);
+                    }
+                    ThreadEvent::ThreadCompleted { usage } => {
+                        println!(
+                            "{}",
+                            format!(
+                                "✓ completed (total: {}in/{}out)",
+                                usage.input_tokens, usage.output_tokens
+                            )
+                            .green()
+                        );
+                        break;
+                    }
+                    ThreadEvent::ThreadCancelled => {
+                        println!("{}", "Thread cancelled".yellow());
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let result = agent.run(prompt).await?;
+        let _ = event_printer.await;
+
+        println!();
+        println!("{}", "─".repeat(40).dimmed());
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            print_result(&result);
+        }
     } else {
-        print_result(&result);
+        let mut agent = agent;
+        let result = agent.run(prompt).await?;
+
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            print_result(&result);
+        }
     }
 
     Ok(())
@@ -685,7 +769,8 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, _provider_config) =
+        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
     let agent_config = create_agent_config(cli, config, &agent_defs);
 
     // Setup terminal
@@ -729,7 +814,7 @@ fn create_client(
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
     registry: &ModelRegistry,
     agent_model_overrides: &std::collections::HashMap<String, String>,
-) -> Result<Arc<dyn ModelClient>, Box<dyn std::error::Error>> {
+) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
     use secrecy::SecretString;
     use uira_protocol::Provider;
 
@@ -764,8 +849,8 @@ fn create_client(
                 ..Default::default()
             };
 
-            let client = AnthropicClient::new(provider_config)?;
-            Ok(Arc::new(client))
+            let client = AnthropicClient::new(provider_config.clone())?;
+            Ok((Arc::new(client), provider_config))
         }
         "openai" => {
             let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
@@ -777,8 +862,8 @@ fn create_client(
                 ..Default::default()
             };
 
-            let client = OpenAIClient::new(provider_config)?;
-            Ok(Arc::new(client))
+            let client = OpenAIClient::new(provider_config.clone())?;
+            Ok((Arc::new(client), provider_config))
         }
         "gemini" | "google" => {
             let api_key = std::env::var("GEMINI_API_KEY")
@@ -792,13 +877,13 @@ fn create_client(
                 ..Default::default()
             };
 
-            let client = GeminiClient::new(provider_config)?;
-            Ok(Arc::new(client))
+            let client = GeminiClient::new(provider_config.clone())?;
+            Ok((Arc::new(client), provider_config))
         }
         "ollama" => {
             let provider_config = ProviderConfig {
                 provider: Provider::Ollama,
-                api_key: None, // Ollama doesn't need API key
+                api_key: None,
                 model: model.unwrap_or_else(|| "llama3.1".to_string()),
                 base_url: Some(
                     std::env::var("OLLAMA_HOST")
@@ -807,8 +892,8 @@ fn create_client(
                 ..Default::default()
             };
 
-            let client = OllamaClient::new(provider_config)?;
-            Ok(Arc::new(client))
+            let client = OllamaClient::new(provider_config.clone())?;
+            Ok((Arc::new(client), provider_config))
         }
         "opencode" => {
             let api_key = std::env::var("OPENCODE_API_KEY")
@@ -822,8 +907,8 @@ fn create_client(
                 ..Default::default()
             };
 
-            let client = OpenCodeClient::new(provider_config)?;
-            Ok(Arc::new(client))
+            let client = OpenCodeClient::new(provider_config.clone())?;
+            Ok((Arc::new(client), provider_config))
         }
         _ => Err(format!("Unknown provider: {}", provider).into()),
     }
