@@ -12,7 +12,6 @@ use uira_protocol::{
     Role, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
-use uira_tools::RunOptions;
 
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
@@ -676,10 +675,9 @@ impl Agent {
     /// Execute tool calls and return results as content blocks
     ///
     /// This method handles approval flow at the Agent level:
-    /// 1. Check cancellation between tools
-    /// 2. Check approval requirement (unless full_auto mode)
-    /// 3. Request approval via the approval channel if needed
-    /// 4. Execute with skip_approval since we handled it here
+    /// 1. Check cancellation and approval for each tool (sequential - requires user interaction)
+    /// 2. Execute approved tools in parallel where possible (parallel-safe tools run concurrently)
+    /// 3. Emit results in original order
     async fn execute_tool_calls(
         &mut self,
         tool_calls: &[ToolCall],
@@ -687,13 +685,17 @@ impl Agent {
         let mut results = Vec::new();
         let ctx = self.session.tool_context();
 
+        // Phase 1: Check approvals sequentially (requires user interaction)
+        // Collect approved calls for parallel execution
+        let mut approved_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
+
         for call in tool_calls {
-            // 1. Check for cancellation between tools
+            // Check for cancellation between approval checks
             if self.control.is_cancelled() {
                 return Err(AgentLoopError::Cancelled);
             }
 
-            // 2. ALWAYS check for Forbidden tools (security critical)
+            // ALWAYS check for Forbidden tools (security critical)
             if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
                 let requirement = tool.approval_requirement(&call.input);
 
@@ -797,42 +799,48 @@ impl Agent {
                 }
             }
 
-            // Record and emit tool start
-            self.record_tool_call(&call.id, &call.name, &call.input);
+            // Tool is approved - add to batch for parallel execution
+            approved_calls.push((call.id.clone(), call.name.clone(), call.input.clone()));
+        }
+
+        // Phase 2: Emit tool start events (must be sequential for proper ordering)
+        for (id, name, input) in &approved_calls {
+            self.record_tool_call(id, name, input);
             self.emit_event(ThreadEvent::ItemStarted {
                 item: Item::ToolCall {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    input: call.input.clone(),
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
                 },
             })
             .await;
+        }
 
-            // 3. Execute the tool with skip_approval since we handled it above
-            let result = self
-                .session
-                .orchestrator
-                .run_with_options(
-                    &call.name,
-                    call.input.clone(),
-                    &ctx,
-                    RunOptions::skip_approval(),
-                )
-                .await;
+        // Phase 3: Execute tools in parallel where possible
+        // ToolCallRuntime handles read/write lock semantics:
+        // - Parallel-safe tools (Read, Glob, Grep): run concurrently with read lock
+        // - Mutating tools (Write, Edit, Bash): run exclusively with write lock
+        let execution_results = self
+            .session
+            .parallel_runtime
+            .execute_batch_with_ids(approved_calls, &ctx)
+            .await;
 
+        // Phase 4: Process results and emit events (must be sequential)
+        for (call_id, result) in execution_results {
             match result {
                 Ok(output) => {
                     let content = output.as_text().unwrap_or("").to_string();
-                    results.push(ContentBlock::tool_result(&call.id, &content));
+                    results.push(ContentBlock::tool_result(&call_id, &content));
 
                     if !content.is_empty() {
                         self.last_tool_output = Some(content.clone());
                     }
 
-                    self.record_tool_result(&call.id, &content, false);
+                    self.record_tool_result(&call_id, &content, false);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {
-                            tool_call_id: call.id.clone(),
+                            tool_call_id: call_id,
                             output: content,
                             is_error: false,
                         },
@@ -841,13 +849,12 @@ impl Agent {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                    results.push(ContentBlock::tool_error(&call_id, &error_msg));
 
-                    // Record and emit tool error
-                    self.record_tool_result(&call.id, &error_msg, true);
+                    self.record_tool_result(&call_id, &error_msg, true);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {
-                            tool_call_id: call.id.clone(),
+                            tool_call_id: call_id,
                             output: error_msg,
                             is_error: true,
                         },

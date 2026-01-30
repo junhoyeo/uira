@@ -8,7 +8,7 @@ use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
 use uira_tools::{
     create_builtin_router, AgentExecutor, AstToolProvider, DelegationToolProvider, LspToolProvider,
-    ToolContext, ToolOrchestrator, ToolRouter,
+    ToolCallRuntime, ToolContext, ToolOrchestrator, ToolRouter,
 };
 
 use crate::AgentConfig;
@@ -32,6 +32,9 @@ pub struct Session {
 
     /// Tool orchestrator
     pub orchestrator: ToolOrchestrator,
+
+    /// Parallel tool execution runtime
+    pub parallel_runtime: ToolCallRuntime,
 
     /// Model client
     pub client: Arc<dyn ModelClient>,
@@ -85,12 +88,15 @@ impl Session {
             }
         }
 
+        let parallel_runtime = ToolCallRuntime::new(tool_router.clone());
+
         Self {
             id: SessionId::new(),
             context,
             sandbox: SandboxManager::new(config.sandbox_policy.clone()),
             tool_router,
             orchestrator,
+            parallel_runtime,
             config,
             client,
             cwd,
