@@ -96,6 +96,67 @@ impl ToolCallRuntime {
     pub fn router(&self) -> &Arc<ToolRouter> {
         &self.router
     }
+
+    /// Execute multiple tool calls with IDs, respecting parallelism
+    /// Returns results in the same order as input calls
+    pub async fn execute_batch_with_ids(
+        &self,
+        calls: Vec<(String, String, serde_json::Value)>, // (id, name, input)
+        ctx: &ToolContext,
+    ) -> Vec<(String, Result<ToolOutput, ToolError>)> {
+        // Partition into parallel and sequential while preserving IDs
+        let (parallel, sequential): (Vec<_>, Vec<_>) = calls
+            .into_iter()
+            .enumerate()
+            .partition(|(_, (_, name, _))| self.router.tool_supports_parallel(name));
+
+        let total_count = parallel.len() + sequential.len();
+        let mut indexed_results: Vec<(usize, String, Result<ToolOutput, ToolError>)> =
+            Vec::with_capacity(total_count);
+
+        // Execute parallel tools concurrently
+        if !parallel.is_empty() {
+            let _guard = self.parallel_lock.read().await;
+            let handles: Vec<_> = parallel
+                .into_iter()
+                .map(|(idx, (id, name, input))| {
+                    let router = self.router.clone();
+                    let ctx = ToolContext {
+                        cwd: ctx.cwd.clone(),
+                        session_id: ctx.session_id.clone(),
+                        full_auto: ctx.full_auto,
+                        env: ctx.env.clone(),
+                    };
+                    tokio::spawn(async move {
+                        let result = router.dispatch(&name, input, &ctx).await;
+                        (idx, id, result)
+                    })
+                })
+                .collect();
+
+            for handle in handles {
+                if let Ok((idx, id, result)) = handle.await {
+                    indexed_results.push((idx, id, result));
+                }
+            }
+        }
+
+        // Execute sequential tools one at a time
+        for (idx, (id, name, input)) in sequential {
+            let _guard = self.parallel_lock.write().await;
+            let result = self.router.dispatch(&name, input, ctx).await;
+            indexed_results.push((idx, id, result));
+        }
+
+        // Sort by original index to preserve order
+        indexed_results.sort_by_key(|(idx, _, _)| *idx);
+
+        // Return just (id, result)
+        indexed_results
+            .into_iter()
+            .map(|(_, id, result)| (id, result))
+            .collect()
+    }
 }
 
 #[cfg(test)]
