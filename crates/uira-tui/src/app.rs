@@ -13,9 +13,13 @@ use ratatui::{
 use std::io::Stdout;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uira_agent::{Agent, AgentConfig, ApprovalReceiver};
+use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
+use uira_protocol::Provider;
 use uira_protocol::{AgentState, Item, ThreadEvent};
-use uira_providers::ModelClient;
+use uira_providers::{
+    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
+    ProviderConfig, SecretString,
+};
 
 use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
 use crate::widgets::ChatMessage;
@@ -72,6 +76,96 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     lines
 }
 
+/// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
+fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
+    let (provider, model) = model_str
+        .split_once('/')
+        .unwrap_or(("anthropic", model_str));
+
+    match provider {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::Anthropic,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            AnthropicClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "openai" => {
+            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::OpenAI,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            OpenAIClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "google" | "gemini" => {
+            let api_key = std::env::var("GEMINI_API_KEY")
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::Google,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            GeminiClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "ollama" => {
+            let config = ProviderConfig {
+                provider: Provider::Ollama,
+                api_key: None,
+                model: model.to_string(),
+                base_url: Some(
+                    std::env::var("OLLAMA_HOST")
+                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                ),
+                ..Default::default()
+            };
+
+            OllamaClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "opencode" => {
+            let api_key = std::env::var("OPENCODE_API_KEY")
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::OpenCode,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            OpenCodeClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        _ => Err(format!("Unknown provider: {}", provider)),
+    }
+}
+
 /// Spawn a task that handles approval requests from the agent
 fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sender<AppEvent>) {
     tokio::spawn(async move {
@@ -114,6 +208,7 @@ pub struct App {
     approval_overlay: ApprovalOverlay,
     model_selector: ModelSelector,
     agent_input_tx: Option<mpsc::Sender<String>>,
+    agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
 }
 
@@ -136,6 +231,7 @@ impl App {
             approval_overlay: ApprovalOverlay::new(),
             model_selector: ModelSelector::new(),
             agent_input_tx: None,
+            agent_command_tx: None,
             current_model: None,
         }
     }
@@ -178,19 +274,17 @@ impl App {
         Ok(())
     }
 
-    /// Run with an agent for interactive mode
     pub async fn run_with_agent(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
     ) -> std::io::Result<()> {
-        // Create agent with event streaming and interactive channels
         let (agent, event_stream) = Agent::new(config, client).with_event_stream();
-        let (mut agent, input_tx, approval_rx) = agent.with_interactive();
+        let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
-        // Store input sender for sending user prompts
         self.agent_input_tx = Some(input_tx);
+        self.agent_command_tx = Some(command_tx);
 
         // Spawn event handler - forwards agent events to app
         let event_tx = self.event_tx.clone();
@@ -449,18 +543,9 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) {
-        // Model selector takes priority for key handling
         if self.model_selector.is_active() {
             if let Some(selected_model) = self.model_selector.handle_key(key.code) {
-                self.current_model = Some(selected_model.clone());
-                self.status = format!("Model: {}", selected_model);
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!(
-                        "Switched to model: {}\nNote: Model change takes effect on next request.",
-                        selected_model
-                    ),
-                });
+                self.switch_model(&selected_model);
             }
             return;
         }
@@ -619,20 +704,22 @@ impl App {
             }
             "/model" => {
                 if let Some(model_name) = parts.get(1) {
-                    let found = MODEL_GROUPS
-                        .iter()
-                        .any(|group| group.models.contains(model_name));
+                    let full_model = if model_name.contains('/') {
+                        (*model_name).to_string()
+                    } else {
+                        MODEL_GROUPS
+                            .iter()
+                            .find(|group| group.models.contains(model_name))
+                            .map(|group| format!("{}/{}", group.provider, model_name))
+                            .unwrap_or_else(|| (*model_name).to_string())
+                    };
 
-                    if found {
-                        self.current_model = Some((*model_name).to_string());
-                        self.status = format!("Model: {}", model_name);
-                        self.messages.push(ChatMessage {
-                            role: "system".to_string(),
-                            content: format!(
-                                "Switched to model: {}\nNote: Model change takes effect on next request.",
-                                model_name
-                            ),
-                        });
+                    let is_known = MODEL_GROUPS
+                        .iter()
+                        .any(|group| group.models.iter().any(|m| full_model.ends_with(m)));
+
+                    if is_known || model_name.contains('/') {
+                        self.switch_model(&full_model);
                     } else {
                         self.messages.push(ChatMessage {
                             role: "system".to_string(),
@@ -893,9 +980,12 @@ impl App {
                 let status = if success { "completed" } else { "failed" };
                 self.push_message("system", format!("Background task {}: {}", task_id, status));
             }
-            // Catch-all for unknown variants (due to #[non_exhaustive])
+            ThreadEvent::ModelSwitched { model, provider } => {
+                self.status = format!("Model: {}/{}", provider, model);
+                self.push_message("system", format!("Switched to {}/{}", provider, model));
+            }
             _ => {
-                tracing::debug!("Unknown ThreadEvent variant");
+                tracing::debug!("Unhandled ThreadEvent variant");
             }
         }
     }
@@ -917,6 +1007,44 @@ impl App {
     /// Set the agent state
     pub fn set_agent_state(&mut self, state: AgentState) {
         self.agent_state = state;
+    }
+
+    fn switch_model(&mut self, model_str: &str) {
+        self.current_model = Some(model_str.to_string());
+        self.status = format!("Switching to {}...", model_str);
+
+        match create_client_for_model(model_str) {
+            Ok(new_client) => {
+                if let Some(ref tx) = self.agent_command_tx {
+                    let tx = tx.clone();
+                    let model_str = model_str.to_string();
+                    tokio::spawn(async move {
+                        if tx
+                            .send(AgentCommand::SwitchClient(new_client))
+                            .await
+                            .is_err()
+                        {
+                            tracing::warn!("Failed to send model switch command for {}", model_str);
+                        }
+                    });
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
+                            model_str
+                        ),
+                    });
+                }
+            }
+            Err(e) => {
+                self.status = "Model switch failed".to_string();
+                self.messages.push(ChatMessage {
+                    role: "error".to_string(),
+                    content: format!("Failed to create client for {}: {}", model_str, e),
+                });
+            }
+        }
     }
 }
 

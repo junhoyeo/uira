@@ -18,32 +18,27 @@ use crate::{
     events::{EventSender, EventStream},
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
-    AgentConfig, AgentControl, AgentLoopError, Session,
+    AgentCommand, AgentConfig, AgentControl, AgentLoopError, CommandReceiver, CommandSender,
+    Session,
 };
 
 /// Timeout for approval requests (5 minutes)
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// The main agent that orchestrates the conversation loop
 pub struct Agent {
     session: Session,
     control: AgentControl,
     state: AgentState,
     event_sender: Option<EventSender>,
-    /// Pending tool calls for step-by-step execution
     pending_tool_calls: Option<Vec<ToolCall>>,
-    /// Rollout recorder for session persistence
     rollout: Option<RolloutRecorder>,
-    /// Whether to use streaming for model responses
     streaming_enabled: bool,
-    /// Channel to receive user input (for interactive mode)
     input_rx: Option<mpsc::Receiver<String>>,
-    /// Channel to send approval requests (for interactive mode)
     approval_tx: Option<ApprovalSender>,
+    command_rx: Option<CommandReceiver>,
 }
 
 impl Agent {
-    /// Create a new agent with the given configuration and model client
     pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
         Self {
             session: Session::new(config, client),
@@ -55,6 +50,7 @@ impl Agent {
             streaming_enabled: true,
             input_rx: None,
             approval_tx: None,
+            command_rx: None,
         }
     }
 
@@ -87,52 +83,65 @@ impl Agent {
         self
     }
 
-    /// Enable interactive mode with input and approval channels
-    ///
-    /// Returns the input sender and approval receiver for the TUI to use.
-    pub fn with_interactive(mut self) -> (Self, mpsc::Sender<String>, ApprovalReceiver) {
-        // Create input channel (user prompts)
+    pub fn with_interactive(
+        mut self,
+    ) -> (Self, mpsc::Sender<String>, ApprovalReceiver, CommandSender) {
         let (input_tx, input_rx) = mpsc::channel(10);
         self.input_rx = Some(input_rx);
 
-        // Create approval channel
         let (approval_tx, approval_rx) = approval_channel(10);
         self.approval_tx = Some(approval_tx);
 
-        (self, input_tx, approval_rx)
+        let (command_tx, command_rx) = mpsc::channel(10);
+        self.command_rx = Some(command_rx);
+
+        (self, input_tx, approval_rx, command_tx)
     }
 
-    /// Run in interactive mode, waiting for user input from channel
-    ///
-    /// This method loops forever, waiting for user prompts and processing them.
-    /// It emits events for the TUI to display and handles approvals via the approval channel.
     pub async fn run_interactive(&mut self) -> Result<(), AgentLoopError> {
-        // Take the input receiver
         let mut input_rx = self
             .input_rx
             .take()
             .ok_or_else(|| AgentLoopError::Io("No input channel configured".to_string()))?;
 
-        // Emit that we're ready
+        let mut command_rx = self.command_rx.take();
+
         self.state = AgentState::WaitingForUser;
         self.emit_event(ThreadEvent::WaitingForInput {
             prompt: "Ready for input...".to_string(),
         })
         .await;
 
-        // Main interactive loop
         loop {
-            // Wait for user input
-            let prompt = match input_rx.recv().await {
-                Some(p) => p,
-                None => {
-                    // Channel closed, exit gracefully
-                    tracing::info!("Input channel closed, exiting interactive mode");
-                    break;
+            let prompt = tokio::select! {
+                Some(cmd) = async {
+                    match &mut command_rx {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    match cmd {
+                        AgentCommand::SwitchClient(new_client) => {
+                            let model = new_client.model().to_string();
+                            let provider = new_client.provider().to_string();
+                            self.session.set_client(new_client);
+                            tracing::info!("Switched to {} ({})", model, provider);
+                            self.emit_event(ThreadEvent::ModelSwitched { model, provider }).await;
+                        }
+                    }
+                    continue;
+                }
+                input = input_rx.recv() => {
+                    match input {
+                        Some(p) => p,
+                        None => {
+                            tracing::info!("Input channel closed, exiting interactive mode");
+                            break;
+                        }
+                    }
                 }
             };
 
-            // Check for quit command
             if prompt.trim().eq_ignore_ascii_case("/quit")
                 || prompt.trim().eq_ignore_ascii_case("/exit")
             {
@@ -140,7 +149,6 @@ impl Agent {
                 break;
             }
 
-            // Run a single conversation turn
             match self.run(&prompt).await {
                 Ok(result) => {
                     tracing::debug!(
@@ -163,7 +171,6 @@ impl Agent {
                 }
             }
 
-            // Reset state for next input
             self.state = AgentState::WaitingForUser;
             self.emit_event(ThreadEvent::WaitingForInput {
                 prompt: "Ready for input...".to_string(),

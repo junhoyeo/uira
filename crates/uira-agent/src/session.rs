@@ -100,4 +100,10 @@ impl Session {
     pub fn is_max_turns_exceeded(&self) -> bool {
         self.turn >= self.config.max_turns
     }
+
+    /// Switch to a new model client
+    pub fn set_client(&mut self, client: Arc<dyn ModelClient>) {
+        self.context = ContextManager::new(client.max_tokens());
+        self.client = client;
+    }
 }

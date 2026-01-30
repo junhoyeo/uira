@@ -99,6 +99,9 @@ pub enum ThreadEvent {
         result_preview: Option<String>,
         duration_secs: f64,
     },
+
+    /// Model was switched at runtime
+    ModelSwitched { model: String, provider: String },
 }
 
 /// Item types that can be processed
