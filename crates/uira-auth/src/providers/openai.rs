@@ -6,9 +6,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-const AUTHORIZE_URL: &str = "https://auth.openai.com/authorize";
+const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-const REDIRECT_URI: &str = "http://localhost:8765/callback";
+const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+const OAUTH_PORT: u16 = 1455;
+
+/// OpenAI Codex CLI OAuth Client ID (public, used by OpenCode/Codex CLI)
+const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
 #[derive(Debug, Clone)]
 pub struct OpenAIAuth {
@@ -50,14 +54,19 @@ impl Default for OpenAIAuth {
 impl OpenAIAuth {
     pub fn new() -> Self {
         Self {
-            client_id: None,
+            client_id: Some(OPENAI_CODEX_CLIENT_ID.to_string()),
             redirect_uri: REDIRECT_URI.to_string(),
             scopes: vec![
                 "openid".to_string(),
                 "profile".to_string(),
                 "email".to_string(),
+                "offline_access".to_string(),
             ],
         }
+    }
+
+    pub fn oauth_port() -> u16 {
+        OAUTH_PORT
     }
 
     pub fn with_oauth(client_id: String) -> Self {
@@ -68,6 +77,7 @@ impl OpenAIAuth {
                 "openid".to_string(),
                 "profile".to_string(),
                 "email".to_string(),
+                "offline_access".to_string(),
             ],
         }
     }
@@ -193,13 +203,16 @@ impl AuthProvider for OpenAIAuth {
 
         auth_url
             .query_pairs_mut()
+            .append_pair("response_type", "code")
             .append_pair("client_id", client_id)
             .append_pair("redirect_uri", &self.redirect_uri)
-            .append_pair("response_type", "code")
             .append_pair("scope", &self.scopes.join(" "))
             .append_pair("code_challenge", &pkce.challenge)
             .append_pair("code_challenge_method", "S256")
-            .append_pair("state", &state);
+            .append_pair("id_token_add_organizations", "true")
+            .append_pair("codex_cli_simplified_flow", "true")
+            .append_pair("state", &state)
+            .append_pair("originator", "uira");
 
         Ok(OAuthChallenge {
             url: auth_url.to_string(),

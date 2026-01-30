@@ -405,13 +405,16 @@ impl App {
     }
 
     fn submit_input(&mut self, input: String) {
-        // Add user message to chat
+        if input.starts_with('/') {
+            self.handle_slash_command(&input);
+            return;
+        }
+
         self.messages.push(ChatMessage {
             role: "user".to_string(),
             content: input.clone(),
         });
 
-        // Send input to agent if connected
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -423,6 +426,47 @@ impl App {
             self.agent_state = AgentState::Thinking;
         } else {
             self.status = "No agent connected".to_string();
+        }
+    }
+
+    fn handle_slash_command(&mut self, input: &str) {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command = parts.first().copied().unwrap_or("");
+
+        match command {
+            "/exit" | "/quit" | "/q" => {
+                self.should_quit = true;
+            }
+            "/help" | "/h" | "/?" => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: "Available commands:\n  /help, /h, /?  - Show this help\n  /exit, /quit, /q - Exit the application\n  /auth, /status - Show current status\n  /clear - Clear chat history".to_string(),
+                });
+            }
+            "/auth" | "/status" => {
+                let status_msg = if self.agent_input_tx.is_some() {
+                    "Agent connected"
+                } else {
+                    "No agent connected"
+                };
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
+                });
+            }
+            "/clear" => {
+                self.messages.clear();
+                self.status = "Chat cleared".to_string();
+            }
+            _ => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "Unknown command: {}. Type /help for available commands.",
+                        command
+                    ),
+                });
+            }
         }
     }
 

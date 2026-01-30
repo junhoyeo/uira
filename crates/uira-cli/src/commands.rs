@@ -91,8 +91,8 @@ pub enum Commands {
 pub enum AuthCommands {
     /// Login to a provider
     Login {
-        /// Provider to login to
-        provider: String,
+        /// Provider to login to (omit to see available providers)
+        provider: Option<String>,
     },
     /// Logout from a provider
     Logout {
