@@ -1,0 +1,34 @@
+[package]
+name = "uira-providers"
+description = "Model provider clients (Anthropic, OpenAI) with streaming support for Uira agent harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-protocol = { workspace = true }
+uira-auth = { path = "../uira-auth" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+futures = { workspace = true }
+async-trait = "0.1"
+async-stream = { workspace = true }
+bytes = "1"
+eventsource-stream = "0.2"
+pin-project-lite = "0.2"
+tracing = "0.1"
+secrecy = "0.10"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+chrono = { workspace = true }
+regex = "1"
+lazy_static = "1"
+
+[dev-dependencies]
+tokio = { workspace = true }
+wiremock = "0.6"

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uira_sdk::{AgentConfig, AgentOverrides, ModelType};
 
 use crate::config::apply_overrides;
-use crate::prompt_loader::{default_agents_dir, PromptLoader};
+use crate::prompt_loader::PromptLoader;
 use crate::tool_restrictions::ToolRestrictionsRegistry;
 
 /// Model configuration for agents (maps agent name to model ID string)
@@ -11,10 +11,9 @@ pub type AgentModelConfig = HashMap<String, String>;
 
 /// Returns all agent definitions with their configurations.
 ///
-/// This builds the full agent config map. Prompts are loaded from
-/// `packages/uira/claude-plugin/agents/{name}.md` by default.
+/// This builds the full agent config map using embedded prompts by default.
 pub fn get_agent_definitions(overrides: Option<&AgentOverrides>) -> HashMap<String, AgentConfig> {
-    let loader = PromptLoader::from_fs(default_agents_dir());
+    let loader = PromptLoader::from_embedded_map(crate::prompts::EMBEDDED_PROMPTS);
     get_agent_definitions_with_loader(&loader, overrides, None)
 }
 
@@ -26,7 +25,7 @@ pub fn get_agent_definitions_with_config(
     overrides: Option<&AgentOverrides>,
     model_config: Option<&AgentModelConfig>,
 ) -> HashMap<String, AgentConfig> {
-    let loader = PromptLoader::from_fs(default_agents_dir());
+    let loader = PromptLoader::from_embedded_map(crate::prompts::EMBEDDED_PROMPTS);
     get_agent_definitions_with_loader(&loader, overrides, model_config)
 }
 

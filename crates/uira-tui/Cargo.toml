@@ -1,0 +1,25 @@
+[package]
+name = "uira-tui"
+description = "Ratatui-based terminal UI with approval overlay and syntax highlighting for Uira agent harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-protocol = { workspace = true }
+uira-agent = { workspace = true }
+uira-providers = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+ratatui = "0.29"
+crossterm = "0.28"
+tui-textarea = "0.7"
+syntect = "5"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { workspace = true }

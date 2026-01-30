@@ -289,16 +289,10 @@ pub fn reset_session_token_estimate(session_id: &str) {
 }
 
 fn extract_tool_response_text(tool_output: &serde_json::Value) -> Option<String> {
-    // uira-core ToolResponse shape: { output?: string }
+    // ToolResponse shape: { output?: string }
     if let Some(obj) = tool_output.as_object() {
         if let Some(output) = obj.get("output").and_then(|v| v.as_str()) {
             return Some(output.to_string());
-        }
-        // legacy-ish: { tool_response: { output } }
-        if let Some(inner) = obj.get("tool_response") {
-            if let Some(output) = inner.get("output").and_then(|v| v.as_str()) {
-                return Some(output.to_string());
-            }
         }
     }
     tool_output.as_str().map(|s| s.to_string())
