@@ -48,8 +48,22 @@ impl SessionStorage {
         Ok(data_dir.join("uira").join("sessions"))
     }
 
+    fn validate_session_id(session_id: &str) -> std::io::Result<()> {
+        if session_id.contains(['/', '\\', '\0'])
+            || session_id.contains("..")
+            || session_id.is_empty()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid session ID: contains path separators or parent directory references",
+            ));
+        }
+        Ok(())
+    }
+
     /// Load a session by ID
     pub fn load(&self, session_id: &str) -> std::io::Result<StoredSession> {
+        Self::validate_session_id(session_id)?;
         let session_path = self.sessions_dir.join(format!("{}.json", session_id));
         let content = std::fs::read_to_string(session_path)?;
         serde_json::from_str(&content)

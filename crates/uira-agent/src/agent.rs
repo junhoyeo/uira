@@ -654,7 +654,6 @@ impl Agent {
                     match requirement {
                         ApprovalRequirement::NeedsApproval { reason } => {
                             if let Some(ref approval_tx) = self.approval_tx {
-                                // Emit approval request event for TUI display
                                 self.emit_event(ThreadEvent::ItemStarted {
                                     item: Item::ApprovalRequest {
                                         id: call.id.clone(),
@@ -665,7 +664,6 @@ impl Agent {
                                 })
                                 .await;
 
-                                // Request approval with timeout via the Agent's channel
                                 let decision = timeout(
                                     APPROVAL_TIMEOUT,
                                     approval_tx.request_approval(
@@ -683,7 +681,6 @@ impl Agent {
                                     }
                                 })??;
 
-                                // Emit approval decision event
                                 self.emit_event(ThreadEvent::ItemCompleted {
                                     item: Item::ApprovalDecision {
                                         request_id: call.id.clone(),
@@ -692,7 +689,6 @@ impl Agent {
                                 })
                                 .await;
 
-                                // If denied, add error result and continue to next tool
                                 if decision.is_denied() {
                                     let deny_reason =
                                         if let uira_protocol::ReviewDecision::Deny { reason } =
@@ -717,6 +713,14 @@ impl Agent {
                                     .await;
                                     continue;
                                 }
+                            } else {
+                                let error_msg = format!(
+                                    "Tool '{}' requires approval but no approval channel is configured",
+                                    call.name
+                                );
+                                results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                                self.record_tool_result(&call.id, &error_msg, true);
+                                continue;
                             }
                         }
                         ApprovalRequirement::Forbidden { reason } => {

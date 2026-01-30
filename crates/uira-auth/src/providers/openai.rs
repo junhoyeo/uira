@@ -186,6 +186,7 @@ impl AuthProvider for OpenAIAuth {
             .ok_or_else(|| AuthError::OAuthFailed("Client ID not configured".to_string()))?;
 
         let pkce = generate_pkce();
+        let state = uuid::Uuid::new_v4().to_string();
 
         let mut auth_url =
             Url::parse(AUTHORIZE_URL).map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
@@ -197,12 +198,13 @@ impl AuthProvider for OpenAIAuth {
             .append_pair("response_type", "code")
             .append_pair("scope", &self.scopes.join(" "))
             .append_pair("code_challenge", &pkce.challenge)
-            .append_pair("code_challenge_method", "S256");
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("state", &state);
 
         Ok(OAuthChallenge {
             url: auth_url.to_string(),
             verifier: pkce.verifier,
-            state: uuid::Uuid::new_v4().to_string(),
+            state,
         })
     }
 

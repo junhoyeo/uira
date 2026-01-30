@@ -33,15 +33,29 @@ impl CredentialStore {
 
         let content = serde_json::to_string_pretty(self)?;
 
-        std::fs::write(&path, content)
-            .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
-
+        // Write with restrictive permissions atomically to avoid race condition
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path)?.permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&path, perms)?;
+            use std::fs::OpenOptions;
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .map_err(|e| AuthError::StorageError(format!("Failed to create file: {}", e)))?;
+
+            file.write_all(content.as_bytes())
+                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&path, content)
+                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
         }
 
         Ok(())
