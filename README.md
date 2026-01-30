@@ -305,7 +305,8 @@ diagnostics:
   ai:
     model: anthropic/claude-sonnet-4-20250514
     severity: error                    # Severity filter: error, warning, all
-    languages: [js, ts, tsx, jsx, rs]  # Filter files by language
+    confidence_threshold: 0.8          # Minimum confidence to apply fixes
+    languages: [js, ts, tsx, jsx]      # Languages to check
 
 comments:
   ai:
@@ -322,11 +323,12 @@ The AI workflow uses an embedded agent that runs autonomously until completion. 
 |---------|--------|---------|-------------|
 | `typos.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for typo fixing |
 | `diagnostics.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for diagnostic fixing |
-| | `severity` | `error` | Severity filter: error, warning, all |
-| | `languages` | `[js, ts, tsx, jsx]` | File extensions to check |
+| `diagnostics.ai` | `severity` | `error` | Severity filter: error, warning, all |
+| `diagnostics.ai` | `confidence_threshold` | `0.8` | Minimum confidence to apply fixes |
+| `diagnostics.ai` | `languages` | `[js, ts, tsx, jsx]` | Languages to check |
 | `comments.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for comment review |
-| | `pragma_format` | `@uira-allow` | Pragma for preserving comments |
-| | `include_docstrings` | `false` | Include docstrings in review |
+| `comments.ai` | `pragma_format` | `@uira-allow` | Pragma for preserving comments |
+| `comments.ai` | `include_docstrings` | `false` | Include docstrings in review |
 
 ## Multi-Provider Model Routing
 
