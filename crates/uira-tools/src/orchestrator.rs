@@ -98,9 +98,6 @@ impl ToolOrchestrator {
             .await
     }
 
-    /// Run a tool with custom options
-    ///
-    /// Use this when the caller has already handled approval (e.g., Agent layer).
     pub async fn run_with_options(
         &self,
         tool_name: &str,
@@ -108,12 +105,15 @@ impl ToolOrchestrator {
         ctx: &ToolContext,
         options: RunOptions,
     ) -> Result<ToolOutput, ToolError> {
-        let tool = self
-            .router
-            .get(tool_name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: tool_name.to_string(),
-            })?;
+        // Check if tool is a direct tool or provider-backed
+        let direct_tool = self.router.get(tool_name);
+
+        // If no direct tool, try dispatch to providers
+        if direct_tool.is_none() {
+            return self.router.dispatch(tool_name, input, ctx).await;
+        }
+
+        let tool = direct_tool.unwrap();
 
         // 1. Check approval requirement (unless skipped by options)
         if !options.skip_approval {
