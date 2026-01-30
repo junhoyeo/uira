@@ -24,4 +24,5 @@ pub use gemini::GeminiClient;
 pub use ollama::OllamaClient;
 pub use openai::OpenAIClient;
 pub use opencode::OpenCodeClient;
+pub use secrecy::SecretString;
 pub use traits::{ModelClient, ModelResult, ResponseStream};

@@ -64,11 +64,17 @@ pub struct StreamController {
 
     /// Whether stream has finished
     finished: bool,
+
+    /// Enable verbose debug logging
+    debug: bool,
 }
 
 impl StreamController {
-    /// Create a new stream controller
     pub fn new() -> Self {
+        Self::with_debug(false)
+    }
+
+    pub fn with_debug(debug: bool) -> Self {
         Self {
             pending_text: String::new(),
             committed_lines: Vec::new(),
@@ -85,6 +91,7 @@ impl StreamController {
             model: None,
             usage: TokenUsage::default(),
             finished: false,
+            debug,
         }
     }
 
@@ -176,7 +183,14 @@ impl StreamController {
             }
 
             StreamChunk::MessageStop => {
-                tracing::debug!("MessageStop");
+                if self.debug {
+                    tracing::debug!(
+                        "MessageStop: pending_text={:?}, committed_lines={:?}, is_text_block={}, current_block_index={:?}, content_blocks_len={}",
+                        self.pending_text, self.committed_lines, self.is_text_block, self.current_block_index, self.content_blocks.len()
+                    );
+                } else {
+                    tracing::debug!("MessageStop");
+                }
                 self.finished = true;
                 self.drain_pending()
             }
@@ -210,8 +224,8 @@ impl StreamController {
         if self.pending_text.is_empty() {
             vec![]
         } else {
-            let line = std::mem::take(&mut self.pending_text);
-            vec![StreamOutput::Text(line)]
+            // Return a clone for UI streaming, but keep the original for into_response()
+            vec![StreamOutput::Text(self.pending_text.clone())]
         }
     }
 
@@ -293,20 +307,18 @@ impl StreamController {
         text
     }
 
-    /// Build final response from accumulated data
     pub fn into_response(mut self) -> ModelResponse {
-        tracing::debug!(
-            "into_response: committed_lines={:?}, pending_text={:?}, pending_in_block={}, content_blocks={:?}, current_block_index={:?}",
-            self.committed_lines, self.pending_text, self.pending_in_block, self.content_blocks, self.current_block_index
-        );
+        if self.debug {
+            tracing::debug!(
+                "into_response: committed_lines={:?}, pending_text={:?}, pending_in_block={}, content_blocks={:?}, current_block_index={:?}",
+                self.committed_lines, self.pending_text, self.pending_in_block, self.content_blocks, self.current_block_index
+            );
+        }
 
-        // Ensure any in-progress block is finalized
         if self.current_block_index.is_some() {
             self.finalize_current_block();
         }
 
-        // Handle any remaining text that wasn't part of a finalized block
-        // Only add if pending_text wasn't already included in a block
         if !self.committed_lines.is_empty()
             || (!self.pending_text.is_empty() && !self.pending_in_block)
         {
@@ -322,10 +334,12 @@ impl StreamController {
             }
         }
 
-        tracing::debug!(
-            "into_response: final content_blocks={:?}",
-            self.content_blocks
-        );
+        if self.debug {
+            tracing::debug!(
+                "into_response: final content_blocks={:?}",
+                self.content_blocks
+            );
+        }
 
         ModelResponse {
             id: self.message_id.unwrap_or_default(),

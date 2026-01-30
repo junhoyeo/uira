@@ -81,6 +81,19 @@ impl AnthropicClient {
     }
 
     fn load_credential(config: &ProviderConfig) -> Result<CredentialSource, ProviderError> {
+        // First check for API key (higher priority for reliability)
+        if let Some(api_key) = &config.api_key {
+            tracing::debug!("Using API key from config");
+            return Ok(CredentialSource::ApiKey(api_key.clone()));
+        }
+
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            tracing::debug!("Using API key from ANTHROPIC_API_KEY env var");
+            return Ok(CredentialSource::ApiKey(SecretString::from(key)));
+        }
+
+        // Fall back to stored credentials (OAuth or stored API key)
+        tracing::debug!("No API key found, checking stored credentials");
         if let Ok(store) = CredentialStore::load() {
             if let Some(cred) = store.get(PROVIDER_NAME) {
                 use uira_auth::secrecy::ExposeSecret as AuthExposeSecret;
@@ -110,14 +123,6 @@ impl AnthropicClient {
             }
         }
 
-        if let Some(api_key) = &config.api_key {
-            return Ok(CredentialSource::ApiKey(api_key.clone()));
-        }
-
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            return Ok(CredentialSource::ApiKey(SecretString::from(key)));
-        }
-
         Err(ProviderError::Configuration(
             "No Anthropic credentials found. Set ANTHROPIC_API_KEY or authenticate via OAuth."
                 .into(),
@@ -128,7 +133,13 @@ impl AnthropicClient {
         match expires_at {
             Some(exp) => {
                 let now = Utc::now().timestamp();
-                now >= (exp - TOKEN_REFRESH_BUFFER_SECS)
+                // Handle both seconds and milliseconds formats
+                let exp_secs = if exp > 1_000_000_000_000 {
+                    exp / 1000 // Convert milliseconds to seconds
+                } else {
+                    exp
+                };
+                now >= (exp_secs - TOKEN_REFRESH_BUFFER_SECS)
             }
             None => false,
         }
@@ -522,18 +533,66 @@ impl ModelClient for AnthropicClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(move |result| match result {
-            Ok(bytes) => {
+        tracing::debug!("Starting SSE stream from Anthropic API");
+        let byte_stream = response.bytes_stream();
+        let stream = async_stream::try_stream! {
+            let mut buffer = String::new();
+            futures::pin_mut!(byte_stream);
+
+            while let Some(result) = byte_stream.next().await {
+                let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
                 let text = if is_oauth {
                     Self::strip_tool_prefix_from_sse(&text)
                 } else {
                     text.to_string()
                 };
-                Self::parse_sse_event(&text)
+                tracing::debug!("SSE raw chunk: {:?}", text);
+                buffer.push_str(&text);
+
+                // Process complete SSE events (separated by double newline)
+                while let Some(pos) = buffer.find("\n\n") {
+                    let event_text = buffer[..pos].to_string();
+                    buffer = buffer[pos + 2..].to_string();
+
+                    // Parse each line in the event
+                    for line in event_text.lines() {
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if data == "[DONE]" {
+                                yield StreamChunk::MessageStop;
+                                return;
+                            }
+                            match serde_json::from_str::<AnthropicStreamEvent>(data) {
+                                Ok(event) => {
+                                    tracing::debug!("Anthropic SSE event: {:?}", event);
+                                    yield event.into();
+                                }
+                                Err(e) => {
+                                    if !data.trim().is_empty() && !data.starts_with(':') {
+                                        tracing::debug!("SSE parse error: {} for data: {}", e, data);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
-        });
+
+            // Process any remaining data in buffer
+            if !buffer.is_empty() {
+                for line in buffer.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" {
+                            yield StreamChunk::MessageStop;
+                            return;
+                        }
+                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                            yield event.into();
+                        }
+                    }
+                }
+            }
+        };
 
         Ok(Box::pin(stream))
     }
@@ -606,31 +665,6 @@ impl AnthropicClient {
                 cache_creation_tokens: response.usage.cache_creation_input_tokens.unwrap_or(0),
             },
         }
-    }
-
-    fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        for line in text.lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" {
-                    return Ok(StreamChunk::MessageStop);
-                }
-
-                match serde_json::from_str::<AnthropicStreamEvent>(data) {
-                    Ok(event) => {
-                        tracing::trace!("Anthropic SSE event: {:?}", event);
-                        return Ok(event.into());
-                    }
-                    Err(e) => {
-                        if data.trim().is_empty() || data.starts_with(':') {
-                            continue;
-                        }
-                        tracing::debug!("SSE parse error (may be incomplete): {}", e);
-                    }
-                }
-            }
-        }
-
-        Ok(StreamChunk::Ping)
     }
 }
 

@@ -6,23 +6,165 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    text::{Line, Span, Text},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::io::Stdout;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uira_agent::{Agent, AgentConfig, ApprovalReceiver};
+use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
+use uira_protocol::Provider;
 use uira_protocol::{AgentState, Item, ThreadEvent};
-use uira_providers::ModelClient;
+use uira_providers::{
+    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
+    ProviderConfig, SecretString,
+};
 
-use crate::views::{ApprovalOverlay, ApprovalRequest};
+use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
 use crate::widgets::ChatMessage;
 use crate::AppEvent;
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
+
+fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> Vec<Line<'static>> {
+    let prefix_len = prefix.chars().count();
+    let content_width = max_width.saturating_sub(prefix_len);
+
+    if content_width == 0 {
+        return vec![Line::from(Span::styled(prefix.to_string(), style))];
+    }
+
+    let mut lines = Vec::new();
+    let mut first = true;
+
+    for paragraph in content.split('\n') {
+        let chars: Vec<char> = paragraph.chars().collect();
+        if chars.is_empty() {
+            let line_prefix = if first { prefix } else { "" };
+            lines.push(Line::from(Span::styled(line_prefix.to_string(), style)));
+            first = false;
+            continue;
+        }
+
+        let mut i = 0;
+        while i < chars.len() {
+            let width = if first { content_width } else { max_width };
+            let end = (i + width).min(chars.len());
+            let chunk: String = chars[i..end].iter().collect();
+
+            let line = if first {
+                Line::from(vec![
+                    Span::styled(prefix.to_string(), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(chunk, style),
+                ])
+            } else {
+                Line::from(Span::styled(chunk, style))
+            };
+
+            lines.push(line);
+            first = false;
+            i = end;
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(prefix.to_string(), style)));
+    }
+
+    lines
+}
+
+/// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
+fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
+    let (provider, model) = model_str
+        .split_once('/')
+        .unwrap_or(("anthropic", model_str));
+
+    match provider {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::Anthropic,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            AnthropicClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "openai" => {
+            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::OpenAI,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            OpenAIClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "google" | "gemini" => {
+            let api_key = std::env::var("GEMINI_API_KEY")
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::Google,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            GeminiClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "ollama" => {
+            let config = ProviderConfig {
+                provider: Provider::Ollama,
+                api_key: None,
+                model: model.to_string(),
+                base_url: Some(
+                    std::env::var("OLLAMA_HOST")
+                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                ),
+                ..Default::default()
+            };
+
+            OllamaClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "opencode" => {
+            let api_key = std::env::var("OPENCODE_API_KEY")
+                .ok()
+                .map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::OpenCode,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            OpenCodeClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        _ => Err(format!("Unknown provider: {}", provider)),
+    }
+}
 
 /// Spawn a task that handles approval requests from the agent
 fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sender<AppEvent>) {
@@ -50,31 +192,6 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
-const AVAILABLE_MODELS: &[(&str, &[&str])] = &[
-    (
-        "opencode",
-        &[
-            "kimi-k2.5-free",
-            "glm-4.7",
-            "qwen3-coder",
-            "claude-opus-4-1",
-            "big-pickle",
-            "gpt-5-nano",
-        ],
-    ),
-    (
-        "anthropic",
-        &[
-            "claude-sonnet-4-20250514",
-            "claude-opus-4-20250514",
-            "claude-3-5-sonnet-20241022",
-        ],
-    ),
-    ("openai", &["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]),
-    ("google", &["gemini-2.0-flash", "gemini-1.5-pro"]),
-    ("ollama", &["llama3.1", "qwen2.5-coder", "deepseek-coder"]),
-];
-
 pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
@@ -84,12 +201,14 @@ pub struct App {
     cursor_pos: usize,
     agent_state: AgentState,
     status: String,
-    scroll: u16,
+    list_state: ListState,
     input_focused: bool,
     streaming_buffer: Option<String>,
     thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
+    model_selector: ModelSelector,
     agent_input_tx: Option<mpsc::Sender<String>>,
+    agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
 }
 
@@ -105,12 +224,14 @@ impl App {
             cursor_pos: 0,
             agent_state: AgentState::Idle,
             status: "Ready".to_string(),
-            scroll: 0,
+            list_state: ListState::default(),
             input_focused: true,
             streaming_buffer: None,
             thinking_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
+            model_selector: ModelSelector::new(),
             agent_input_tx: None,
+            agent_command_tx: None,
             current_model: None,
         }
     }
@@ -153,19 +274,17 @@ impl App {
         Ok(())
     }
 
-    /// Run with an agent for interactive mode
     pub async fn run_with_agent(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
     ) -> std::io::Result<()> {
-        // Create agent with event streaming and interactive channels
         let (agent, event_stream) = Agent::new(config, client).with_event_stream();
-        let (mut agent, input_tx, approval_rx) = agent.with_interactive();
+        let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
-        // Store input sender for sending user prompts
         self.agent_input_tx = Some(input_tx);
+        self.agent_command_tx = Some(command_tx);
 
         // Spawn event handler - forwards agent events to app
         let event_tx = self.event_tx.clone();
@@ -189,7 +308,7 @@ impl App {
         self.run(terminal).await
     }
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
         // Main layout: Chat area, Status bar, Input area
@@ -215,81 +334,85 @@ impl App {
         if self.approval_overlay.is_active() {
             self.approval_overlay.render(frame, area);
         }
+
+        // Render model selector overlay on top
+        if self.model_selector.is_active() {
+            self.model_selector.render(frame, area);
+        }
     }
 
-    fn render_chat(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_chat(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let block = Block::default()
             .title(" Uira ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Cyan));
 
-        // Build list items from messages
+        let inner_width = area.width.saturating_sub(2) as usize;
+
         let mut items: Vec<ListItem> = self
             .messages
             .iter()
             .map(|msg| {
-                let style = match msg.role.as_str() {
-                    "user" => Style::default().fg(Color::Green),
-                    "assistant" => Style::default().fg(Color::Cyan),
-                    "tool" => Style::default().fg(Color::Magenta),
-                    "error" => Style::default().fg(Color::Red),
-                    "system" => Style::default().fg(Color::Yellow),
-                    _ => Style::default(),
+                let (prefix, style) = if msg.role == "thinking" {
+                    (
+                        "thinking: ",
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::ITALIC),
+                    )
+                } else {
+                    let s = match msg.role.as_str() {
+                        "user" => Style::default().fg(Color::Green),
+                        "assistant" => Style::default().fg(Color::Cyan),
+                        "tool" => Style::default().fg(Color::Magenta),
+                        "error" => Style::default().fg(Color::Red),
+                        "system" => Style::default().fg(Color::Yellow),
+                        _ => Style::default(),
+                    };
+                    ("", s)
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!("{}: ", msg.role),
-                        style.add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(&msg.content, style),
-                ]))
+
+                let role_prefix = if prefix.is_empty() {
+                    format!("{}: ", msg.role)
+                } else {
+                    prefix.to_string()
+                };
+
+                let lines = wrap_message(&role_prefix, &msg.content, inner_width, style);
+                ListItem::new(Text::from(lines))
             })
             .collect();
 
         if let Some(ref buffer) = self.thinking_buffer {
             if !buffer.is_empty() {
-                let thinking_item = ListItem::new(Line::from(vec![
-                    Span::styled(
-                        "> Thinking: ",
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                    Span::styled(
-                        buffer.as_str(),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ]));
-                items.push(thinking_item);
+                let style = Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC);
+                let lines = wrap_message("> Thinking: ", buffer, inner_width, style);
+                items.push(ListItem::new(Text::from(lines)));
             }
         }
 
-        // Render streaming buffer as in-progress message with blinking cursor
         if let Some(ref buffer) = self.streaming_buffer {
             if !buffer.is_empty() {
-                let streaming_item = ListItem::new(Line::from(vec![
-                    Span::styled(
-                        "assistant: ",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(buffer.as_str(), Style::default().fg(Color::Cyan)),
-                    Span::styled(
+                let style = Style::default().fg(Color::Cyan);
+                let mut lines = wrap_message("assistant: ", buffer, inner_width, style);
+                if let Some(last) = lines.last_mut() {
+                    last.spans.push(Span::styled(
                         "▌",
                         Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::SLOW_BLINK),
-                    ),
-                ]));
-                items.push(streaming_item);
+                    ));
+                }
+                items.push(ListItem::new(Text::from(lines)));
             }
         }
 
-        let list = List::new(items).block(block);
-        frame.render_widget(list, area);
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -367,12 +490,69 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
+    fn scroll_up(&mut self) {
+        let total = self.total_items();
+        let i = match self.list_state.selected() {
+            Some(i) => i.saturating_sub(1),
+            None if total > 0 => total - 1,
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn scroll_down(&mut self) {
+        let total = self.total_items();
+        if total == 0 {
+            return;
+        }
+        let i = match self.list_state.selected() {
+            Some(i) => (i + 1).min(total - 1),
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        let total = self.total_items();
+        if total > 0 {
+            self.list_state.select(Some(total - 1));
+        }
+    }
+
+    fn total_items(&self) -> usize {
+        let mut count = self.messages.len();
+        if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+            count += 1;
+        }
+        if self
+            .streaming_buffer
+            .as_ref()
+            .is_some_and(|b| !b.is_empty())
+        {
+            count += 1;
+        }
+        count
+    }
+
+    fn push_message(&mut self, role: &str, content: String) {
+        self.messages.push(ChatMessage {
+            role: role.to_string(),
+            content,
+        });
+        self.scroll_to_bottom();
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) {
+        if self.model_selector.is_active() {
+            if let Some(selected_model) = self.model_selector.handle_key(key.code) {
+                self.switch_model(&selected_model);
+            }
+            return;
+        }
+
         // Approval overlay takes priority for key handling
         if self.approval_overlay.handle_key(key.code) {
-            // Key was consumed by overlay
             if !self.approval_overlay.is_active() {
-                // Overlay finished, update state
                 self.agent_state = AgentState::Thinking;
             }
             return;
@@ -458,12 +638,10 @@ impl App {
                     self.should_quit = true;
                 }
                 KeyCode::Up => {
-                    // Scroll up
-                    self.scroll = self.scroll.saturating_add(1);
+                    self.scroll_up();
                 }
                 KeyCode::Down => {
-                    // Scroll down
-                    self.scroll = self.scroll.saturating_sub(1);
+                    self.scroll_down();
                 }
                 _ => {}
             }
@@ -476,10 +654,7 @@ impl App {
             return;
         }
 
-        self.messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: input.clone(),
-        });
+        self.push_message("user", input.clone());
 
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
@@ -525,40 +700,26 @@ impl App {
                 self.status = "Chat cleared".to_string();
             }
             "/models" => {
-                let mut output = String::from("Available models by provider:\n");
-                for (provider, models) in AVAILABLE_MODELS {
-                    output.push_str(&format!("\n  {}:\n", provider));
-                    for model in *models {
-                        let marker = if self.current_model.as_deref() == Some(*model) {
-                            "→"
-                        } else {
-                            " "
-                        };
-                        output.push_str(&format!("    {} {}\n", marker, model));
-                    }
-                }
-                output.push_str("\nUse /model <name> to switch models.");
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: output,
-                });
+                self.model_selector.open(self.current_model.clone());
             }
             "/model" => {
                 if let Some(model_name) = parts.get(1) {
-                    let found = AVAILABLE_MODELS
-                        .iter()
-                        .any(|(_, models)| models.contains(model_name));
+                    let full_model = if model_name.contains('/') {
+                        (*model_name).to_string()
+                    } else {
+                        MODEL_GROUPS
+                            .iter()
+                            .find(|group| group.models.contains(model_name))
+                            .map(|group| format!("{}/{}", group.provider, model_name))
+                            .unwrap_or_else(|| (*model_name).to_string())
+                    };
 
-                    if found {
-                        self.current_model = Some((*model_name).to_string());
-                        self.status = format!("Model: {}", model_name);
-                        self.messages.push(ChatMessage {
-                            role: "system".to_string(),
-                            content: format!(
-                                "Switched to model: {}\nNote: Model change takes effect on next request.",
-                                model_name
-                            ),
-                        });
+                    let is_known = MODEL_GROUPS
+                        .iter()
+                        .any(|group| group.models.iter().any(|m| full_model.ends_with(m)));
+
+                    if is_known || model_name.contains('/') {
+                        self.switch_model(&full_model);
                     } else {
                         self.messages.push(ChatMessage {
                             role: "system".to_string(),
@@ -608,10 +769,7 @@ impl App {
             }
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Error: {}", msg),
-                });
+                self.push_message("system", format!("Error: {}", msg));
             }
         }
     }
@@ -632,16 +790,14 @@ impl App {
                 );
             }
             ThreadEvent::ContentDelta { delta } => {
-                // Accumulate streaming content with size limit
                 if let Some(ref mut buffer) = self.streaming_buffer {
-                    // Only append if within size limit
                     if buffer.len() + delta.len() <= MAX_STREAMING_BUFFER_SIZE {
                         buffer.push_str(&delta);
                     }
-                    // Silently drop if over limit (could truncate from front as alternative)
                 } else {
                     self.streaming_buffer = Some(delta);
                 }
+                self.scroll_to_bottom();
             }
             ThreadEvent::ThinkingDelta { thinking } => {
                 if let Some(ref mut buffer) = self.thinking_buffer {
@@ -651,6 +807,7 @@ impl App {
                 } else {
                     self.thinking_buffer = Some(thinking);
                 }
+                self.scroll_to_bottom();
             }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { name, .. } => {
@@ -685,19 +842,17 @@ impl App {
                     output, is_error, ..
                 } => {
                     let role = if is_error { "error" } else { "tool" };
-                    self.messages.push(ChatMessage {
-                        role: role.to_string(),
-                        content: output,
-                    });
+                    self.push_message(role, output);
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
                     self.streaming_buffer = None;
-                    self.thinking_buffer = None;
-                    self.messages.push(ChatMessage {
-                        role: "assistant".to_string(),
-                        content,
-                    });
+                    if let Some(thinking) = self.thinking_buffer.take() {
+                        if !thinking.is_empty() {
+                            self.push_message("thinking", thinking);
+                        }
+                    }
+                    self.push_message("assistant", content);
                 }
                 Item::ApprovalDecision {
                     request_id,
@@ -723,14 +878,15 @@ impl App {
                     usage.input_tokens, usage.output_tokens
                 );
 
-                self.thinking_buffer = None;
+                if let Some(thinking) = self.thinking_buffer.take() {
+                    if !thinking.is_empty() {
+                        self.push_message("thinking", thinking);
+                    }
+                }
 
                 if let Some(buffer) = self.streaming_buffer.take() {
                     if !buffer.is_empty() {
-                        self.messages.push(ChatMessage {
-                            role: "assistant".to_string(),
-                            content: buffer,
-                        });
+                        self.push_message("assistant", buffer);
                     }
                 }
             }
@@ -741,10 +897,7 @@ impl App {
             ThreadEvent::Error { message, .. } => {
                 self.agent_state = AgentState::Failed;
                 self.status = format!("Error: {}", message);
-                self.messages.push(ChatMessage {
-                    role: "error".to_string(),
-                    content: message,
-                });
+                self.push_message("error", message);
             }
             // Goal Verification Events
             ThreadEvent::GoalVerificationStarted { goals, .. } => {
@@ -758,13 +911,13 @@ impl App {
                 ..
             } => {
                 let icon = if passed { "[PASS]" } else { "[FAIL]" };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!(
+                self.push_message(
+                    "system",
+                    format!(
                         "{} Goal '{}': {:.1}% (target: {:.1}%)",
                         icon, goal, score, target
                     ),
-                });
+                );
             }
             ThreadEvent::GoalVerificationCompleted {
                 all_passed,
@@ -788,28 +941,27 @@ impl App {
             ThreadEvent::RalphContinuation {
                 reason, confidence, ..
             } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
-                });
+                self.push_message(
+                    "system",
+                    format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
+                );
             }
             ThreadEvent::RalphCircuitBreak { reason, iteration } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Ralph stopped at iteration {}: {}", iteration, reason),
-                });
+                self.push_message(
+                    "system",
+                    format!("Ralph stopped at iteration {}: {}", iteration, reason),
+                );
                 self.agent_state = AgentState::Complete;
             }
-            // Background Task Events
             ThreadEvent::BackgroundTaskSpawned {
                 task_id,
                 description,
                 ..
             } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task started: {} ({})", description, task_id),
-                });
+                self.push_message(
+                    "system",
+                    format!("Background task started: {} ({})", description, task_id),
+                );
             }
             ThreadEvent::BackgroundTaskProgress {
                 task_id,
@@ -817,23 +969,23 @@ impl App {
                 message,
             } => {
                 let msg = message.map(|m| format!(": {}", m)).unwrap_or_default();
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task {} - {}{}", task_id, status, msg),
-                });
+                self.push_message(
+                    "system",
+                    format!("Background task {} - {}{}", task_id, status, msg),
+                );
             }
             ThreadEvent::BackgroundTaskCompleted {
                 task_id, success, ..
             } => {
                 let status = if success { "completed" } else { "failed" };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task {}: {}", task_id, status),
-                });
+                self.push_message("system", format!("Background task {}: {}", task_id, status));
             }
-            // Catch-all for unknown variants (due to #[non_exhaustive])
+            ThreadEvent::ModelSwitched { model, provider } => {
+                self.status = format!("Model: {}/{}", provider, model);
+                self.push_message("system", format!("Switched to {}/{}", provider, model));
+            }
             _ => {
-                tracing::debug!("Unknown ThreadEvent variant");
+                tracing::debug!("Unhandled ThreadEvent variant");
             }
         }
     }
@@ -843,12 +995,8 @@ impl App {
         self.event_tx.clone()
     }
 
-    /// Add a message to the chat
     pub fn add_message(&mut self, role: &str, content: &str) {
-        self.messages.push(ChatMessage {
-            role: role.to_string(),
-            content: content.to_string(),
-        });
+        self.push_message(role, content.to_string());
     }
 
     /// Set the status message
@@ -859,6 +1007,44 @@ impl App {
     /// Set the agent state
     pub fn set_agent_state(&mut self, state: AgentState) {
         self.agent_state = state;
+    }
+
+    fn switch_model(&mut self, model_str: &str) {
+        self.current_model = Some(model_str.to_string());
+        self.status = format!("Switching to {}...", model_str);
+
+        match create_client_for_model(model_str) {
+            Ok(new_client) => {
+                if let Some(ref tx) = self.agent_command_tx {
+                    let tx = tx.clone();
+                    let model_str = model_str.to_string();
+                    tokio::spawn(async move {
+                        if tx
+                            .send(AgentCommand::SwitchClient(new_client))
+                            .await
+                            .is_err()
+                        {
+                            tracing::warn!("Failed to send model switch command for {}", model_str);
+                        }
+                    });
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
+                            model_str
+                        ),
+                    });
+                }
+            }
+            Err(e) => {
+                self.status = "Model switch failed".to_string();
+                self.messages.push(ChatMessage {
+                    role: "error".to_string(),
+                    content: format!("Failed to create client for {}: {}", model_str, e),
+                });
+            }
+        }
     }
 }
 

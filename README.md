@@ -62,6 +62,62 @@ uira-agent --resume ~/.uira/sessions/abc123.jsonl
 uira-agent --model claude-sonnet-4-20250514
 ```
 
+## Authentication
+
+Uira supports OAuth authentication for multiple providers:
+
+```bash
+# Login to a provider
+uira-agent auth login anthropic
+uira-agent auth login openai
+uira-agent auth login google
+
+# Check authentication status
+uira-agent auth status
+
+# Logout from a provider
+uira-agent auth logout anthropic
+```
+
+### OAuth Flow
+
+- **Anthropic**: Uses code-copy flow. Opens browser → authorize → copy the code → paste in terminal
+- **OpenAI/Google**: Uses device code flow with automatic polling
+
+Credentials are securely stored in `~/.uira/credentials/`.
+
+## TUI Commands & Shortcuts
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help`, `/h`, `/?` | Show available commands |
+| `/models` | Open model selector (keyboard-driven) |
+| `/model <name>` | Switch to a specific model |
+| `/clear` | Clear chat history |
+| `/status`, `/auth` | Show connection status |
+| `/exit`, `/quit`, `/q` | Exit the application |
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `↑` / `↓` | Scroll through messages |
+| `←` / `→` | Move cursor in input |
+| `Ctrl+C` | Quit |
+| `Ctrl+L` | Clear screen |
+| `Esc` | Quit / Close overlay |
+
+### Model Selector
+
+Press `/models` to open an interactive model selector:
+- `↑` / `↓` or `j` / `k` - Navigate models
+- `←` / `→` or `h` / `l` - Switch provider groups
+- `Enter` - Select model
+- `Esc` - Cancel
+
 ## Architecture
 
 ```
@@ -91,7 +147,7 @@ uira-agent --model claude-sonnet-4-20250514
 |-------|-------------|
 | **uira-cli** | CLI with session management and multi-provider support |
 | **uira-agent** | Core agent loop with state machine, session persistence, and streaming |
-| **uira-tui** | Ratatui-based terminal UI with approval overlay and syntax highlighting |
+| **uira-tui** | Ratatui-based terminal UI with approval overlay, model selector, and thinking display |
 | **uira-protocol** | Shared types, events, streaming chunks, and protocol definitions |
 | **uira-providers** | Model provider clients (Anthropic, OpenAI) with streaming support |
 | **uira-sandbox** | Platform-native sandboxing (macOS sandbox-exec, Linux Landlock) |
@@ -110,8 +166,8 @@ uira-agent --model claude-sonnet-4-20250514
 | Crate | Description |
 |-------|-------------|
 | **uira** | Standalone CLI for git hooks and dev tools |
+| **uira-auth** | OAuth authentication for Anthropic, OpenAI, Google |
 | **uira-config** | Configuration loading and management |
-| **uira-keywords** | Keyword detection for mode activation |
 | **uira-hooks** | Hook implementations |
 | **uira-goals** | Score-based goal verification |
 | **uira-core** | Shared types and utilities |

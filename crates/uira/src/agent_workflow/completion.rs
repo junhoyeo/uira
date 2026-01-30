@@ -7,8 +7,9 @@ pub struct CompletionDetector {
 
 impl CompletionDetector {
     pub fn new() -> Self {
-        let pattern = Regex::new(r"<DONE\s*(?:/\s*>|>.*?</DONE>)").unwrap();
-        let summary_pattern = Regex::new(r"<DONE\s*>(.*?)</DONE>").unwrap();
+        // Use (?s) dotall mode so .* matches newlines in multi-line summaries
+        let pattern = Regex::new(r"(?s)<DONE\s*(?:/\s*>|>.*?</DONE>)").unwrap();
+        let summary_pattern = Regex::new(r"(?s)<DONE\s*>(.*?)</DONE>").unwrap();
         Self {
             pattern,
             summary_pattern,
@@ -65,5 +66,17 @@ mod tests {
         );
         assert_eq!(detector.extract_summary("<DONE/>"), None);
         assert_eq!(detector.extract_summary("<DONE></DONE>"), None);
+    }
+
+    #[test]
+    fn test_multiline_summary() {
+        let detector = CompletionDetector::new();
+
+        let multiline = "<DONE>Fixed issues:\n- Typo in foo.rs\n- Missing import in bar.rs</DONE>";
+        assert!(detector.is_done(multiline));
+        assert_eq!(
+            detector.extract_summary(multiline),
+            Some("Fixed issues:\n- Typo in foo.rs\n- Missing import in bar.rs".to_string())
+        );
     }
 }
