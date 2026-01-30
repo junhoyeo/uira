@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_protocol::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     Role, ThreadEvent, ToolCall,
@@ -36,6 +37,7 @@ pub struct Agent {
     input_rx: Option<mpsc::Receiver<String>>,
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
+    keyword_detector: KeywordDetectorHook,
 }
 
 impl Agent {
@@ -51,6 +53,7 @@ impl Agent {
             input_rx: None,
             approval_tx: None,
             command_rx: None,
+            keyword_detector: KeywordDetectorHook::new(),
         }
     }
 
@@ -236,18 +239,26 @@ impl Agent {
         self.rollout.as_ref().map(|r| r.path())
     }
 
-    /// Run the agent with the given prompt
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
         self.state = AgentState::Thinking;
 
-        // Emit thread started event
         self.emit_event(ThreadEvent::ThreadStarted {
             thread_id: self.session.id.to_string(),
         })
         .await;
 
-        // Add user message
-        let user_message = Message::user(prompt);
+        let effective_prompt =
+            if let Some(keyword_msg) = self.keyword_detector.detect_and_message(prompt) {
+                self.emit_event(ThreadEvent::ContentDelta {
+                    delta: format!("{}\n\n", keyword_msg),
+                })
+                .await;
+                format!("{}\n\n{}", keyword_msg, prompt)
+            } else {
+                prompt.to_string()
+            };
+
+        let user_message = Message::user(&effective_prompt);
         self.record_message(user_message.clone());
         self.session
             .context
