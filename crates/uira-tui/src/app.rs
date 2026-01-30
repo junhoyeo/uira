@@ -50,34 +50,46 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
-/// Main TUI application state
+const AVAILABLE_MODELS: &[(&str, &[&str])] = &[
+    (
+        "opencode",
+        &[
+            "kimi-k2.5-free",
+            "glm-4.7",
+            "qwen3-coder",
+            "claude-opus-4-1",
+            "big-pickle",
+            "gpt-5-nano",
+        ],
+    ),
+    (
+        "anthropic",
+        &[
+            "claude-sonnet-4-20250514",
+            "claude-opus-4-20250514",
+            "claude-3-5-sonnet-20241022",
+        ],
+    ),
+    ("openai", &["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]),
+    ("google", &["gemini-2.0-flash", "gemini-1.5-pro"]),
+    ("ollama", &["llama3.1", "qwen2.5-coder", "deepseek-coder"]),
+];
+
 pub struct App {
-    /// Whether the app should quit
     should_quit: bool,
-    /// Event sender for internal communication
     event_tx: mpsc::Sender<AppEvent>,
-    /// Event receiver
     event_rx: mpsc::Receiver<AppEvent>,
-    /// Chat messages
     messages: Vec<ChatMessage>,
-    /// Input buffer
     input: String,
-    /// Input cursor position
     cursor_pos: usize,
-    /// Agent state
     agent_state: AgentState,
-    /// Current status message
     status: String,
-    /// Scroll offset for chat
     scroll: u16,
-    /// Is input focused
     input_focused: bool,
-    /// Current streaming message buffer
     streaming_buffer: Option<String>,
-    /// Approval overlay for tool approvals
     approval_overlay: ApprovalOverlay,
-    /// Input sender to agent (for interactive mode)
     agent_input_tx: Option<mpsc::Sender<String>>,
+    current_model: Option<String>,
 }
 
 impl App {
@@ -97,7 +109,13 @@ impl App {
             streaming_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
             agent_input_tx: None,
+            current_model: None,
         }
+    }
+
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.current_model = Some(model.to_string());
+        self
     }
 
     /// Run the TUI application
@@ -440,7 +458,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?  - Show this help\n  /exit, /quit, /q - Exit the application\n  /auth, /status - Show current status\n  /clear - Clear chat history".to_string(),
+                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /clear            - Clear chat history".to_string(),
                 });
             }
             "/auth" | "/status" => {
@@ -457,6 +475,61 @@ impl App {
             "/clear" => {
                 self.messages.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/models" => {
+                let mut output = String::from("Available models by provider:\n");
+                for (provider, models) in AVAILABLE_MODELS {
+                    output.push_str(&format!("\n  {}:\n", provider));
+                    for model in *models {
+                        let marker = if self.current_model.as_deref() == Some(*model) {
+                            "→"
+                        } else {
+                            " "
+                        };
+                        output.push_str(&format!("    {} {}\n", marker, model));
+                    }
+                }
+                output.push_str("\nUse /model <name> to switch models.");
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: output,
+                });
+            }
+            "/model" => {
+                if let Some(model_name) = parts.get(1) {
+                    let found = AVAILABLE_MODELS
+                        .iter()
+                        .any(|(_, models)| models.contains(model_name));
+
+                    if found {
+                        self.current_model = Some((*model_name).to_string());
+                        self.status = format!("Model: {}", model_name);
+                        self.messages.push(ChatMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "Switched to model: {}\nNote: Model change takes effect on next request.",
+                                model_name
+                            ),
+                        });
+                    } else {
+                        self.messages.push(ChatMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "Unknown model: {}. Use /models to see available options.",
+                                model_name
+                            ),
+                        });
+                    }
+                } else {
+                    let current = self
+                        .current_model
+                        .as_deref()
+                        .unwrap_or("(default from config)");
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!("Current model: {}\nUsage: /model <name>", current),
+                    });
+                }
             }
             _ => {
                 self.messages.push(ChatMessage {
