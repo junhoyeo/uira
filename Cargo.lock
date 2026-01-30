@@ -4749,6 +4749,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "uira-core",
  "url",
  "uuid",
 ]
@@ -4765,6 +4766,7 @@ dependencies = [
  "dirs",
  "predicates",
  "ratatui",
+ "regex",
  "secrecy 0.10.3",
  "serde",
  "serde_json",
@@ -4777,6 +4779,7 @@ dependencies = [
  "uira-agents",
  "uira-auth",
  "uira-config",
+ "uira-core",
  "uira-features",
  "uira-goals",
  "uira-protocol",
@@ -4851,6 +4854,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

@@ -1,8 +1,10 @@
 //! Session persistence for resuming agent conversations
 
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use uira_protocol::{Message, TokenUsage};
 
 /// Stored session metadata
@@ -49,13 +51,14 @@ impl SessionStorage {
     }
 
     fn validate_session_id(session_id: &str) -> std::io::Result<()> {
-        if session_id.contains(['/', '\\', '\0'])
-            || session_id.contains("..")
-            || session_id.is_empty()
-        {
+        static SESSION_ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"^[A-Za-z0-9_-]{1,64}$").expect("Invalid session ID regex")
+        });
+
+        if !SESSION_ID_PATTERN.is_match(session_id) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "Invalid session ID: contains path separators or parent directory references",
+                "Invalid session ID: must be 1-64 alphanumeric characters, underscores, or hyphens",
             ));
         }
         Ok(())
@@ -133,5 +136,67 @@ mod tests {
         let json = serde_json::to_string(&meta).unwrap();
         let parsed: SessionMeta = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, "test-123");
+    }
+
+    #[test]
+    fn test_validate_session_id_valid_ids() {
+        // Valid IDs with alphanumeric characters
+        assert!(SessionStorage::validate_session_id("abc123").is_ok());
+        assert!(SessionStorage::validate_session_id("test-session").is_ok());
+        assert!(SessionStorage::validate_session_id("test_session").is_ok());
+        assert!(SessionStorage::validate_session_id("ABC123").is_ok());
+        assert!(SessionStorage::validate_session_id("a").is_ok());
+        assert!(SessionStorage::validate_session_id("Z").is_ok());
+        assert!(SessionStorage::validate_session_id("0").is_ok());
+        assert!(SessionStorage::validate_session_id("_").is_ok());
+        assert!(SessionStorage::validate_session_id("-").is_ok());
+
+        // Max length (64 characters)
+        let max_id = "a".repeat(64);
+        assert!(SessionStorage::validate_session_id(&max_id).is_ok());
+
+        // Mixed valid characters
+        assert!(SessionStorage::validate_session_id("test-123_ABC").is_ok());
+        assert!(SessionStorage::validate_session_id("session_2024-01-30").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_invalid_ids() {
+        // Empty string
+        assert!(SessionStorage::validate_session_id("").is_err());
+
+        // Path separators
+        assert!(SessionStorage::validate_session_id("test/session").is_err());
+        assert!(SessionStorage::validate_session_id("test\\session").is_err());
+        assert!(SessionStorage::validate_session_id("/test").is_err());
+        assert!(SessionStorage::validate_session_id("test/").is_err());
+
+        // Parent directory references
+        assert!(SessionStorage::validate_session_id("..").is_err());
+        assert!(SessionStorage::validate_session_id("test..session").is_err());
+        assert!(SessionStorage::validate_session_id("../test").is_err());
+
+        // Null character
+        assert!(SessionStorage::validate_session_id("test\0session").is_err());
+
+        // Special characters not allowed
+        assert!(SessionStorage::validate_session_id("test@session").is_err());
+        assert!(SessionStorage::validate_session_id("test.session").is_err());
+        assert!(SessionStorage::validate_session_id("test session").is_err());
+        assert!(SessionStorage::validate_session_id("test#session").is_err());
+        assert!(SessionStorage::validate_session_id("test$session").is_err());
+
+        // Exceeds max length (65 characters)
+        let too_long = "a".repeat(65);
+        assert!(SessionStorage::validate_session_id(&too_long).is_err());
+    }
+
+    #[test]
+    fn test_validate_session_id_error_message() {
+        let result = SessionStorage::validate_session_id("invalid/path");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("alphanumeric"));
     }
 }

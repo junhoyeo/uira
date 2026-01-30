@@ -2,6 +2,7 @@ use crate::{AuthError, Result, StoredCredential};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use uira_core::atomic_write_secure;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CredentialStore {
@@ -33,30 +34,8 @@ impl CredentialStore {
 
         let content = serde_json::to_string_pretty(self)?;
 
-        // Write with restrictive permissions atomically to avoid race condition
-        #[cfg(unix)]
-        {
-            use std::fs::OpenOptions;
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&path)
-                .map_err(|e| AuthError::StorageError(format!("Failed to create file: {}", e)))?;
-
-            file.write_all(content.as_bytes())
-                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
-        }
-
-        #[cfg(not(unix))]
-        {
-            std::fs::write(&path, content)
-                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
-        }
+        atomic_write_secure(&path, content.as_bytes())
+            .map_err(|e| AuthError::StorageError(format!("Failed to write credentials: {}", e)))?;
 
         Ok(())
     }

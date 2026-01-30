@@ -646,11 +646,20 @@ impl Agent {
                 return Err(AgentLoopError::Cancelled);
             }
 
-            // 2. Handle approval at Agent level (unless full_auto)
-            if !ctx.full_auto {
-                if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
-                    let requirement = tool.approval_requirement(&call.input);
+            // 2. ALWAYS check for Forbidden tools (security critical)
+            if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
+                let requirement = tool.approval_requirement(&call.input);
 
+                // Forbidden MUST be enforced regardless of full_auto
+                if let ApprovalRequirement::Forbidden { reason } = &requirement {
+                    return Err(AgentLoopError::ToolForbidden {
+                        tool: call.name.clone(),
+                        reason: reason.clone(),
+                    });
+                }
+
+                // Handle approval (skip only NeedsApproval in full_auto mode)
+                if !ctx.full_auto {
                     match requirement {
                         ApprovalRequirement::NeedsApproval { reason } => {
                             if let Some(ref approval_tx) = self.approval_tx {
@@ -731,14 +740,11 @@ impl Agent {
                                 continue;
                             }
                         }
-                        ApprovalRequirement::Forbidden { reason } => {
-                            return Err(AgentLoopError::ToolForbidden {
-                                tool: call.name.clone(),
-                                reason,
-                            });
-                        }
                         ApprovalRequirement::Skip { .. } => {
                             // No approval needed
+                        }
+                        ApprovalRequirement::Forbidden { .. } => {
+                            // Already handled above
                         }
                     }
                 }
