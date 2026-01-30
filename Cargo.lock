@@ -4688,6 +4688,7 @@ dependencies = [
  "uira-core",
  "uira-features",
  "uira-goals",
+ "uira-oxc",
  "uira-sdk",
 ]
 

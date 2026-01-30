@@ -1,4 +1,4 @@
-use crate::hooks::HooksConfig as AiHooksConfig;
+use crate::hooks::{HooksConfig as AiHooksConfig, OnFail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -34,6 +34,14 @@ pub struct Command {
 
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stage_fixed: bool,
+
+    /// Behavior when command fails: "stop" (default), "warn", or "continue"
+    #[serde(default = "default_on_fail")]
+    pub on_fail: OnFail,
+}
+
+fn default_on_fail() -> OnFail {
+    OnFail::Stop
 }
 
 impl Config {
@@ -53,6 +61,7 @@ impl Config {
                 run: "uira lint {staged_files}".to_string(),
                 glob: Some("**/*.{js,ts,jsx,tsx}".to_string()),
                 stage_fixed: false,
+                on_fail: default_on_fail(),
             }],
         };
 
@@ -63,6 +72,7 @@ impl Config {
                 run: "git push origin HEAD".to_string(),
                 glob: None,
                 stage_fixed: false,
+                on_fail: default_on_fail(),
             }],
         };
 

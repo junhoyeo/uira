@@ -16,6 +16,7 @@ uira-agents = { workspace = true }
 uira-features = { workspace = true }
 uira-config = { path = "../uira-config" }
 uira-goals = { path = "../uira-goals" }
+uira-oxc = { path = "../uira-oxc" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { workspace = true }
 serde = { workspace = true }

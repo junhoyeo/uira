@@ -78,6 +78,19 @@ enum Commands {
         #[command(subcommand)]
         action: GoalsCommands,
     },
+    /// Run diagnostics (lsp_diagnostics) on files
+    Diagnostics {
+        #[arg(long, help = "Only check staged files")]
+        staged: bool,
+        #[arg(
+            long,
+            default_value = "error",
+            help = "Severity filter: error, warning, all"
+        )]
+        severity: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -150,6 +163,11 @@ fn main() {
         Commands::Session { action } => session_command(action),
         Commands::Skill { action } => skill_command(action),
         Commands::Goals { action } => goals_command(action),
+        Commands::Diagnostics {
+            staged,
+            severity,
+            files,
+        } => diagnostics_command(staged, &severity, &files),
     };
 
     if let Err(e) = result {
@@ -768,6 +786,138 @@ fn skill_command(action: SkillCommands) -> anyhow::Result<()> {
 fn goals_command(action: GoalsCommands) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async { goals_command_async(action).await })
+}
+
+fn diagnostics_command(staged: bool, severity: &str, files: &[String]) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use colored::Colorize;
+    use std::process::Command;
+    use uira_oxc::{LintRule, Linter, Severity};
+
+    println!("🔍 Running diagnostics...\n");
+
+    let files_to_check = if staged {
+        let output = Command::new("git")
+            .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
+            .output()
+            .context("Failed to get staged files")?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    } else if files.is_empty() {
+        collect_files_from_cwd()?
+    } else {
+        files.to_vec()
+    };
+
+    if files_to_check.is_empty() {
+        println!("{} No files to check", "✓".green());
+        return Ok(());
+    }
+
+    let (js_ts_files, other_files): (Vec<_>, Vec<_>) = files_to_check.iter().partition(|f| {
+        let ext = std::path::Path::new(f)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        matches!(
+            ext,
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+        )
+    });
+
+    let rust_files: Vec<_> = other_files
+        .iter()
+        .filter(|f| f.ends_with(".rs"))
+        .cloned()
+        .collect();
+
+    let mut error_count = 0;
+    let mut warning_count = 0;
+
+    if !js_ts_files.is_empty() {
+        let linter = Linter::new(LintRule::recommended());
+        let js_files_owned: Vec<String> = js_ts_files.into_iter().cloned().collect();
+        let diagnostics = linter.lint_files(&js_files_owned);
+
+        let filtered: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| match severity {
+                "error" => matches!(d.severity, Severity::Error),
+                "warning" => matches!(d.severity, Severity::Error | Severity::Warning),
+                _ => true,
+            })
+            .collect();
+
+        for d in &filtered {
+            match d.severity {
+                Severity::Error => error_count += 1,
+                Severity::Warning => warning_count += 1,
+                Severity::Info => {}
+            }
+
+            let severity_str = match d.severity {
+                Severity::Error => "error".red().bold(),
+                Severity::Warning => "warning".yellow().bold(),
+                Severity::Info => "info".blue(),
+            };
+
+            println!(
+                "{}:{}:{}: {} [{}]",
+                d.file.dimmed(),
+                d.line,
+                d.column,
+                severity_str,
+                d.rule.cyan()
+            );
+            println!("  {}", d.message);
+            if let Some(suggestion) = &d.suggestion {
+                println!("  {}: {}", "suggestion".dimmed(), suggestion);
+            }
+            println!();
+        }
+    }
+
+    if !rust_files.is_empty() {
+        let output = Command::new("cargo")
+            .arg("check")
+            .arg("--message-format=short")
+            .output()
+            .context("Failed to run cargo check")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            for line in stderr.lines() {
+                if line.contains("error")
+                    && (severity == "error" || severity == "warning" || severity == "all")
+                {
+                    error_count += 1;
+                    println!("{}", line.red());
+                } else if line.contains("warning") && (severity == "warning" || severity == "all") {
+                    warning_count += 1;
+                    println!("{}", line.yellow());
+                }
+            }
+        }
+    }
+
+    println!();
+    if error_count > 0 {
+        println!(
+            "{} {} error(s), {} warning(s)",
+            "✗".red().bold(),
+            error_count,
+            warning_count
+        );
+        process::exit(1);
+    } else if warning_count > 0 {
+        println!("{} {} warning(s)", "⚠".yellow().bold(), warning_count);
+    } else {
+        println!("{} No diagnostics found", "✓".green().bold());
+    }
+
+    Ok(())
 }
 
 async fn goals_command_async(action: GoalsCommands) -> anyhow::Result<()> {

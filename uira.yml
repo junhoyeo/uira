@@ -20,6 +20,8 @@ pre-commit:
         echo "$staged" | xargs git add
     - name: clippy
       run: cargo clippy -- -D warnings
+    - name: diagnostics
+      run: ./target/debug/uira diagnostics --staged --severity error
     - name: typos
       run: ./target/debug/uira typos --ai --stage
 
