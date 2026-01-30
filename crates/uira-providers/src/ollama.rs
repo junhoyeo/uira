@@ -196,20 +196,21 @@ impl ModelClient for OllamaClient {
             )));
         }
 
-        // Ollama streams newline-delimited JSON
-        let stream = response.bytes_stream().map(|result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                // Process each line
-                for line in text.lines() {
-                    let chunk = Self::parse_stream_line(line)?;
-                    if !matches!(chunk, StreamChunk::Ping) {
-                        return Ok(chunk);
-                    }
+        let stream = response.bytes_stream().flat_map(|result| {
+            let chunks: Vec<Result<StreamChunk, ProviderError>> = match result {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    text.lines()
+                        .filter_map(|line| match Self::parse_stream_line(line) {
+                            Ok(chunk) if !matches!(chunk, StreamChunk::Ping) => Some(Ok(chunk)),
+                            Ok(_) => None,
+                            Err(e) => Some(Err(e)),
+                        })
+                        .collect()
                 }
-                Ok(StreamChunk::Ping)
-            }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
+                Err(e) => vec![Err(ProviderError::StreamError(e.to_string()))],
+            };
+            futures::stream::iter(chunks)
         });
 
         Ok(Box::pin(stream))

@@ -146,7 +146,7 @@ async fn run_resume(session_id: Option<&str>) -> Result<(), Box<dyn std::error::
 
                     println!(
                         "{} {} {} ({}, {} turns)",
-                        session.id[..8].yellow(),
+                        session.id.get(..8).unwrap_or(&session.id).yellow(),
                         age_str.dimmed(),
                         session.summary,
                         session.model.cyan(),
@@ -517,7 +517,7 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
 
                 println!(
                     "{} {} {}",
-                    task.id[..12].yellow(),
+                    task.id.get(..12).unwrap_or(&task.id).yellow(),
                     status_str,
                     task.description
                 );
@@ -772,14 +772,14 @@ fn create_agent_config(
     _config: &CliConfig,
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
 ) -> AgentConfig {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
         "read-only" => SandboxPolicy::read_only(),
         "full-access" => SandboxPolicy::full_access(),
-        _ => SandboxPolicy::workspace_write(std::env::current_dir().unwrap_or_default()),
+        _ => SandboxPolicy::workspace_write(cwd.clone()),
     };
 
-    let mut config =
-        AgentConfig::new().with_working_directory(std::env::current_dir().unwrap_or_default());
+    let mut config = AgentConfig::new().with_working_directory(cwd);
 
     config.sandbox_policy = sandbox_policy;
 

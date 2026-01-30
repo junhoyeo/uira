@@ -83,11 +83,14 @@ impl ContextManager {
                     while self.history.len() > count {
                         self.history.remove_first();
                     }
-                    break;
+                    if self.current_tokens() <= self.max_tokens {
+                        break;
+                    }
+                    if self.history.remove_first().is_none() {
+                        break;
+                    }
                 }
                 TruncationPolicy::Summarize => {
-                    // Would need model access for summarization
-                    // For now, fall back to FIFO
                     if self.history.remove_first().is_none() {
                         break;
                     }

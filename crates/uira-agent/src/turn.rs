@@ -83,12 +83,12 @@ impl TurnState {
     /// Cancel the turn
     pub fn cancel(&mut self) {
         self.cancelled = true;
-        // Cancel all pending approvals
         for (_, tx) in self.pending_approvals.drain() {
             let _ = tx.send(ReviewDecision::Deny {
                 reason: Some("cancelled".to_string()),
             });
         }
+        self.pending_user_input.clear();
     }
 
     pub fn is_cancelled(&self) -> bool {

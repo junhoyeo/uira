@@ -228,7 +228,6 @@ impl GeminiClient {
             None => return StreamChunk::Ping,
         };
 
-        // Check for finish reason
         if let Some(reason) = candidate.finish_reason {
             let stop_reason = match reason.as_str() {
                 "STOP" => StopReason::EndTurn,
@@ -250,13 +249,25 @@ impl GeminiClient {
             };
         }
 
-        // Extract text content
-        for part in candidate.content.parts {
-            if let GeminiPart::Text { text } = part {
-                return StreamChunk::ContentBlockDelta {
-                    index: 0,
-                    delta: ContentDelta::TextDelta { text },
-                };
+        for (index, part) in candidate.content.parts.into_iter().enumerate() {
+            match part {
+                GeminiPart::Text { text } => {
+                    return StreamChunk::ContentBlockDelta {
+                        index,
+                        delta: ContentDelta::TextDelta { text },
+                    };
+                }
+                GeminiPart::FunctionCall { function_call } => {
+                    return StreamChunk::ContentBlockStart {
+                        index,
+                        content_block: ContentBlock::ToolUse {
+                            id: format!("call_{}", uuid::Uuid::new_v4()),
+                            name: function_call.name,
+                            input: function_call.args,
+                        },
+                    };
+                }
+                _ => {}
             }
         }
 
