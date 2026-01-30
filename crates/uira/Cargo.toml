@@ -17,6 +17,7 @@ uira-features = { workspace = true }
 uira-config = { path = "../uira-config" }
 uira-goals = { path = "../uira-goals" }
 uira-oxc = { path = "../uira-oxc" }
+uira-comment-checker = { path = "../uira-comment-checker" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { workspace = true }
 serde = { workspace = true }

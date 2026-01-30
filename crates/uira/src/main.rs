@@ -1,4 +1,5 @@
 mod ai_decision;
+mod comments;
 mod config;
 mod diagnostics;
 mod hooks;
@@ -98,6 +99,17 @@ enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
+    /// Check and manage comments with AI assistance
+    Comments {
+        #[arg(long, help = "Use AI to decide whether to remove or keep comments")]
+        ai: bool,
+        #[arg(long, help = "Only check staged files")]
+        staged: bool,
+        #[arg(long, help = "Automatically stage modified files after fixing")]
+        stage: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -177,6 +189,12 @@ fn main() {
             severity,
             files,
         } => diagnostics_command(ai, staged, stage, &severity, &files),
+        Commands::Comments {
+            ai,
+            staged,
+            stage,
+            files,
+        } => comments_command(ai, staged, stage, &files),
     };
 
     if let Err(e) = result {
@@ -942,6 +960,87 @@ fn diagnostics_command(
         println!("{} {} warning(s)", "⚠".yellow().bold(), warning_count);
     } else {
         println!("{} No diagnostics found", "✓".green().bold());
+    }
+
+    Ok(())
+}
+
+fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use colored::Colorize;
+    use comments::CommentsChecker;
+    use std::process::Command;
+    use uira_comment_checker::{CommentDetector, FilterChain};
+
+    println!("💬 Checking comments...\n");
+
+    let files_to_check = if staged {
+        let output = Command::new("git")
+            .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
+            .output()
+            .context("Failed to get staged files")?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    } else if files.is_empty() {
+        collect_files_from_cwd()?
+    } else {
+        files.to_vec()
+    };
+
+    if files_to_check.is_empty() {
+        println!("{} No files to check", "✓".green());
+        return Ok(());
+    }
+
+    if ai {
+        let config = uira_config::load_config(None).ok();
+        let comments_config = config.map(|c| c.comments);
+        let mut checker = CommentsChecker::new(comments_config).with_auto_stage(stage);
+        let success = checker.run(&files_to_check)?;
+        if !success {
+            process::exit(1);
+        }
+        return Ok(());
+    }
+
+    let detector = CommentDetector::new();
+    let filter_chain = FilterChain::new();
+    let mut comment_count = 0;
+
+    for file in &files_to_check {
+        let content = match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let comments = detector.detect(&content, file, false);
+
+        for comment in comments {
+            if filter_chain.should_skip(&comment) {
+                continue;
+            }
+            comment_count += 1;
+
+            println!(
+                "{}:{}: {}",
+                file.dimmed(),
+                comment.line_number,
+                comment.text.trim().yellow()
+            );
+        }
+    }
+
+    println!();
+    if comment_count > 0 {
+        println!(
+            "{} Found {} comment(s). Use --ai to analyze with AI.",
+            "!".yellow().bold(),
+            comment_count
+        );
+    } else {
+        println!("{} No actionable comments found", "✓".green().bold());
     }
 
     Ok(())
