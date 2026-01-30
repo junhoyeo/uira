@@ -306,6 +306,13 @@ Each line must be EXACTLY one of: FIX:HIGH, FIX:LOW, or SKIP
         let current_line = lines[line_idx];
         let fixed_line = self.apply_suggestion_to_line(current_line, suggestion);
 
+        if fixed_line == current_line {
+            return Err(anyhow::anyhow!(
+                "No applicable transformation for suggestion: {}",
+                suggestion
+            ));
+        }
+
         let mut new_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
         new_lines[line_idx] = fixed_line;
 

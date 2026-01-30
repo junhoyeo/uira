@@ -304,17 +304,23 @@ Each line must be EXACTLY one of: REMOVE, KEEP, PRAGMA, or SKIP
             return Err(anyhow::anyhow!("Line number out of bounds"));
         }
 
+        let target_line = lines[line_idx];
+        let target_trimmed = target_line.trim();
+        let comment_trimmed = comment.text.trim();
+
+        if target_trimmed != comment_trimmed {
+            return Err(anyhow::anyhow!(
+                "Comment text mismatch at line {}. Expected: '{}', Found: '{}'",
+                comment.line,
+                comment_trimmed,
+                target_trimmed
+            ));
+        }
+
         let mut new_lines: Vec<String> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
             if i == line_idx {
-                let trimmed = line.trim();
-                if trimmed == comment.text.trim()
-                    || trimmed.starts_with("//")
-                    || trimmed.starts_with("#")
-                    || trimmed.starts_with("/*")
-                {
-                    continue;
-                }
+                continue;
             }
             new_lines.push(line.to_string());
         }
