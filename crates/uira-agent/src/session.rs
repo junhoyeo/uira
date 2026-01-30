@@ -51,8 +51,7 @@ impl Session {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
         let tool_router = Arc::new(create_builtin_router());
-        let full_auto =
-            !config.require_approval_for_writes && !config.require_approval_for_commands;
+        let full_auto = Self::is_full_auto(&config);
         let orchestrator =
             ToolOrchestrator::new(tool_router.clone(), config.sandbox_policy.clone())
                 .with_full_auto(full_auto);
@@ -71,13 +70,16 @@ impl Session {
         }
     }
 
+    fn is_full_auto(config: &AgentConfig) -> bool {
+        !config.require_approval_for_writes && !config.require_approval_for_commands
+    }
+
     /// Create a tool context for execution
     pub fn tool_context(&self) -> ToolContext {
         ToolContext {
             cwd: self.cwd.clone(),
             session_id: self.id.to_string(),
-            full_auto: !self.config.require_approval_for_writes
-                && !self.config.require_approval_for_commands,
+            full_auto: Self::is_full_auto(&self.config),
             env: std::collections::HashMap::new(),
         }
     }

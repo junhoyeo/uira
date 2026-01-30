@@ -86,11 +86,6 @@ impl JsonSchema {
         self
     }
 
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
     pub fn property(mut self, name: &str, schema: JsonSchema) -> Self {
         let props = self.properties.get_or_insert(serde_json::json!({}));
         if let Some(obj) = props.as_object_mut() {
