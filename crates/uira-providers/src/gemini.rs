@@ -250,13 +250,27 @@ impl GeminiClient {
             };
         }
 
-        // Extract text content
+        // Extract content (text or function calls)
         for part in candidate.content.parts {
-            if let GeminiPart::Text { text } = part {
-                return StreamChunk::ContentBlockDelta {
-                    index: 0,
-                    delta: ContentDelta::TextDelta { text },
-                };
+            match part {
+                GeminiPart::Text { text } => {
+                    return StreamChunk::ContentBlockDelta {
+                        index: 0,
+                        delta: ContentDelta::TextDelta { text },
+                    };
+                }
+                GeminiPart::FunctionCall { function_call } => {
+                    // Emit tool use as a ContentBlockStart event
+                    return StreamChunk::ContentBlockStart {
+                        index: 0,
+                        content_block: ContentBlock::ToolUse {
+                            id: format!("call_{}", uuid::Uuid::new_v4()),
+                            name: function_call.name,
+                            input: function_call.args,
+                        },
+                    };
+                }
+                _ => {}
             }
         }
 

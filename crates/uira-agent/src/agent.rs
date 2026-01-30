@@ -717,6 +717,26 @@ impl Agent {
                                     .await;
                                     continue;
                                 }
+                            } else {
+                                // No approval channel available but approval is required
+                                // Block execution to prevent unauthorized tool use
+                                let error_msg = format!(
+                                    "Tool '{}' requires approval but no approval channel is configured. \
+                                    Use --full-auto flag or run in interactive mode to approve tools. \
+                                    Reason: {}",
+                                    call.name, reason
+                                );
+                                results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                                self.record_tool_result(&call.id, &error_msg, true);
+                                self.emit_event(ThreadEvent::ItemCompleted {
+                                    item: Item::ToolResult {
+                                        tool_call_id: call.id.clone(),
+                                        output: error_msg,
+                                        is_error: true,
+                                    },
+                                })
+                                .await;
+                                continue;
                             }
                         }
                         ApprovalRequirement::Forbidden { reason } => {

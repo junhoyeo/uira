@@ -65,7 +65,7 @@ async fn run_exec(
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
     let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs);
+    let agent_config = create_agent_config(cli, config, &agent_defs)?;
 
     let mut agent = Agent::new(agent_config, client);
 
@@ -624,7 +624,7 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
     let client = create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs);
+    let agent_config = create_agent_config(cli, config, &agent_defs)?;
 
     // Setup terminal
     enable_raw_mode()?;
@@ -771,15 +771,22 @@ fn create_agent_config(
     cli: &Cli,
     _config: &CliConfig,
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
-) -> AgentConfig {
+) -> Result<AgentConfig, Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir().map_err(|e| {
+        format!(
+            "Failed to get current directory for sandbox policy: {}. \
+            Ensure you are running from a valid directory.",
+            e
+        )
+    })?;
+
     let sandbox_policy = match cli.sandbox.as_str() {
         "read-only" => SandboxPolicy::read_only(),
         "full-access" => SandboxPolicy::full_access(),
-        _ => SandboxPolicy::workspace_write(std::env::current_dir().unwrap_or_default()),
+        _ => SandboxPolicy::workspace_write(cwd.clone()),
     };
 
-    let mut config =
-        AgentConfig::new().with_working_directory(std::env::current_dir().unwrap_or_default());
+    let mut config = AgentConfig::new().with_working_directory(cwd);
 
     config.sandbox_policy = sandbox_policy;
 
@@ -801,7 +808,7 @@ fn create_agent_config(
         }
     }
 
-    config
+    Ok(config)
 }
 
 fn print_result(result: &ExecutionResult) {

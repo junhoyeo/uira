@@ -1,6 +1,7 @@
 use crate::{AuthError, Result, StoredCredential};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -33,18 +34,31 @@ impl CredentialStore {
 
         let content = serde_json::to_string_pretty(self)?;
 
-        std::fs::write(&path, content)
-            .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
-
+        // Write with restrictive permissions atomically to avoid TOCTOU race condition
+        // This ensures credentials are never readable by others, even briefly
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path)?.permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&path, perms)?;
+            use std::fs::OpenOptions;
+            use std::os::unix::fs::OpenOptionsExt;
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
+            return Ok(());
         }
 
-        Ok(())
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&path, content)
+                .map_err(|e| AuthError::StorageError(format!("Failed to write: {}", e)))?;
+            Ok(())
+        }
     }
 
     pub fn get(&self, provider: &str) -> Option<&StoredCredential> {

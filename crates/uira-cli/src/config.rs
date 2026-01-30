@@ -1,6 +1,7 @@
 //! CLI configuration
 
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::PathBuf;
 
 /// CLI-specific configuration
@@ -82,7 +83,7 @@ impl CliConfig {
         Self::default()
     }
 
-    /// Save configuration to disk
+    /// Save configuration to disk with restrictive permissions (contains API keys)
     pub fn save(&self) -> std::io::Result<()> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No config dir"))?
@@ -94,7 +95,26 @@ impl CliConfig {
         let content = toml::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        std::fs::write(config_path, content)
+        // Write with restrictive permissions (0600) to protect API keys
+        #[cfg(unix)]
+        {
+            use std::fs::OpenOptions;
+            use std::os::unix::fs::OpenOptionsExt;
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&config_path)?;
+            file.write_all(content.as_bytes())?;
+            return Ok(());
+        }
+
+        #[cfg(not(unix))]
+        {
+            std::fs::write(config_path, content)
+        }
     }
 
     /// Get API key for a provider

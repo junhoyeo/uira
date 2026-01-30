@@ -80,10 +80,19 @@ impl ContextManager {
                     }
                 }
                 TruncationPolicy::KeepRecent { count } => {
+                    // First, trim to the desired count
                     while self.history.len() > count {
                         self.history.remove_first();
                     }
-                    break;
+                    // If still over token limit after keeping recent messages,
+                    // continue removing from the front (fallback to FIFO behavior)
+                    if self.current_tokens() > self.max_tokens {
+                        if self.history.remove_first().is_none() {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
                 }
                 TruncationPolicy::Summarize => {
                     // Would need model access for summarization
