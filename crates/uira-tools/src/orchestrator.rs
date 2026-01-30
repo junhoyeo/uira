@@ -108,7 +108,12 @@ impl ToolOrchestrator {
         // Check if tool is a direct tool or provider-backed
         let direct_tool = self.router.get(tool_name);
 
-        // If no direct tool, try dispatch to providers
+        // Provider-backed tools (e.g., delegate_task, background_output) handle their own
+        // security through the provider implementation. They don't need orchestrator-level
+        // approval/sandbox because:
+        // 1. delegate_task spawns subagents with their own configs
+        // 2. background_output only reads task results, no file/command access
+        // 3. Providers implement their own validation in dispatch()
         if direct_tool.is_none() {
             return self.router.dispatch(tool_name, input, ctx).await;
         }

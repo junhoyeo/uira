@@ -80,7 +80,9 @@ impl Session {
         let mut context = ContextManager::new(client.max_tokens());
 
         if let Some(ref system_prompt) = config.system_prompt {
-            let _ = context.add_message(uira_protocol::Message::system(system_prompt));
+            if let Err(e) = context.add_message(uira_protocol::Message::system(system_prompt)) {
+                tracing::warn!("Failed to add system prompt: {}", e);
+            }
         }
 
         Self {

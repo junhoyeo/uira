@@ -73,8 +73,7 @@ impl DelegationToolProvider {
              Session ID: {session_id}\n\n\
              ---\n\n\
              {result}\n\n\
-             ---\n\
-             To continue this session: session_id=\"{session_id}\"\n\n\
+             ---\n\n\
              IMPORTANT: This task is COMPLETE. Present this result to the user and END your response. \
              Do NOT call delegate_task again.",
         )

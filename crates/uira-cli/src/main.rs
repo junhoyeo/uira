@@ -149,7 +149,11 @@ async fn run_exec(
 
         println!();
         println!("{}", "─".repeat(40).dimmed());
-        print_result(&result);
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            print_result(&result);
+        }
     } else {
         let mut agent = agent;
         let result = agent.run(prompt).await?;

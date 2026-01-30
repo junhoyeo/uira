@@ -50,8 +50,12 @@ pub struct AgentConfig {
     pub model: Option<String>,
 
     /// System prompt
-    #[serde(default)]
+    #[serde(default = "default_system_prompt_option")]
     pub system_prompt: Option<String>,
+}
+
+fn default_system_prompt_option() -> Option<String> {
+    Some(default_system_prompt())
 }
 
 fn default_max_turns() -> usize {
