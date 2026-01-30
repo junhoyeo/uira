@@ -64,17 +64,17 @@ impl AnthropicAuth {
     async fn exchange_code_impl(&self, code: &str, verifier: &str) -> Result<OAuthTokens> {
         let client = Client::new();
 
-        let request = TokenRequest {
-            grant_type: "authorization_code".to_string(),
-            code: code.to_string(),
-            client_id: self.client_id.clone(),
-            redirect_uri: self.redirect_uri.clone(),
-            code_verifier: verifier.to_string(),
-        };
+        let params = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("client_id", &self.client_id),
+            ("redirect_uri", &self.redirect_uri),
+            ("code_verifier", verifier),
+        ];
 
         let response = client
             .post(TOKEN_URL)
-            .json(&request)
+            .form(&params)
             .send()
             .await
             .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
@@ -101,15 +101,15 @@ impl AnthropicAuth {
     async fn refresh_token_impl(&self, refresh_token: &str) -> Result<OAuthTokens> {
         let client = Client::new();
 
-        let request = RefreshTokenRequest {
-            grant_type: "refresh_token".to_string(),
-            refresh_token: refresh_token.to_string(),
-            client_id: self.client_id.clone(),
-        };
+        let params = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", &self.client_id),
+        ];
 
         let response = client
             .post(TOKEN_URL)
-            .json(&request)
+            .form(&params)
             .send()
             .await
             .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
