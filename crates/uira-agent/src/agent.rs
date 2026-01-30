@@ -38,12 +38,21 @@ pub struct Agent {
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
     keyword_detector: KeywordDetectorHook,
+    last_tool_output: Option<String>,
 }
 
 impl Agent {
     pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
+        Self::new_with_executor(config, client, None)
+    }
+
+    pub fn new_with_executor(
+        config: AgentConfig,
+        client: Arc<dyn ModelClient>,
+        executor: Option<Arc<dyn uira_tools::AgentExecutor>>,
+    ) -> Self {
         Self {
-            session: Session::new(config, client),
+            session: Session::new_with_executor(config, client, executor),
             control: AgentControl::default(),
             state: AgentState::Idle,
             event_sender: None,
@@ -54,6 +63,7 @@ impl Agent {
             approval_tx: None,
             command_rx: None,
             keyword_detector: KeywordDetectorHook::new(),
+            last_tool_output: None,
         }
     }
 
@@ -348,8 +358,17 @@ impl Agent {
                 })
                 .await;
 
+                let output = {
+                    let text = response.text();
+                    if text.is_empty() {
+                        self.last_tool_output.take().unwrap_or_default()
+                    } else {
+                        text
+                    }
+                };
+
                 return Ok(ExecutionResult::success(
-                    response.text(),
+                    output,
                     self.session.turn,
                     self.session.usage.clone(),
                 ));
@@ -806,7 +825,10 @@ impl Agent {
                     let content = output.as_text().unwrap_or("").to_string();
                     results.push(ContentBlock::tool_result(&call.id, &content));
 
-                    // Record and emit tool result
+                    if !content.is_empty() {
+                        self.last_tool_output = Some(content.clone());
+                    }
+
                     self.record_tool_result(&call.id, &content, false);
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {

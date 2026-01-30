@@ -27,6 +27,7 @@ pub trait AgentExecutor: Send + Sync {
         prompt: &str,
         model: &str,
         allowed_tools: Option<Vec<String>>,
+        max_turns: Option<usize>,
     ) -> Result<String, String>;
 }
 
@@ -58,6 +59,25 @@ impl DelegationToolProvider {
                     .and_then(|agent_config| agent_config.model.clone())
             })
             .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string())
+    }
+
+    fn format_completion_result(
+        agent: &str,
+        _task: &str,
+        result: &str,
+        session_id: &str,
+    ) -> String {
+        format!(
+            "Task completed.\n\n\
+             Agent: {agent}\n\
+             Session ID: {session_id}\n\n\
+             ---\n\n\
+             {result}\n\n\
+             ---\n\
+             To continue this session: session_id=\"{session_id}\"\n\n\
+             IMPORTANT: This task is COMPLETE. Present this result to the user and END your response. \
+             Do NOT call delegate_task again.",
+        )
     }
 
     async fn delegate_task(&self, args: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
@@ -96,6 +116,8 @@ impl DelegationToolProvider {
                 .collect()
         });
 
+        let max_turns: Option<usize> = args["maxTurns"].as_u64().map(|n| n as usize);
+
         if run_in_background {
             let input = LaunchInput {
                 description: description.to_string(),
@@ -118,10 +140,16 @@ impl DelegationToolProvider {
                 let prompt_owned = prompt.to_string();
                 let model_owned = model.clone();
                 let allowed_tools_owned = allowed_tools.clone();
+                let max_turns_owned = max_turns;
 
                 let handle = tokio::spawn(async move {
                     let result = executor
-                        .execute(&prompt_owned, &model_owned, allowed_tools_owned)
+                        .execute(
+                            &prompt_owned,
+                            &model_owned,
+                            allowed_tools_owned,
+                            max_turns_owned,
+                        )
                         .await;
 
                     match result {
@@ -160,9 +188,20 @@ impl DelegationToolProvider {
         } else {
             match &self.agent_executor {
                 Some(executor) => {
-                    let result = executor.execute(prompt, &model, allowed_tools).await;
+                    let subagent_session_id = format!("sub_{}", uuid::Uuid::new_v4());
+                    let result = executor
+                        .execute(prompt, &model, allowed_tools, max_turns)
+                        .await;
                     match result {
-                        Ok(output) => Ok(ToolOutput::text(output)),
+                        Ok(output) => {
+                            let formatted = Self::format_completion_result(
+                                agent,
+                                description,
+                                &output,
+                                &subagent_session_id,
+                            );
+                            Ok(ToolOutput::text(formatted))
+                        }
                         Err(e) => Err(ToolError::ExecutionFailed { message: e }),
                     }
                 }
@@ -359,7 +398,7 @@ impl ToolProvider for DelegationToolProvider {
                     .property("prompt", JsonSchema::string().description("Task/prompt for the agent to execute"))
                     .property("model", JsonSchema::string().description("Override model (e.g., 'claude-sonnet-4-20250514'). Uses agent default if not specified"))
                     .property("allowedTools", JsonSchema::array(JsonSchema::string()).description("Tools to allow (e.g., ['Read', 'Glob']). Defaults to agent's configured tools"))
-                    .property("maxTurns", JsonSchema::number().description("Maximum turns before stopping. Default: 10"))
+                    .property("maxTurns", JsonSchema::number().description("Maximum turns before stopping. Uses agent default (100) if not specified"))
                     .property("runInBackground", JsonSchema::boolean().description("If true, runs in background and returns task_id"))
                     .required(&["agent", "prompt"]),
             ),

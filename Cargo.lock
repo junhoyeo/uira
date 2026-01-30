@@ -4772,6 +4772,7 @@ dependencies = [
  "colored",
  "crossterm",
  "dirs",
+ "futures",
  "predicates",
  "ratatui",
  "regex",
