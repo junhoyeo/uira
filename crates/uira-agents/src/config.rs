@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use uira_sdk::{AgentConfig, AgentOverrideConfig, AgentOverrides, ModelType};
+use crate::types::{AgentConfig, AgentOverrideConfig, AgentOverrides, ModelType};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentConfigError {

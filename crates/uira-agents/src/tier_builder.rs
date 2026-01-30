@@ -1,5 +1,4 @@
-use uira_sdk::{AgentConfig, ModelType};
-
+use crate::types::{AgentConfig, ModelType};
 use crate::prompt_loader::PromptLoader;
 
 /// Error marker returned when a prompt file is not found.

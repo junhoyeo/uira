@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use uira_sdk::AgentConfig;
+use crate::types::AgentConfig;
 
 /// Tool restrictions expressed as an allowlist.
 #[derive(Debug, Clone, Default)]

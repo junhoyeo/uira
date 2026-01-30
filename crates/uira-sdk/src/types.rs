@@ -1,117 +1,14 @@
 //! Core types for Uira SDK
+//!
+//! Agent-related types have been moved to uira-agents and are re-exported here
+//! for backwards compatibility.
 
 use serde::{Deserialize, Serialize};
 
-/// Model type for Claude models
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ModelType {
-    #[default]
-    Sonnet,
-    Opus,
-    Haiku,
-    /// Inherit from parent/orchestrator
-    Inherit,
-}
-
-impl ModelType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ModelType::Sonnet => "sonnet",
-            ModelType::Opus => "opus",
-            ModelType::Haiku => "haiku",
-            ModelType::Inherit => "inherit",
-        }
-    }
-}
-
-impl std::fmt::Display for ModelType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-/// Cost tier for agent usage
-/// Used to guide when to invoke expensive vs cheap agents
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum AgentCost {
-    Free,
-    Cheap,
-    Expensive,
-}
-
-/// Agent category for routing and grouping
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentCategory {
-    /// Code search and discovery
-    Exploration,
-    /// Domain-specific implementation
-    Specialist,
-    /// Strategic consultation (read-only)
-    Advisor,
-    /// General purpose helpers
-    Utility,
-    /// Multi-agent coordination
-    Orchestration,
-    /// Strategic planning
-    Planner,
-    /// Plan/work review
-    Reviewer,
-}
-
-impl AgentCategory {
-    /// Get the default model for this category
-    pub fn default_model(&self) -> ModelType {
-        match self {
-            AgentCategory::Exploration => ModelType::Haiku, // Fast, cheap
-            AgentCategory::Specialist => ModelType::Sonnet, // Balanced
-            AgentCategory::Advisor => ModelType::Opus,      // High quality reasoning
-            AgentCategory::Utility => ModelType::Haiku,     // Fast, cheap
-            AgentCategory::Orchestration => ModelType::Sonnet, // Balanced
-            AgentCategory::Planner => ModelType::Opus,      // Strategic thinking
-            AgentCategory::Reviewer => ModelType::Opus,     // Critical analysis
-        }
-    }
-}
-
-/// Trigger condition for delegation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DelegationTrigger {
-    /// Domain or area this trigger applies to
-    pub domain: String,
-    /// Condition that triggers delegation
-    pub trigger: String,
-}
-
-/// Metadata about an agent for dynamic prompt generation
-/// This enables Uira to build delegation tables automatically
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentPromptMetadata {
-    /// Agent category
-    pub category: AgentCategory,
-    /// Cost tier
-    pub cost: AgentCost,
-    /// Short alias for prompts
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_alias: Option<String>,
-    /// Conditions that trigger delegation to this agent
-    #[serde(default)]
-    pub triggers: Vec<DelegationTrigger>,
-    /// When to use this agent
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub use_when: Vec<String>,
-    /// When NOT to use this agent
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub avoid_when: Vec<String>,
-    /// Description for dynamic prompt building
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_description: Option<String>,
-    /// Tools this agent uses (for tool selection guidance)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<String>,
-}
+// Re-export agent types from uira-agents
+pub use uira_agents::{
+    AgentCategory, AgentCost, AgentPromptMetadata, DelegationTrigger, ModelType, RoutingTier,
+};
 
 /// Agent state during execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,15 +127,6 @@ impl Default for HookResult {
             modified_input: None,
         }
     }
-}
-
-/// Routing tier for model selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum RoutingTier {
-    Low,
-    Medium,
-    High,
 }
 
 #[cfg(test)]

@@ -4730,9 +4730,9 @@ name = "uira-agents"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
- "uira-sdk",
 ]
 
 [[package]]
@@ -5050,6 +5050,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
+ "uira-agents",
  "uira-config",
 ]
 

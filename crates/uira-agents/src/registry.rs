@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use uira_sdk::AgentConfig;
+use crate::types::AgentConfig;
 
 pub type AgentFactory = Arc<dyn Fn() -> AgentConfig + Send + Sync + 'static>;
 

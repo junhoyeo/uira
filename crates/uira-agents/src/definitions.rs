@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use uira_sdk::{AgentConfig, AgentOverrides, ModelType};
-
+use crate::types::{AgentConfig, AgentOverrides, ModelType};
 use crate::config::apply_overrides;
 use crate::prompt_loader::PromptLoader;
 use crate::tool_restrictions::ToolRestrictionsRegistry;
