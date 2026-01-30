@@ -194,8 +194,11 @@ async fn run_auth(
 
             println!("{} {}", "Logging in to:".cyan().bold(), provider.yellow());
 
+            let provider_lower = provider.to_lowercase();
+            let is_anthropic = provider_lower == "anthropic";
+
             let (auth_provider, oauth_port): (Box<dyn AuthProvider>, u16) =
-                match provider.to_lowercase().as_str() {
+                match provider_lower.as_str() {
                     "anthropic" => (Box::new(AnthropicAuth::new()), DEFAULT_OAUTH_PORT),
                     "openai" => (Box::new(OpenAIAuth::new()), OpenAIAuth::oauth_port()),
                     "google" | "gemini" => (Box::new(GoogleAuth::new()), DEFAULT_OAUTH_PORT),
@@ -211,40 +214,73 @@ async fn run_auth(
             println!("{}", "Starting OAuth flow...".dimmed());
             let challenge = auth_provider.start_oauth(0).await?;
 
-            let server = Arc::new(OAuthCallbackServer::new(oauth_port));
+            // Anthropic uses code-copy flow (user pastes code manually)
+            // Other providers use localhost callback
+            let auth_code = if is_anthropic {
+                // Open browser
+                println!("{}", "Opening browser for authorization...".cyan());
+                println!(
+                    "{}",
+                    format!("If browser doesn't open, visit:\n{}", challenge.url).dimmed()
+                );
 
-            // Spawn server in a separate thread (actix-web requires its own runtime)
-            let server_clone = server.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(async {
-                    let _ = server_clone.start().await;
+                if let Err(e) = webbrowser::open(&challenge.url) {
+                    eprintln!("{}: {}", "Warning: Failed to open browser".yellow(), e);
+                    println!("{}", "Please open the URL manually.".yellow());
+                }
+
+                println!();
+                println!(
+                    "{}",
+                    "After authorizing, copy the code from the browser and paste it here.".cyan()
+                );
+                println!(
+                    "{}",
+                    "The code will be displayed on Anthropic's page after you authorize.".dimmed()
+                );
+                println!();
+
+                print!("{}", "Enter authorization code: ".green().bold());
+                use std::io::Write;
+                std::io::stdout().flush()?;
+
+                let mut code_input = String::new();
+                std::io::stdin().read_line(&mut code_input)?;
+                code_input.trim().to_string()
+            } else {
+                // Use localhost callback server for other providers
+                let server = Arc::new(OAuthCallbackServer::new(oauth_port));
+
+                let server_clone = server.clone();
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        let _ = server_clone.start().await;
+                    });
                 });
-            });
 
-            // Give server time to start
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            // Open browser
-            println!("{}", "Opening browser for authorization...".cyan());
-            println!(
-                "{}",
-                format!("If browser doesn't open, visit: {}", challenge.url).dimmed()
-            );
+                println!("{}", "Opening browser for authorization...".cyan());
+                println!(
+                    "{}",
+                    format!("If browser doesn't open, visit: {}", challenge.url).dimmed()
+                );
 
-            if let Err(e) = webbrowser::open(&challenge.url) {
-                eprintln!("{}: {}", "Warning: Failed to open browser".yellow(), e);
-                println!("{}", "Please open the URL manually.".yellow());
-            }
+                if let Err(e) = webbrowser::open(&challenge.url) {
+                    eprintln!("{}: {}", "Warning: Failed to open browser".yellow(), e);
+                    println!("{}", "Please open the URL manually.".yellow());
+                }
 
-            // Wait for callback
-            println!("{}", "Waiting for authorization...".dimmed());
-            let callback = server.wait_for_callback(&challenge.state).await?;
+                println!("{}", "Waiting for authorization...".dimmed());
+                let callback = server.wait_for_callback(&challenge.state).await?;
+                callback.code
+            };
 
             // Exchange code for tokens
             println!("{}", "Exchanging authorization code for tokens...".dimmed());
             let tokens = auth_provider
-                .exchange_code(&callback.code, &challenge.verifier)
+                .exchange_code(&auth_code, &challenge.verifier)
                 .await?;
 
             // Save credentials

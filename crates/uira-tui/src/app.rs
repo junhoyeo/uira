@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::io::Stdout;
@@ -17,7 +17,7 @@ use uira_agent::{Agent, AgentConfig, ApprovalReceiver};
 use uira_protocol::{AgentState, Item, ThreadEvent};
 use uira_providers::ModelClient;
 
-use crate::views::{ApprovalOverlay, ApprovalRequest};
+use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
 use crate::widgets::ChatMessage;
 use crate::AppEvent;
 
@@ -50,31 +50,6 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
-const AVAILABLE_MODELS: &[(&str, &[&str])] = &[
-    (
-        "opencode",
-        &[
-            "kimi-k2.5-free",
-            "glm-4.7",
-            "qwen3-coder",
-            "claude-opus-4-1",
-            "big-pickle",
-            "gpt-5-nano",
-        ],
-    ),
-    (
-        "anthropic",
-        &[
-            "claude-sonnet-4-20250514",
-            "claude-opus-4-20250514",
-            "claude-3-5-sonnet-20241022",
-        ],
-    ),
-    ("openai", &["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]),
-    ("google", &["gemini-2.0-flash", "gemini-1.5-pro"]),
-    ("ollama", &["llama3.1", "qwen2.5-coder", "deepseek-coder"]),
-];
-
 pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
@@ -84,11 +59,12 @@ pub struct App {
     cursor_pos: usize,
     agent_state: AgentState,
     status: String,
-    scroll: u16,
+    list_state: ListState,
     input_focused: bool,
     streaming_buffer: Option<String>,
     thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
+    model_selector: ModelSelector,
     agent_input_tx: Option<mpsc::Sender<String>>,
     current_model: Option<String>,
 }
@@ -105,11 +81,12 @@ impl App {
             cursor_pos: 0,
             agent_state: AgentState::Idle,
             status: "Ready".to_string(),
-            scroll: 0,
+            list_state: ListState::default(),
             input_focused: true,
             streaming_buffer: None,
             thinking_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
+            model_selector: ModelSelector::new(),
             agent_input_tx: None,
             current_model: None,
         }
@@ -189,7 +166,7 @@ impl App {
         self.run(terminal).await
     }
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
         // Main layout: Chat area, Status bar, Input area
@@ -215,19 +192,33 @@ impl App {
         if self.approval_overlay.is_active() {
             self.approval_overlay.render(frame, area);
         }
+
+        // Render model selector overlay on top
+        if self.model_selector.is_active() {
+            self.model_selector.render(frame, area);
+        }
     }
 
-    fn render_chat(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_chat(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let block = Block::default()
             .title(" Uira ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::Cyan));
 
-        // Build list items from messages
         let mut items: Vec<ListItem> = self
             .messages
             .iter()
             .map(|msg| {
+                if msg.role == "thinking" {
+                    let style = Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC);
+                    return ListItem::new(Line::from(vec![
+                        Span::styled("thinking: ", style),
+                        Span::styled(&msg.content, style),
+                    ]));
+                }
+
                 let style = match msg.role.as_str() {
                     "user" => Style::default().fg(Color::Green),
                     "assistant" => Style::default().fg(Color::Cyan),
@@ -288,8 +279,10 @@ impl App {
             }
         }
 
-        let list = List::new(items).block(block);
-        frame.render_widget(list, area);
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -367,12 +360,77 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
+    fn scroll_up(&mut self) {
+        let i = match self.list_state.selected() {
+            Some(i) => i.saturating_sub(1),
+            None if !self.messages.is_empty() => self.messages.len() - 1,
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn scroll_down(&mut self) {
+        let total = self.total_items();
+        if total == 0 {
+            return;
+        }
+        let i = match self.list_state.selected() {
+            Some(i) => (i + 1).min(total - 1),
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        let total = self.total_items();
+        if total > 0 {
+            self.list_state.select(Some(total - 1));
+        }
+    }
+
+    fn total_items(&self) -> usize {
+        let mut count = self.messages.len();
+        if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+            count += 1;
+        }
+        if self
+            .streaming_buffer
+            .as_ref()
+            .is_some_and(|b| !b.is_empty())
+        {
+            count += 1;
+        }
+        count
+    }
+
+    fn push_message(&mut self, role: &str, content: String) {
+        self.messages.push(ChatMessage {
+            role: role.to_string(),
+            content,
+        });
+        self.scroll_to_bottom();
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) {
+        // Model selector takes priority for key handling
+        if self.model_selector.is_active() {
+            if let Some(selected_model) = self.model_selector.handle_key(key.code) {
+                self.current_model = Some(selected_model.clone());
+                self.status = format!("Model: {}", selected_model);
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "Switched to model: {}\nNote: Model change takes effect on next request.",
+                        selected_model
+                    ),
+                });
+            }
+            return;
+        }
+
         // Approval overlay takes priority for key handling
         if self.approval_overlay.handle_key(key.code) {
-            // Key was consumed by overlay
             if !self.approval_overlay.is_active() {
-                // Overlay finished, update state
                 self.agent_state = AgentState::Thinking;
             }
             return;
@@ -458,12 +516,10 @@ impl App {
                     self.should_quit = true;
                 }
                 KeyCode::Up => {
-                    // Scroll up
-                    self.scroll = self.scroll.saturating_add(1);
+                    self.scroll_up();
                 }
                 KeyCode::Down => {
-                    // Scroll down
-                    self.scroll = self.scroll.saturating_sub(1);
+                    self.scroll_down();
                 }
                 _ => {}
             }
@@ -476,10 +532,7 @@ impl App {
             return;
         }
 
-        self.messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: input.clone(),
-        });
+        self.push_message("user", input.clone());
 
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
@@ -525,29 +578,13 @@ impl App {
                 self.status = "Chat cleared".to_string();
             }
             "/models" => {
-                let mut output = String::from("Available models by provider:\n");
-                for (provider, models) in AVAILABLE_MODELS {
-                    output.push_str(&format!("\n  {}:\n", provider));
-                    for model in *models {
-                        let marker = if self.current_model.as_deref() == Some(*model) {
-                            "→"
-                        } else {
-                            " "
-                        };
-                        output.push_str(&format!("    {} {}\n", marker, model));
-                    }
-                }
-                output.push_str("\nUse /model <name> to switch models.");
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: output,
-                });
+                self.model_selector.open(self.current_model.clone());
             }
             "/model" => {
                 if let Some(model_name) = parts.get(1) {
-                    let found = AVAILABLE_MODELS
+                    let found = MODEL_GROUPS
                         .iter()
-                        .any(|(_, models)| models.contains(model_name));
+                        .any(|group| group.models.contains(model_name));
 
                     if found {
                         self.current_model = Some((*model_name).to_string());
@@ -608,10 +645,7 @@ impl App {
             }
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Error: {}", msg),
-                });
+                self.push_message("system", format!("Error: {}", msg));
             }
         }
     }
@@ -632,16 +666,14 @@ impl App {
                 );
             }
             ThreadEvent::ContentDelta { delta } => {
-                // Accumulate streaming content with size limit
                 if let Some(ref mut buffer) = self.streaming_buffer {
-                    // Only append if within size limit
                     if buffer.len() + delta.len() <= MAX_STREAMING_BUFFER_SIZE {
                         buffer.push_str(&delta);
                     }
-                    // Silently drop if over limit (could truncate from front as alternative)
                 } else {
                     self.streaming_buffer = Some(delta);
                 }
+                self.scroll_to_bottom();
             }
             ThreadEvent::ThinkingDelta { thinking } => {
                 if let Some(ref mut buffer) = self.thinking_buffer {
@@ -651,6 +683,7 @@ impl App {
                 } else {
                     self.thinking_buffer = Some(thinking);
                 }
+                self.scroll_to_bottom();
             }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { name, .. } => {
@@ -685,19 +718,17 @@ impl App {
                     output, is_error, ..
                 } => {
                     let role = if is_error { "error" } else { "tool" };
-                    self.messages.push(ChatMessage {
-                        role: role.to_string(),
-                        content: output,
-                    });
+                    self.push_message(role, output);
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
                     self.streaming_buffer = None;
-                    self.thinking_buffer = None;
-                    self.messages.push(ChatMessage {
-                        role: "assistant".to_string(),
-                        content,
-                    });
+                    if let Some(thinking) = self.thinking_buffer.take() {
+                        if !thinking.is_empty() {
+                            self.push_message("thinking", thinking);
+                        }
+                    }
+                    self.push_message("assistant", content);
                 }
                 Item::ApprovalDecision {
                     request_id,
@@ -723,14 +754,15 @@ impl App {
                     usage.input_tokens, usage.output_tokens
                 );
 
-                self.thinking_buffer = None;
+                if let Some(thinking) = self.thinking_buffer.take() {
+                    if !thinking.is_empty() {
+                        self.push_message("thinking", thinking);
+                    }
+                }
 
                 if let Some(buffer) = self.streaming_buffer.take() {
                     if !buffer.is_empty() {
-                        self.messages.push(ChatMessage {
-                            role: "assistant".to_string(),
-                            content: buffer,
-                        });
+                        self.push_message("assistant", buffer);
                     }
                 }
             }
@@ -741,10 +773,7 @@ impl App {
             ThreadEvent::Error { message, .. } => {
                 self.agent_state = AgentState::Failed;
                 self.status = format!("Error: {}", message);
-                self.messages.push(ChatMessage {
-                    role: "error".to_string(),
-                    content: message,
-                });
+                self.push_message("error", message);
             }
             // Goal Verification Events
             ThreadEvent::GoalVerificationStarted { goals, .. } => {
@@ -758,13 +787,13 @@ impl App {
                 ..
             } => {
                 let icon = if passed { "[PASS]" } else { "[FAIL]" };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!(
+                self.push_message(
+                    "system",
+                    format!(
                         "{} Goal '{}': {:.1}% (target: {:.1}%)",
                         icon, goal, score, target
                     ),
-                });
+                );
             }
             ThreadEvent::GoalVerificationCompleted {
                 all_passed,
@@ -788,28 +817,27 @@ impl App {
             ThreadEvent::RalphContinuation {
                 reason, confidence, ..
             } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
-                });
+                self.push_message(
+                    "system",
+                    format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
+                );
             }
             ThreadEvent::RalphCircuitBreak { reason, iteration } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Ralph stopped at iteration {}: {}", iteration, reason),
-                });
+                self.push_message(
+                    "system",
+                    format!("Ralph stopped at iteration {}: {}", iteration, reason),
+                );
                 self.agent_state = AgentState::Complete;
             }
-            // Background Task Events
             ThreadEvent::BackgroundTaskSpawned {
                 task_id,
                 description,
                 ..
             } => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task started: {} ({})", description, task_id),
-                });
+                self.push_message(
+                    "system",
+                    format!("Background task started: {} ({})", description, task_id),
+                );
             }
             ThreadEvent::BackgroundTaskProgress {
                 task_id,
@@ -817,19 +845,16 @@ impl App {
                 message,
             } => {
                 let msg = message.map(|m| format!(": {}", m)).unwrap_or_default();
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task {} - {}{}", task_id, status, msg),
-                });
+                self.push_message(
+                    "system",
+                    format!("Background task {} - {}{}", task_id, status, msg),
+                );
             }
             ThreadEvent::BackgroundTaskCompleted {
                 task_id, success, ..
             } => {
                 let status = if success { "completed" } else { "failed" };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Background task {}: {}", task_id, status),
-                });
+                self.push_message("system", format!("Background task {}: {}", task_id, status));
             }
             // Catch-all for unknown variants (due to #[non_exhaustive])
             _ => {
@@ -843,12 +868,8 @@ impl App {
         self.event_tx.clone()
     }
 
-    /// Add a message to the chat
     pub fn add_message(&mut self, role: &str, content: &str) {
-        self.messages.push(ChatMessage {
-            role: role.to_string(),
-            content: content.to_string(),
-        });
+        self.push_message(role, content.to_string());
     }
 
     /// Set the status message

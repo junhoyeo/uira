@@ -6,7 +6,6 @@
 //! This client calls the Zen API directly without requiring a local OpenCode server.
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -255,6 +254,9 @@ impl ModelClient for OpenCodeClient {
         messages: &[Message],
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
+        use async_stream::stream;
+        use futures::StreamExt;
+
         let request = self.build_request(messages, tools, true);
         let url = format!("{}/chat/completions", self.base_url());
 
@@ -269,13 +271,37 @@ impl ModelClient for OpenCodeClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| match result {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                Self::parse_sse_event(&text)
+        let mut byte_stream = response.bytes_stream();
+
+        let stream = stream! {
+            let mut buffer = String::new();
+
+            while let Some(result) = byte_stream.next().await {
+                match result {
+                    Ok(bytes) => {
+                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let event = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
+
+                            if let Some(chunk) = Self::parse_sse_line(&event) {
+                                yield Ok(chunk);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        yield Err(ProviderError::StreamError(e.to_string()));
+                    }
+                }
             }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
-        });
+
+            if !buffer.trim().is_empty() {
+                if let Some(chunk) = Self::parse_sse_line(&buffer) {
+                    yield Ok(chunk);
+                }
+            }
+        };
 
         Ok(Box::pin(stream))
     }
@@ -298,8 +324,8 @@ impl ModelClient for OpenCodeClient {
 }
 
 impl OpenCodeClient {
-    fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        for line in text.lines() {
+    fn parse_sse_line(event: &str) -> Option<StreamChunk> {
+        for line in event.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with(':') {
                 continue;
@@ -307,16 +333,16 @@ impl OpenCodeClient {
 
             if let Some(data) = line.strip_prefix("data: ") {
                 if data == "[DONE]" {
-                    return Ok(StreamChunk::MessageStop);
+                    return Some(StreamChunk::MessageStop);
                 }
 
                 if let Ok(chunk) = serde_json::from_str::<OpenCodeStreamChunk>(data) {
-                    return Ok(Self::convert_stream_chunk(chunk));
+                    return Some(Self::convert_stream_chunk(chunk));
                 }
             }
         }
 
-        Ok(StreamChunk::Ping)
+        None
     }
 
     fn convert_stream_chunk(chunk: OpenCodeStreamChunk) -> StreamChunk {
@@ -354,6 +380,18 @@ impl OpenCodeClient {
                 return StreamChunk::ContentBlockDelta {
                     index: choice.index,
                     delta: ContentDelta::TextDelta { text: content },
+                };
+            }
+        }
+
+        // Handle reasoning_content as thinking (for models like Kimi)
+        if let Some(reasoning) = choice.delta.reasoning_content {
+            if !reasoning.is_empty() {
+                return StreamChunk::ContentBlockDelta {
+                    index: choice.index,
+                    delta: ContentDelta::ThinkingDelta {
+                        thinking: reasoning,
+                    },
                 };
             }
         }
@@ -504,6 +542,8 @@ struct OpenCodeStreamDelta {
     role: Option<String>,
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Option<Vec<OpenCodeStreamToolCall>>,
 }
