@@ -1,13 +1,12 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
-
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::Command;
 
+use crate::ai_decision::{AiDecisionClient, AiWorkflowConfig, Decision};
 use crate::hooks::{AiHookExecutor, HookContext, HookEvent, HooksConfig};
 use uira_config::TyposSettings;
 
@@ -23,65 +22,11 @@ pub struct TypoEntry {
     pub corrections: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Session {
-    id: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ChatBody {
-    #[serde(rename = "modelID")]
-    model_id: String,
-
-    #[serde(rename = "providerID")]
-    provider_id: String,
-
-    parts: Vec<ChatPart>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<HashMap<String, bool>>,
-}
-
-#[derive(Debug, Serialize)]
-struct ChatPart {
-    #[serde(rename = "type")]
-    part_type: String,
-    text: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessageInfo {
-    #[allow(dead_code)]
-    info: MessageMeta,
-    parts: Vec<MessagePart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessageMeta {
-    #[allow(dead_code)]
-    id: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    role: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MessagePart {
-    #[serde(rename = "type")]
-    part_type: String,
-    text: Option<String>,
-}
-
 pub struct TyposChecker {
-    client: reqwest::blocking::Client,
-    session_id: Option<String>,
-    server_was_started: bool,
+    ai_client: AiDecisionClient,
+    #[allow(dead_code)]
     config: TyposSettings,
-    host: String,
-    port: u16,
     hook_executor: Option<AiHookExecutor>,
-    modified_files: HashSet<String>,
-    auto_stage: bool,
 }
 
 impl TyposChecker {
@@ -91,30 +36,30 @@ impl TyposChecker {
     }
 
     pub fn with_auto_stage(mut self, auto_stage: bool) -> Self {
-        self.auto_stage = auto_stage;
+        self.ai_client.auto_stage = auto_stage;
         self
     }
 
     pub fn with_hooks(config: Option<TyposSettings>, hooks_config: Option<HooksConfig>) -> Self {
         let config = config.unwrap_or_default();
-        let host = config.ai.host.clone();
-        let port = config.ai.port;
+        let (provider, model) = config.ai.parse_model();
+
+        let ai_config = AiWorkflowConfig {
+            host: config.ai.host.clone(),
+            port: config.ai.port,
+            model,
+            provider,
+            disable_tools: config.ai.disable_tools,
+            disable_mcp: config.ai.disable_mcp,
+            timeout_secs: 120,
+        };
 
         let hook_executor = hooks_config.map(AiHookExecutor::new);
 
         Self {
-            client: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .unwrap(),
-            session_id: None,
-            server_was_started: false,
+            ai_client: AiDecisionClient::new(ai_config),
             config,
-            host,
-            port,
             hook_executor,
-            modified_files: HashSet::new(),
-            auto_stage: false,
         }
     }
 
@@ -129,31 +74,6 @@ impl TyposChecker {
             }
         }
         Ok(true)
-    }
-
-    fn build_tools_config(&self) -> Option<HashMap<String, bool>> {
-        if !self.config.ai.disable_tools && !self.config.ai.disable_mcp {
-            return None;
-        }
-
-        let mut tools = HashMap::new();
-
-        if self.config.ai.disable_tools {
-            tools.insert("bash".to_string(), false);
-            tools.insert("edit".to_string(), false);
-            tools.insert("write".to_string(), false);
-            tools.insert("read".to_string(), false);
-            tools.insert("patch".to_string(), false);
-            tools.insert("glob".to_string(), false);
-            tools.insert("grep".to_string(), false);
-            tools.insert("webfetch".to_string(), false);
-        }
-
-        if self.config.ai.disable_mcp {
-            tools.insert("mcp_*".to_string(), false);
-        }
-
-        Some(tools)
     }
 
     pub fn run(&mut self, files: &[String]) -> Result<bool> {
@@ -185,7 +105,7 @@ impl TyposChecker {
             unique_count
         );
 
-        self.ensure_opencode_server()?;
+        self.ai_client.ensure_server()?;
 
         let unique_typos: Vec<&TypoEntry> = grouped.values().map(|v| v[0]).collect();
         let decisions = self.process_typos_batch_unique(&unique_typos)?;
@@ -247,10 +167,10 @@ impl TyposChecker {
             }
         }
 
-        self.cleanup_server()?;
+        self.ai_client.cleanup()?;
 
-        if self.auto_stage && !self.modified_files.is_empty() {
-            self.stage_modified_files()?;
+        if self.ai_client.auto_stage && !self.ai_client.modified_files.is_empty() {
+            self.ai_client.stage_modified_files()?;
         }
 
         println!();
@@ -305,84 +225,6 @@ impl TyposChecker {
         Ok(typos)
     }
 
-    fn ensure_opencode_server(&mut self) -> Result<()> {
-        if self.is_server_running() {
-            println!("  {} OpenCode server already running", "→".dimmed());
-            return Ok(());
-        }
-
-        println!("  {} Starting OpenCode server...", "→".dimmed());
-        self.start_server()?;
-        self.server_was_started = true;
-
-        for _ in 0..30 {
-            std::thread::sleep(Duration::from_millis(500));
-            if self.is_server_running() {
-                println!("  {} OpenCode server ready", "✓".green());
-                return Ok(());
-            }
-        }
-
-        anyhow::bail!("Timeout waiting for OpenCode server to start")
-    }
-
-    fn is_server_running(&self) -> bool {
-        self.client
-            .get(format!("http://{}:{}/health", self.host, self.port))
-            .send()
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
-    }
-
-    fn start_server(&self) -> Result<()> {
-        Command::new("opencode")
-            .args(["serve"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("Failed to start OpenCode server. Is opencode installed?")?;
-        Ok(())
-    }
-
-    fn cleanup_server(&mut self) -> Result<()> {
-        if let Some(session_id) = &self.session_id {
-            let _ = self
-                .client
-                .delete(format!(
-                    "http://{}:{}/session/{}",
-                    self.host, self.port, session_id
-                ))
-                .send();
-        }
-
-        if self.server_was_started {
-            println!("  {} Stopping OpenCode server...", "→".dimmed());
-            let _ = Command::new("pkill")
-                .args(["-f", "opencode.*--server"])
-                .status();
-        }
-
-        Ok(())
-    }
-
-    fn get_or_create_session(&mut self) -> Result<String> {
-        if let Some(id) = &self.session_id {
-            return Ok(id.clone());
-        }
-
-        let resp: Session = self
-            .client
-            .post(format!("http://{}:{}/session", self.host, self.port))
-            .send()
-            .context("Failed to create session")?
-            .json()
-            .context("Failed to parse session response")?;
-
-        self.session_id = Some(resp.id.clone());
-        Ok(resp.id)
-    }
-
     fn process_typos_batch_unique(&mut self, typos: &[&TypoEntry]) -> Result<Vec<Decision>> {
         for typo in typos {
             let corrections = typo.corrections.join(", ");
@@ -397,8 +239,8 @@ impl TyposChecker {
         let mut typo_list = String::new();
         for (i, typo) in typos.iter().enumerate() {
             let corrections = typo.corrections.join(", ");
-            let context = self.get_file_context(&typo.path, typo.line_num)?;
-            let line_content = self.get_line(&typo.path, typo.line_num)?;
+            let context = AiDecisionClient::get_file_context(&typo.path, typo.line_num)?;
+            let line_content = AiDecisionClient::get_line(&typo.path, typo.line_num)?;
 
             typo_list.push_str(&format!(
                 r#"
@@ -422,7 +264,6 @@ Context:
             ));
         }
 
-        let session_id = self.get_or_create_session()?;
         let prompt = format!(
             r#"I found {} unique potential typos in code. For EACH typo, analyze if it should be fixed or ignored.
 
@@ -451,33 +292,8 @@ Your response (one word per line, {} lines total):"#,
             "→".dimmed(),
             typos.len()
         );
-
-        let (provider_id, model_id) = self.config.ai.parse_model();
-
-        let body = ChatBody {
-            model_id,
-            provider_id,
-            parts: vec![ChatPart {
-                part_type: "text".to_string(),
-                text: prompt,
-            }],
-            tools: self.build_tools_config(),
-        };
-
-        let resp = self
-            .client
-            .post(format!(
-                "http://{}:{}/session/{}/message",
-                self.host, self.port, session_id
-            ))
-            .json(&body)
-            .send()
-            .context("Failed to send message")?;
-
-        let message: MessageInfo = resp.json().context("Failed to parse AI response")?;
-
-        let ai_text = self.extract_text_from_message(&message);
-        let decisions = self.parse_batch_decisions(&ai_text, typos.len());
+        let ai_text = self.ai_client.send_prompt(&prompt)?;
+        let decisions = self.ai_client.parse_decisions(&ai_text, typos.len());
 
         for (typo, decision) in typos.iter().zip(decisions.iter()) {
             let mut post_ai_ctx = HookContext::new();
@@ -490,83 +306,6 @@ Your response (one word per line, {} lines total):"#,
         println!("  {} AI analysis complete", "✓".green());
 
         Ok(decisions)
-    }
-
-    fn extract_text_from_message(&self, message: &MessageInfo) -> String {
-        let mut text = String::new();
-        for part in &message.parts {
-            if part.part_type == "text" {
-                if let Some(t) = &part.text {
-                    text.push_str(t);
-                    text.push('\n');
-                }
-            }
-        }
-        text
-    }
-
-    fn parse_batch_decisions(&self, ai_text: &str, expected_count: usize) -> Vec<Decision> {
-        let mut decisions = Vec::with_capacity(expected_count);
-        let upper = ai_text.to_uppercase();
-
-        for line in upper.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let decision = if trimmed.contains("APPLY") {
-                Decision::Apply
-            } else if trimmed.contains("IGNORE") {
-                Decision::Ignore
-            } else if trimmed.contains("SKIP") {
-                Decision::Skip
-            } else {
-                continue;
-            };
-
-            decisions.push(decision);
-
-            if decisions.len() >= expected_count {
-                break;
-            }
-        }
-
-        while decisions.len() < expected_count {
-            decisions.push(Decision::Skip);
-        }
-
-        decisions
-    }
-
-    fn get_file_context(&self, path: &str, line_num: u32) -> Result<String> {
-        let content = fs::read_to_string(path)?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        let start = (line_num as usize).saturating_sub(3);
-        let end = (line_num as usize + 2).min(lines.len());
-
-        let mut context = String::new();
-        for (i, line) in lines[start..end].iter().enumerate() {
-            let actual_line = start + i + 1;
-            let marker = if actual_line == line_num as usize {
-                ">"
-            } else {
-                " "
-            };
-            context.push_str(&format!("{} {:4} | {}\n", marker, actual_line, line));
-        }
-
-        Ok(context)
-    }
-
-    fn get_line(&self, path: &str, line_num: u32) -> Result<String> {
-        let content = fs::read_to_string(path)?;
-        content
-            .lines()
-            .nth(line_num as usize - 1)
-            .map(|s| s.to_string())
-            .ok_or_else(|| anyhow::anyhow!("Line not found"))
     }
 
     fn apply_fix(&mut self, typo: &TypoEntry) -> Result<()> {
@@ -594,7 +333,7 @@ Your response (one word per line, {} lines total):"#,
         }
 
         fs::write(&typo.path, lines.join("\n") + "\n")?;
-        self.modified_files.insert(typo.path.clone());
+        self.ai_client.modified_files.insert(typo.path.clone());
         println!("    {} Fixed: {} → {}", "✓".green(), typo.typo, correction);
 
         let mut post_fix_ctx = HookContext::new();
@@ -622,38 +361,11 @@ Your response (one word per line, {} lines total):"#,
 
         let toml_str = toml::to_string_pretty(&config)?;
         fs::write(config_path, toml_str)?;
-        self.modified_files.insert(config_path.to_string());
+        self.ai_client
+            .modified_files
+            .insert(config_path.to_string());
 
         println!("    {} Added '{}' to {}", "✓".yellow(), word, config_path);
-        Ok(())
-    }
-
-    fn stage_modified_files(&self) -> Result<()> {
-        if self.modified_files.is_empty() {
-            return Ok(());
-        }
-
-        let files: Vec<&str> = self.modified_files.iter().map(|s| s.as_str()).collect();
-        println!(
-            "  {} Staging {} modified file(s)...",
-            "→".dimmed(),
-            files.len()
-        );
-
-        let status = Command::new("git")
-            .arg("add")
-            .args(&files)
-            .status()
-            .context("Failed to run git add")?;
-
-        if status.success() {
-            for file in &files {
-                println!("    {} {}", "✓".green(), file);
-            }
-        } else {
-            anyhow::bail!("git add failed");
-        }
-
         Ok(())
     }
 }
@@ -668,13 +380,6 @@ impl From<TyposSettings> for TyposChecker {
     fn from(config: TyposSettings) -> Self {
         Self::with_hooks(Some(config), None)
     }
-}
-
-#[derive(Debug)]
-enum Decision {
-    Apply,
-    Ignore,
-    Skip,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -697,8 +402,7 @@ mod tests {
     #[test]
     fn test_typos_checker_creation() {
         let checker = TyposChecker::new(None);
-        assert!(checker.session_id.is_none());
-        assert!(!checker.server_was_started);
+        assert!(!checker.ai_client.auto_stage);
         assert!(checker.config.ai.disable_tools);
         assert!(checker.config.ai.disable_mcp);
 
@@ -739,7 +443,7 @@ mod tests {
     #[test]
     fn test_tools_config() {
         let checker = TyposChecker::default();
-        let tools = checker.build_tools_config().unwrap();
+        let tools = checker.ai_client.build_tools_config().unwrap();
         assert_eq!(tools.get("bash"), Some(&false));
         assert_eq!(tools.get("mcp_*"), Some(&false));
 
@@ -751,6 +455,6 @@ mod tests {
             },
         };
         let checker_no_disable = TyposChecker::new(Some(config));
-        assert!(checker_no_disable.build_tools_config().is_none());
+        assert!(checker_no_disable.ai_client.build_tools_config().is_none());
     }
 }

@@ -1,3 +1,4 @@
+mod ai_decision;
 mod config;
 mod hooks;
 mod linter;
@@ -85,6 +86,7 @@ enum Commands {
         #[arg(
             long,
             default_value = "error",
+            value_parser = clap::builder::PossibleValuesParser::new(["error", "warning", "all"]),
             help = "Severity filter: error, warning, all"
         )]
         severity: String,
