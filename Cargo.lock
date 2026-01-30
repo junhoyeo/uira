@@ -4668,6 +4668,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "chrono",
  "clap",
  "colored",
  "dirs",
@@ -4683,12 +4684,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "uira-agent",
  "uira-agents",
+ "uira-comment-checker",
  "uira-config",
  "uira-core",
  "uira-features",
  "uira-goals",
+ "uira-oxc",
+ "uira-protocol",
+ "uira-providers",
+ "uira-sandbox",
  "uira-sdk",
+ "uira-tools",
 ]
 
 [[package]]

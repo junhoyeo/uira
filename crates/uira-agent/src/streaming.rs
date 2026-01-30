@@ -6,6 +6,12 @@
 
 use uira_protocol::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
 
+#[derive(Debug, Clone)]
+pub enum StreamOutput {
+    Text(String),
+    Thinking(String),
+}
+
 /// Controller for processing streaming model responses
 ///
 /// Implements the Codex newline-gated streaming pattern:
@@ -82,10 +88,14 @@ impl StreamController {
         }
     }
 
-    /// Push a stream chunk, returns newly committed lines
-    pub fn push(&mut self, chunk: StreamChunk) -> Vec<String> {
+    /// Push a stream chunk, returns newly committed outputs (text lines or thinking)
+    pub fn push(&mut self, chunk: StreamChunk) -> Vec<StreamOutput> {
         match chunk {
             StreamChunk::MessageStart { message } => {
+                tracing::debug!(
+                    "StreamController: MessageStart - usage: {:?}",
+                    message.usage
+                );
                 self.message_id = Some(message.id);
                 self.model = Some(message.model);
                 self.usage = message.usage;
@@ -96,6 +106,11 @@ impl StreamController {
                 index,
                 content_block,
             } => {
+                tracing::debug!(
+                    "ContentBlockStart: index={}, block={:?}",
+                    index,
+                    content_block
+                );
                 self.current_block_index = Some(index);
                 match &content_block {
                     ContentBlock::Text { .. } => {
@@ -117,40 +132,51 @@ impl StreamController {
                 vec![]
             }
 
-            StreamChunk::ContentBlockDelta { delta, .. } => match delta {
-                ContentDelta::TextDelta { text } => self.push_text(&text),
-                ContentDelta::InputJsonDelta { partial_json } => {
-                    self.tool_json_buffer.push_str(&partial_json);
-                    vec![]
-                }
-                ContentDelta::ThinkingDelta { thinking } => {
-                    self.thinking_buffer.push_str(&thinking);
-                    vec![]
-                }
-                ContentDelta::SignatureDelta { signature } => {
-                    if let Some(ref mut sig) = self.thinking_signature {
-                        sig.push_str(&signature);
-                    } else {
-                        self.thinking_signature = Some(signature);
+            StreamChunk::ContentBlockDelta { index, delta } => {
+                tracing::debug!("ContentBlockDelta: index={}, delta={:?}", index, delta);
+                match delta {
+                    ContentDelta::TextDelta { text } => self.push_text(&text),
+                    ContentDelta::InputJsonDelta { partial_json } => {
+                        self.tool_json_buffer.push_str(&partial_json);
+                        vec![]
                     }
-                    vec![]
+                    ContentDelta::ThinkingDelta { thinking } => {
+                        self.thinking_buffer.push_str(&thinking);
+                        vec![StreamOutput::Thinking(thinking)]
+                    }
+                    ContentDelta::SignatureDelta { signature } => {
+                        if let Some(ref mut sig) = self.thinking_signature {
+                            sig.push_str(&signature);
+                        } else {
+                            self.thinking_signature = Some(signature);
+                        }
+                        vec![]
+                    }
                 }
-            },
+            }
 
-            StreamChunk::ContentBlockStop { .. } => {
+            StreamChunk::ContentBlockStop { index } => {
+                tracing::debug!("ContentBlockStop: index={}", index);
                 self.finalize_current_block();
                 self.current_block_index = None;
                 vec![]
             }
 
             StreamChunk::MessageDelta { usage, .. } => {
+                tracing::debug!("StreamController: MessageDelta - usage: {:?}", usage);
                 if let Some(u) = usage {
-                    self.usage = u;
+                    // Accumulate: keep input_tokens from MessageStart, update output_tokens
+                    self.usage.output_tokens = u.output_tokens;
+                    // If MessageDelta has input_tokens (rare), use them
+                    if u.input_tokens > 0 {
+                        self.usage.input_tokens = u.input_tokens;
+                    }
                 }
                 vec![]
             }
 
             StreamChunk::MessageStop => {
+                tracing::debug!("MessageStop");
                 self.finished = true;
                 self.drain_pending()
             }
@@ -164,16 +190,14 @@ impl StreamController {
         }
     }
 
-    /// Push text, committing on newlines (Codex pattern)
-    fn push_text(&mut self, text: &str) -> Vec<String> {
+    fn push_text(&mut self, text: &str) -> Vec<StreamOutput> {
         let mut new_lines = Vec::new();
 
         for ch in text.chars() {
             if ch == '\n' {
-                // Commit the pending line
                 let line = std::mem::take(&mut self.pending_text);
                 self.committed_lines.push(line.clone());
-                new_lines.push(line);
+                new_lines.push(StreamOutput::Text(line));
             } else {
                 self.pending_text.push(ch);
             }
@@ -182,17 +206,12 @@ impl StreamController {
         new_lines
     }
 
-    /// Drain any remaining partial line (for UI streaming)
-    /// Note: This returns the pending text for display but doesn't add it to
-    /// committed_lines since it's already been included in the finalized content block.
-    fn drain_pending(&mut self) -> Vec<String> {
+    fn drain_pending(&mut self) -> Vec<StreamOutput> {
         if self.pending_text.is_empty() {
             vec![]
         } else {
             let line = std::mem::take(&mut self.pending_text);
-            // Don't add to committed_lines - it's already in the content block
-            // from finalize_current_block(). Just return for UI streaming.
-            vec![line]
+            vec![StreamOutput::Text(line)]
         }
     }
 
@@ -276,6 +295,11 @@ impl StreamController {
 
     /// Build final response from accumulated data
     pub fn into_response(mut self) -> ModelResponse {
+        tracing::debug!(
+            "into_response: committed_lines={:?}, pending_text={:?}, pending_in_block={}, content_blocks={:?}, current_block_index={:?}",
+            self.committed_lines, self.pending_text, self.pending_in_block, self.content_blocks, self.current_block_index
+        );
+
         // Ensure any in-progress block is finalized
         if self.current_block_index.is_some() {
             self.finalize_current_block();
@@ -297,6 +321,11 @@ impl StreamController {
                 self.content_blocks.push(ContentBlock::Text { text });
             }
         }
+
+        tracing::debug!(
+            "into_response: final content_blocks={:?}",
+            self.content_blocks
+        );
 
         ModelResponse {
             id: self.message_id.unwrap_or_default(),

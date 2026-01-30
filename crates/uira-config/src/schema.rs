@@ -15,6 +15,14 @@ pub struct UiraConfig {
     #[serde(default)]
     pub typos: TyposSettings,
 
+    /// Diagnostics command settings (AI-assisted lint/type error fixing)
+    #[serde(default)]
+    pub diagnostics: DiagnosticsSettings,
+
+    /// Comments command settings (AI-assisted comment removal/preservation)
+    #[serde(default)]
+    pub comments: CommentsSettings,
+
     /// OpenCode server settings
     #[serde(default)]
     pub opencode: OpencodeSettings,
@@ -110,6 +118,7 @@ fn default_opencode_auto_start() -> bool {
 /// Typos command settings for AI-assisted typo checking
 ///
 /// Configuration for the `uira typos --ai` command.
+/// The AI workflow uses an embedded agent with full tool access.
 ///
 /// # Example
 ///
@@ -117,10 +126,6 @@ fn default_opencode_auto_start() -> bool {
 /// typos:
 ///   ai:
 ///     model: "anthropic/claude-sonnet-4-20250514"
-///     host: "127.0.0.1"
-///     port: 4096
-///     disable_tools: true
-///     disable_mcp: true
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TyposSettings {
@@ -135,32 +140,12 @@ pub struct TyposAiSettings {
     /// Model identifier (e.g., "anthropic/claude-sonnet-4-20250514")
     #[serde(default = "default_typos_model")]
     pub model: String,
-
-    /// OpenCode server host (default: 127.0.0.1)
-    #[serde(default = "default_typos_host")]
-    pub host: String,
-
-    /// OpenCode server port (default: 4096)
-    #[serde(default = "default_typos_port")]
-    pub port: u16,
-
-    /// Disable built-in tools (default: true)
-    #[serde(default = "default_typos_disable_tools")]
-    pub disable_tools: bool,
-
-    /// Disable MCP servers (default: true)
-    #[serde(default = "default_typos_disable_mcp")]
-    pub disable_mcp: bool,
 }
 
 impl Default for TyposAiSettings {
     fn default() -> Self {
         Self {
             model: default_typos_model(),
-            host: default_typos_host(),
-            port: default_typos_port(),
-            disable_tools: default_typos_disable_tools(),
-            disable_mcp: default_typos_disable_mcp(),
         }
     }
 }
@@ -180,20 +165,125 @@ fn default_typos_model() -> String {
     "anthropic/claude-sonnet-4-20250514".to_string()
 }
 
-fn default_typos_host() -> String {
-    "127.0.0.1".to_string()
+// ============================================================================
+// Diagnostics Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnosticsSettings {
+    #[serde(default)]
+    pub ai: DiagnosticsAiSettings,
 }
 
-fn default_typos_port() -> u16 {
-    4096
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsAiSettings {
+    #[serde(default = "default_diagnostics_model")]
+    pub model: String,
+
+    #[serde(default = "default_diagnostics_severity")]
+    pub severity: String,
+
+    #[serde(default = "default_diagnostics_confidence")]
+    pub confidence_threshold: f64,
+
+    #[serde(default = "default_diagnostics_languages")]
+    pub languages: Vec<String>,
 }
 
-fn default_typos_disable_tools() -> bool {
-    true
+impl Default for DiagnosticsAiSettings {
+    fn default() -> Self {
+        Self {
+            model: default_diagnostics_model(),
+            severity: default_diagnostics_severity(),
+            confidence_threshold: default_diagnostics_confidence(),
+            languages: default_diagnostics_languages(),
+        }
+    }
 }
 
-fn default_typos_disable_mcp() -> bool {
-    true
+impl DiagnosticsAiSettings {
+    pub fn parse_model(&self) -> (String, String) {
+        if let Some((provider, model)) = self.model.split_once('/') {
+            (provider.to_string(), model.to_string())
+        } else {
+            ("anthropic".to_string(), self.model.clone())
+        }
+    }
+}
+
+fn default_diagnostics_model() -> String {
+    "anthropic/claude-sonnet-4-20250514".to_string()
+}
+
+fn default_diagnostics_severity() -> String {
+    "error".to_string()
+}
+
+fn default_diagnostics_confidence() -> f64 {
+    0.8
+}
+
+fn default_diagnostics_languages() -> Vec<String> {
+    vec![
+        "js".to_string(),
+        "ts".to_string(),
+        "tsx".to_string(),
+        "jsx".to_string(),
+    ]
+}
+
+// ============================================================================
+// Comments Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CommentsSettings {
+    #[serde(default)]
+    pub ai: CommentsAiSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentsAiSettings {
+    #[serde(default = "default_comments_model")]
+    pub model: String,
+
+    #[serde(default = "default_comments_pragma")]
+    pub pragma_format: String,
+
+    #[serde(default = "default_comments_docstrings")]
+    pub include_docstrings: bool,
+}
+
+impl Default for CommentsAiSettings {
+    fn default() -> Self {
+        Self {
+            model: default_comments_model(),
+            pragma_format: default_comments_pragma(),
+            include_docstrings: default_comments_docstrings(),
+        }
+    }
+}
+
+impl CommentsAiSettings {
+    pub fn parse_model(&self) -> (String, String) {
+        if let Some((provider, model)) = self.model.split_once('/') {
+            (provider.to_string(), model.to_string())
+        } else {
+            ("anthropic".to_string(), self.model.clone())
+        }
+    }
+}
+
+fn default_comments_model() -> String {
+    "anthropic/claude-sonnet-4-20250514".to_string()
+}
+
+fn default_comments_pragma() -> String {
+    "@uira-allow".to_string()
+}
+
+fn default_comments_docstrings() -> bool {
+    false
 }
 
 /// HUD configuration
@@ -692,5 +782,82 @@ target: 100
         assert_eq!(config.check_interval_secs, 30);
         assert_eq!(config.max_iterations, 100);
         assert!(config.auto_verify);
+    }
+
+    #[test]
+    fn test_diagnostics_settings_defaults() {
+        let settings = DiagnosticsSettings::default();
+        assert_eq!(settings.ai.model, "anthropic/claude-sonnet-4-20250514");
+        assert_eq!(settings.ai.severity, "error");
+        assert!((settings.ai.confidence_threshold - 0.8).abs() < 0.01);
+        assert_eq!(settings.ai.languages, vec!["js", "ts", "tsx", "jsx"]);
+    }
+
+    #[test]
+    fn test_diagnostics_settings_parse() {
+        let yaml = r#"
+ai:
+  model: openai/gpt-4o
+  severity: warning
+  confidence_threshold: 0.9
+  languages:
+    - ts
+    - rust
+"#;
+        let settings: DiagnosticsSettings = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(settings.ai.model, "openai/gpt-4o");
+        assert_eq!(settings.ai.severity, "warning");
+        assert!((settings.ai.confidence_threshold - 0.9).abs() < 0.01);
+        assert_eq!(settings.ai.languages, vec!["ts", "rust"]);
+
+        let (provider, model) = settings.ai.parse_model();
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_comments_settings_defaults() {
+        let settings = CommentsSettings::default();
+        assert_eq!(settings.ai.model, "anthropic/claude-sonnet-4-20250514");
+        assert_eq!(settings.ai.pragma_format, "@uira-allow");
+        assert!(!settings.ai.include_docstrings);
+    }
+
+    #[test]
+    fn test_comments_settings_parse() {
+        let yaml = r#"
+ai:
+  model: anthropic/claude-opus-4
+  pragma_format: "@allow-comment"
+  include_docstrings: true
+"#;
+        let settings: CommentsSettings = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(settings.ai.model, "anthropic/claude-opus-4");
+        assert_eq!(settings.ai.pragma_format, "@allow-comment");
+        assert!(settings.ai.include_docstrings);
+    }
+
+    #[test]
+    fn test_full_config_with_diagnostics_comments() {
+        let yaml = r#"
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
+
+diagnostics:
+  ai:
+    severity: error
+    languages:
+      - ts
+      - tsx
+
+comments:
+  ai:
+    include_docstrings: true
+"#;
+        let config: UiraConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.diagnostics.ai.severity, "error");
+        assert_eq!(config.diagnostics.ai.languages, vec!["ts", "tsx"]);
+        assert!(config.comments.ai.include_docstrings);
     }
 }

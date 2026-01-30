@@ -26,6 +26,7 @@ impl OAuthCallbackServer {
             App::new()
                 .app_data(web::Data::new(pending.clone()))
                 .route("/callback", web::get().to(handle_callback))
+                .route("/auth/callback", web::get().to(handle_callback))
         })
         .bind(("127.0.0.1", self.port))
         .map_err(|e| AuthError::Other(format!("Failed to bind server: {}", e)))?

@@ -50,34 +50,47 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
-/// Main TUI application state
+const AVAILABLE_MODELS: &[(&str, &[&str])] = &[
+    (
+        "opencode",
+        &[
+            "kimi-k2.5-free",
+            "glm-4.7",
+            "qwen3-coder",
+            "claude-opus-4-1",
+            "big-pickle",
+            "gpt-5-nano",
+        ],
+    ),
+    (
+        "anthropic",
+        &[
+            "claude-sonnet-4-20250514",
+            "claude-opus-4-20250514",
+            "claude-3-5-sonnet-20241022",
+        ],
+    ),
+    ("openai", &["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]),
+    ("google", &["gemini-2.0-flash", "gemini-1.5-pro"]),
+    ("ollama", &["llama3.1", "qwen2.5-coder", "deepseek-coder"]),
+];
+
 pub struct App {
-    /// Whether the app should quit
     should_quit: bool,
-    /// Event sender for internal communication
     event_tx: mpsc::Sender<AppEvent>,
-    /// Event receiver
     event_rx: mpsc::Receiver<AppEvent>,
-    /// Chat messages
     messages: Vec<ChatMessage>,
-    /// Input buffer
     input: String,
-    /// Input cursor position
     cursor_pos: usize,
-    /// Agent state
     agent_state: AgentState,
-    /// Current status message
     status: String,
-    /// Scroll offset for chat
     scroll: u16,
-    /// Is input focused
     input_focused: bool,
-    /// Current streaming message buffer
     streaming_buffer: Option<String>,
-    /// Approval overlay for tool approvals
+    thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
-    /// Input sender to agent (for interactive mode)
     agent_input_tx: Option<mpsc::Sender<String>>,
+    current_model: Option<String>,
 }
 
 impl App {
@@ -95,9 +108,16 @@ impl App {
             scroll: 0,
             input_focused: true,
             streaming_buffer: None,
+            thinking_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
             agent_input_tx: None,
+            current_model: None,
         }
+    }
+
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.current_model = Some(model.to_string());
+        self
     }
 
     /// Run the TUI application
@@ -226,6 +246,26 @@ impl App {
             })
             .collect();
 
+        if let Some(ref buffer) = self.thinking_buffer {
+            if !buffer.is_empty() {
+                let thinking_item = ListItem::new(Line::from(vec![
+                    Span::styled(
+                        "> Thinking: ",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                    Span::styled(
+                        buffer.as_str(),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                ]));
+                items.push(thinking_item);
+            }
+        }
+
         // Render streaming buffer as in-progress message with blinking cursor
         if let Some(ref buffer) = self.streaming_buffer {
             if !buffer.is_empty() {
@@ -306,11 +346,18 @@ impl App {
 
         let inner = block.inner(area);
 
-        // Display input with cursor
-        let display_input = if self.cursor_pos >= self.input.len() {
+        // Display input with cursor (use char boundary for UTF-8 safety)
+        let char_count = self.input.chars().count();
+        let display_input = if self.cursor_pos >= char_count {
             format!("{}_", self.input)
         } else {
-            let (before, after) = self.input.split_at(self.cursor_pos);
+            let byte_pos = self
+                .input
+                .char_indices()
+                .nth(self.cursor_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input.len());
+            let (before, after) = self.input.split_at(byte_pos);
             format!("{}|{}", before, after)
         };
 
@@ -347,22 +394,41 @@ impl App {
             }
         }
 
-        // Input handling
+        // Input handling (cursor_pos is char index, not byte index for UTF-8 safety)
         if self.input_focused {
+            let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
-                    self.input.insert(self.cursor_pos, c);
+                    let byte_pos = self
+                        .input
+                        .char_indices()
+                        .nth(self.cursor_pos)
+                        .map(|(i, _)| i)
+                        .unwrap_or(self.input.len());
+                    self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
                 }
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
-                        self.input.remove(self.cursor_pos);
+                        let byte_pos = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.input.remove(byte_pos);
                     }
                 }
                 KeyCode::Delete => {
-                    if self.cursor_pos < self.input.len() {
-                        self.input.remove(self.cursor_pos);
+                    if self.cursor_pos < char_count {
+                        let byte_pos = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(self.input.len());
+                        self.input.remove(byte_pos);
                     }
                 }
                 KeyCode::Left => {
@@ -371,7 +437,7 @@ impl App {
                     }
                 }
                 KeyCode::Right => {
-                    if self.cursor_pos < self.input.len() {
+                    if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
                     }
                 }
@@ -379,7 +445,7 @@ impl App {
                     self.cursor_pos = 0;
                 }
                 KeyCode::End => {
-                    self.cursor_pos = self.input.len();
+                    self.cursor_pos = char_count;
                 }
                 KeyCode::Enter => {
                     if !self.input.is_empty() {
@@ -405,13 +471,16 @@ impl App {
     }
 
     fn submit_input(&mut self, input: String) {
-        // Add user message to chat
+        if input.starts_with('/') {
+            self.handle_slash_command(&input);
+            return;
+        }
+
         self.messages.push(ChatMessage {
             role: "user".to_string(),
             content: input.clone(),
         });
 
-        // Send input to agent if connected
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -423,6 +492,102 @@ impl App {
             self.agent_state = AgentState::Thinking;
         } else {
             self.status = "No agent connected".to_string();
+        }
+    }
+
+    fn handle_slash_command(&mut self, input: &str) {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let command = parts.first().copied().unwrap_or("");
+
+        match command {
+            "/exit" | "/quit" | "/q" => {
+                self.should_quit = true;
+            }
+            "/help" | "/h" | "/?" => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /clear            - Clear chat history".to_string(),
+                });
+            }
+            "/auth" | "/status" => {
+                let status_msg = if self.agent_input_tx.is_some() {
+                    "Agent connected"
+                } else {
+                    "No agent connected"
+                };
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
+                });
+            }
+            "/clear" => {
+                self.messages.clear();
+                self.status = "Chat cleared".to_string();
+            }
+            "/models" => {
+                let mut output = String::from("Available models by provider:\n");
+                for (provider, models) in AVAILABLE_MODELS {
+                    output.push_str(&format!("\n  {}:\n", provider));
+                    for model in *models {
+                        let marker = if self.current_model.as_deref() == Some(*model) {
+                            "→"
+                        } else {
+                            " "
+                        };
+                        output.push_str(&format!("    {} {}\n", marker, model));
+                    }
+                }
+                output.push_str("\nUse /model <name> to switch models.");
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: output,
+                });
+            }
+            "/model" => {
+                if let Some(model_name) = parts.get(1) {
+                    let found = AVAILABLE_MODELS
+                        .iter()
+                        .any(|(_, models)| models.contains(model_name));
+
+                    if found {
+                        self.current_model = Some((*model_name).to_string());
+                        self.status = format!("Model: {}", model_name);
+                        self.messages.push(ChatMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "Switched to model: {}\nNote: Model change takes effect on next request.",
+                                model_name
+                            ),
+                        });
+                    } else {
+                        self.messages.push(ChatMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "Unknown model: {}. Use /models to see available options.",
+                                model_name
+                            ),
+                        });
+                    }
+                } else {
+                    let current = self
+                        .current_model
+                        .as_deref()
+                        .unwrap_or("(default from config)");
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!("Current model: {}\nUsage: /model <name>", current),
+                    });
+                }
+            }
+            _ => {
+                self.messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: format!(
+                        "Unknown command: {}. Type /help for available commands.",
+                        command
+                    ),
+                });
+            }
         }
     }
 
@@ -478,6 +643,15 @@ impl App {
                     self.streaming_buffer = Some(delta);
                 }
             }
+            ThreadEvent::ThinkingDelta { thinking } => {
+                if let Some(ref mut buffer) = self.thinking_buffer {
+                    if buffer.len() + thinking.len() <= MAX_STREAMING_BUFFER_SIZE {
+                        buffer.push_str(&thinking);
+                    }
+                } else {
+                    self.thinking_buffer = Some(thinking);
+                }
+            }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { name, .. } => {
                     self.agent_state = AgentState::ExecutingTool;
@@ -518,8 +692,8 @@ impl App {
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
-                    // Complete message
                     self.streaming_buffer = None;
+                    self.thinking_buffer = None;
                     self.messages.push(ChatMessage {
                         role: "assistant".to_string(),
                         content,
@@ -549,7 +723,8 @@ impl App {
                     usage.input_tokens, usage.output_tokens
                 );
 
-                // Flush streaming buffer if present
+                self.thinking_buffer = None;
+
                 if let Some(buffer) = self.streaming_buffer.take() {
                     if !buffer.is_empty() {
                         self.messages.push(ChatMessage {

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::process::Command;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HookEvent {
@@ -71,6 +72,7 @@ pub struct HooksConfig {
     pub post_fix: Vec<HookMatcher>,
 }
 
+#[allow(dead_code)]
 impl HooksConfig {
     pub fn get_hooks(&self, event: HookEvent) -> &[HookMatcher] {
         match event {
@@ -84,6 +86,7 @@ impl HooksConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HookContext {
     pub cwd: String,
@@ -101,6 +104,7 @@ impl Default for HookContext {
     }
 }
 
+#[allow(dead_code)]
 impl HookContext {
     pub fn new() -> Self {
         Self::default()
@@ -111,6 +115,7 @@ impl HookContext {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct HookResult {
     pub should_continue: bool,
@@ -128,10 +133,12 @@ impl Default for HookResult {
     }
 }
 
+#[allow(dead_code)]
 pub struct AiHookExecutor {
     config: HooksConfig,
 }
 
+#[allow(dead_code)]
 impl AiHookExecutor {
     pub fn new(config: HooksConfig) -> Self {
         Self { config }

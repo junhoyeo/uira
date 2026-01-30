@@ -1,4 +1,5 @@
 use crate::config::{Command, HookConfig};
+use crate::hooks::OnFail;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use rayon::prelude::*;
@@ -70,11 +71,30 @@ impl HookExecutor {
         .with_context(|| format!("Failed to execute command: {}", cmd.run))?;
 
         if !output.status.success() {
-            anyhow::bail!(
-                "Command '{}' failed with exit code: {}",
-                name,
-                output.status.code().unwrap_or(-1)
-            );
+            let exit_code = output.status.code().unwrap_or(-1);
+            match cmd.on_fail {
+                OnFail::Stop => {
+                    anyhow::bail!("Command '{}' failed with exit code: {}", name, exit_code);
+                }
+                OnFail::Warn => {
+                    println!(
+                        "  {} {} (exit code: {}, continuing due to on_fail: warn)",
+                        "⚠".bright_yellow(),
+                        name.bright_white(),
+                        exit_code
+                    );
+                    return Ok(());
+                }
+                OnFail::Continue => {
+                    println!(
+                        "  {} {} (exit code: {}, ignored)",
+                        "•".bright_black(),
+                        name.bright_white(),
+                        exit_code
+                    );
+                    return Ok(());
+                }
+            }
         }
 
         println!("  {} {}", "✓".bright_green(), name.bright_white());

@@ -172,26 +172,46 @@ async fn run_auth(
     use uira_auth::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
     use uira_auth::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
 
+    const DEFAULT_OAUTH_PORT: u16 = 8765;
+
     match command {
         AuthCommands::Login { provider } => {
-            println!("{} {}", "Logging in to:".cyan().bold(), provider.yellow());
-
-            // Create provider instance
-            let auth_provider: Box<dyn AuthProvider> = match provider.to_lowercase().as_str() {
-                "anthropic" => Box::new(AnthropicAuth::new()),
-                "openai" => Box::new(OpenAIAuth::new()),
-                "google" | "gemini" => Box::new(GoogleAuth::new()),
-                _ => {
-                    return Err(format!("Unknown provider: {}", provider).into());
+            let provider = match provider {
+                Some(p) => p.clone(),
+                None => {
+                    println!("{}", "Available providers:".cyan().bold());
+                    println!("{}", "─".repeat(50).dimmed());
+                    println!("  {} anthropic  - Anthropic (Claude)", "•".cyan());
+                    println!("  {} openai     - OpenAI (GPT models)", "•".cyan());
+                    println!("  {} google     - Google (Gemini models)", "•".cyan());
+                    println!("{}", "─".repeat(50).dimmed());
+                    println!();
+                    println!("{}", "Usage: uira auth login <provider>".dimmed());
+                    println!("{}", "Example: uira auth login anthropic".dimmed());
+                    return Ok(());
                 }
             };
 
-            // Start OAuth flow
+            println!("{} {}", "Logging in to:".cyan().bold(), provider.yellow());
+
+            let (auth_provider, oauth_port): (Box<dyn AuthProvider>, u16) =
+                match provider.to_lowercase().as_str() {
+                    "anthropic" => (Box::new(AnthropicAuth::new()), DEFAULT_OAUTH_PORT),
+                    "openai" => (Box::new(OpenAIAuth::new()), OpenAIAuth::oauth_port()),
+                    "google" | "gemini" => (Box::new(GoogleAuth::new()), DEFAULT_OAUTH_PORT),
+                    _ => {
+                        return Err(format!(
+                        "Unknown provider: {}. Run 'uira auth login' to see available providers.",
+                        provider
+                    )
+                        .into());
+                    }
+                };
+
             println!("{}", "Starting OAuth flow...".dimmed());
             let challenge = auth_provider.start_oauth(0).await?;
 
-            // Start callback server
-            let server = Arc::new(OAuthCallbackServer::new(8765));
+            let server = Arc::new(OAuthCallbackServer::new(oauth_port));
 
             // Spawn server in a separate thread (actix-web requires its own runtime)
             let server_clone = server.clone();

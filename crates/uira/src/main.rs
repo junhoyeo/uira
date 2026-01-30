@@ -1,18 +1,23 @@
+mod agent_workflow;
+mod comments;
 mod config;
+mod diagnostics;
 mod hooks;
 mod linter;
+mod runtime;
 mod typos;
 
+use agent_workflow::{AgentWorkflow, TaskOptions, WorkflowConfig, WorkflowResult, WorkflowTask};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use config::Config;
 use hooks::HookExecutor;
 use linter::Linter;
+use runtime::block_on;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
-use typos::TyposChecker;
 use uira_agents::get_agent_definitions;
 use uira_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
 use uira_features::uira_state::has_uira_state;
@@ -77,6 +82,34 @@ enum Commands {
     Goals {
         #[command(subcommand)]
         action: GoalsCommands,
+    },
+    /// Run diagnostics (lsp_diagnostics) on files
+    Diagnostics {
+        #[arg(long, help = "Use AI to decide and apply fixes")]
+        ai: bool,
+        #[arg(long, help = "Only check staged files")]
+        staged: bool,
+        #[arg(long, help = "Automatically stage modified files after fixing")]
+        stage: bool,
+        #[arg(
+            long,
+            value_parser = clap::builder::PossibleValuesParser::new(["error", "warning", "all"]),
+            help = "Severity filter: error, warning, all (default from config or 'error')"
+        )]
+        severity: Option<String>,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
+    },
+    /// Check and manage comments with AI assistance
+    Comments {
+        #[arg(long, help = "Use AI to decide whether to remove or keep comments")]
+        ai: bool,
+        #[arg(long, help = "Only check staged files")]
+        staged: bool,
+        #[arg(long, help = "Automatically stage modified files after fixing")]
+        stage: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        files: Vec<String>,
     },
 }
 
@@ -150,6 +183,19 @@ fn main() {
         Commands::Session { action } => session_command(action),
         Commands::Skill { action } => skill_command(action),
         Commands::Goals { action } => goals_command(action),
+        Commands::Diagnostics {
+            ai,
+            staged,
+            stage,
+            severity,
+            files,
+        } => diagnostics_command(ai, staged, stage, severity.as_deref(), &files),
+        Commands::Comments {
+            ai,
+            staged,
+            stage,
+            files,
+        } => comments_command(ai, staged, stage, &files),
     };
 
     if let Err(e) = result {
@@ -318,19 +364,60 @@ fn lint_command(files: &[String]) -> anyhow::Result<()> {
 
 fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
     if ai {
-        println!("🔍 Checking for typos with AI assistance...\n");
+        println!("🔍 Starting AI-assisted typos workflow...\n");
 
-        let unified_config = uira_config::load_config(None).ok();
-        let typos_config = unified_config.map(|c| c.typos);
+        let config = WorkflowConfig {
+            auto_stage: stage,
+            files: files.to_vec(),
+            ..Default::default()
+        };
 
-        let local_config = Config::from_file("uira.yml").ok();
-        let ai_hooks = local_config.and_then(|c| c.ai_hooks);
-
-        let mut checker = TyposChecker::with_hooks(typos_config, ai_hooks).with_auto_stage(stage);
-        let success = checker.run(files)?;
-        if !success {
-            process::exit(1);
-        }
+        block_on(async {
+            let mut workflow = AgentWorkflow::new(WorkflowTask::Typos, config).await?;
+            match workflow.run().await? {
+                WorkflowResult::Complete {
+                    iterations,
+                    files_modified,
+                    summary,
+                } => {
+                    println!("\n✅ Typos workflow complete!");
+                    println!("   Iterations: {}", iterations);
+                    println!("   Files modified: {}", files_modified.len());
+                    if let Some(s) = summary {
+                        println!("   Summary: {}", s);
+                    }
+                    Ok(())
+                }
+                WorkflowResult::MaxIterationsReached {
+                    iterations,
+                    files_modified,
+                } => {
+                    println!("\n⚠️  Max iterations ({}) reached", iterations);
+                    println!("   Files modified: {}", files_modified.len());
+                    std::process::exit(1);
+                }
+                WorkflowResult::VerificationFailed {
+                    remaining_issues,
+                    details,
+                    ..
+                } => {
+                    println!(
+                        "\n❌ Verification failed: {} issues remain",
+                        remaining_issues
+                    );
+                    println!("   Details: {}", details);
+                    std::process::exit(1);
+                }
+                WorkflowResult::Cancelled => {
+                    println!("\n⚠️  Workflow cancelled");
+                    std::process::exit(1);
+                }
+                WorkflowResult::Failed { error } => {
+                    eprintln!("\n❌ Workflow failed: {}", error);
+                    std::process::exit(1);
+                }
+            }
+        })
     } else {
         println!("🔍 Checking for typos...\n");
         let mut cmd = std::process::Command::new("typos");
@@ -346,9 +433,8 @@ fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> 
             process::exit(1);
         }
         println!("✓ No typos found");
+        Ok(())
     }
-
-    Ok(())
 }
 
 fn format_command(check: bool, files: &[String]) -> anyhow::Result<()> {
@@ -768,6 +854,312 @@ fn skill_command(action: SkillCommands) -> anyhow::Result<()> {
 fn goals_command(action: GoalsCommands) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async { goals_command_async(action).await })
+}
+
+fn diagnostics_command(
+    ai: bool,
+    staged: bool,
+    stage: bool,
+    severity: Option<&str>,
+    files: &[String],
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use colored::Colorize;
+    use std::process::Command;
+    use uira_oxc::{LintRule, Linter, Severity};
+
+    println!("🔍 Running diagnostics...\n");
+
+    let files_to_check = if staged {
+        let output = Command::new("git")
+            .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
+            .output()
+            .context("Failed to get staged files")?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    } else if files.is_empty() {
+        collect_files_from_cwd()?
+    } else {
+        files.to_vec()
+    };
+
+    if files_to_check.is_empty() {
+        println!("{} No files to check", "✓".green());
+        return Ok(());
+    }
+
+    if ai {
+        let workflow_config = WorkflowConfig {
+            auto_stage: stage,
+            staged_only: staged,
+            files: files_to_check.clone(),
+            task_options: TaskOptions {
+                severity: severity.map(String::from),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        return block_on(async {
+            let mut workflow =
+                AgentWorkflow::new(WorkflowTask::Diagnostics, workflow_config).await?;
+            match workflow.run().await? {
+                WorkflowResult::Complete {
+                    iterations,
+                    files_modified,
+                    summary,
+                } => {
+                    println!("\n✅ Diagnostics workflow complete!");
+                    println!("   Iterations: {}", iterations);
+                    println!("   Files modified: {}", files_modified.len());
+                    if let Some(s) = summary {
+                        println!("   Summary: {}", s);
+                    }
+                    Ok(())
+                }
+                WorkflowResult::MaxIterationsReached { .. } => {
+                    println!("\n⚠️  Max iterations reached");
+                    std::process::exit(1);
+                }
+                WorkflowResult::VerificationFailed {
+                    remaining_issues, ..
+                } => {
+                    println!("\n❌ {} issues remain", remaining_issues);
+                    std::process::exit(1);
+                }
+                WorkflowResult::Cancelled => {
+                    println!("\n⚠️  Workflow cancelled");
+                    std::process::exit(1);
+                }
+                WorkflowResult::Failed { error } => {
+                    eprintln!("\n❌ Workflow failed: {}", error);
+                    std::process::exit(1);
+                }
+            }
+        });
+    }
+
+    let severity = severity.unwrap_or("error");
+
+    let (js_ts_files, other_files): (Vec<_>, Vec<_>) = files_to_check.iter().partition(|f| {
+        let ext = std::path::Path::new(f)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        matches!(
+            ext,
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts"
+        )
+    });
+
+    let rust_files: Vec<_> = other_files
+        .iter()
+        .filter(|f| f.ends_with(".rs"))
+        .cloned()
+        .collect();
+
+    let mut error_count = 0;
+    let mut warning_count = 0;
+
+    if !js_ts_files.is_empty() {
+        let linter = Linter::new(LintRule::recommended());
+        let js_files_owned: Vec<String> = js_ts_files.into_iter().cloned().collect();
+        let diagnostics = linter.lint_files(&js_files_owned);
+
+        let filtered: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| match severity {
+                "error" => matches!(d.severity, Severity::Error),
+                "warning" => matches!(d.severity, Severity::Error | Severity::Warning),
+                _ => true,
+            })
+            .collect();
+
+        for d in &filtered {
+            match d.severity {
+                Severity::Error => error_count += 1,
+                Severity::Warning => warning_count += 1,
+                Severity::Info => {}
+            }
+
+            let severity_str = match d.severity {
+                Severity::Error => "error".red().bold(),
+                Severity::Warning => "warning".yellow().bold(),
+                Severity::Info => "info".blue(),
+            };
+
+            println!(
+                "{}:{}:{}: {} [{}]",
+                d.file.dimmed(),
+                d.line,
+                d.column,
+                severity_str,
+                d.rule.cyan()
+            );
+            println!("  {}", d.message);
+            if let Some(suggestion) = &d.suggestion {
+                println!("  {}: {}", "suggestion".dimmed(), suggestion);
+            }
+            println!();
+        }
+    }
+
+    if !rust_files.is_empty() {
+        let output = Command::new("cargo")
+            .arg("check")
+            .arg("--message-format=short")
+            .output()
+            .context("Failed to run cargo check")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            for line in stderr.lines() {
+                if line.contains("error")
+                    && (severity == "error" || severity == "warning" || severity == "all")
+                {
+                    error_count += 1;
+                    println!("{}", line.red());
+                } else if line.contains("warning") && (severity == "warning" || severity == "all") {
+                    warning_count += 1;
+                    println!("{}", line.yellow());
+                }
+            }
+        }
+    }
+
+    println!();
+    if error_count > 0 {
+        println!(
+            "{} {} error(s), {} warning(s)",
+            "✗".red().bold(),
+            error_count,
+            warning_count
+        );
+        process::exit(1);
+    } else if warning_count > 0 {
+        println!("{} {} warning(s)", "⚠".yellow().bold(), warning_count);
+    } else {
+        println!("{} No diagnostics found", "✓".green().bold());
+    }
+
+    Ok(())
+}
+
+fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use colored::Colorize;
+    use std::process::Command;
+    use uira_comment_checker::{CommentDetector, FilterChain};
+
+    println!("💬 Checking comments...\n");
+
+    let files_to_check = if staged {
+        let output = Command::new("git")
+            .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
+            .output()
+            .context("Failed to get staged files")?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    } else if files.is_empty() {
+        collect_files_from_cwd()?
+    } else {
+        files.to_vec()
+    };
+
+    if files_to_check.is_empty() {
+        println!("{} No files to check", "✓".green());
+        return Ok(());
+    }
+
+    if ai {
+        let workflow_config = WorkflowConfig {
+            auto_stage: stage,
+            staged_only: staged,
+            files: files_to_check.clone(),
+            ..Default::default()
+        };
+
+        return block_on(async {
+            let mut workflow = AgentWorkflow::new(WorkflowTask::Comments, workflow_config).await?;
+            match workflow.run().await? {
+                WorkflowResult::Complete {
+                    iterations,
+                    files_modified,
+                    summary,
+                } => {
+                    println!("\n✅ Comments workflow complete!");
+                    println!("   Iterations: {}", iterations);
+                    println!("   Files modified: {}", files_modified.len());
+                    if let Some(s) = summary {
+                        println!("   Summary: {}", s);
+                    }
+                    Ok(())
+                }
+                WorkflowResult::MaxIterationsReached { .. } => {
+                    println!("\n⚠️  Max iterations reached");
+                    std::process::exit(1);
+                }
+                WorkflowResult::VerificationFailed {
+                    remaining_issues, ..
+                } => {
+                    println!("\n❌ {} issues remain", remaining_issues);
+                    std::process::exit(1);
+                }
+                WorkflowResult::Cancelled => {
+                    println!("\n⚠️  Workflow cancelled");
+                    std::process::exit(1);
+                }
+                WorkflowResult::Failed { error } => {
+                    eprintln!("\n❌ Workflow failed: {}", error);
+                    std::process::exit(1);
+                }
+            }
+        });
+    }
+
+    let detector = CommentDetector::new();
+    let filter_chain = FilterChain::new();
+    let mut comment_count = 0;
+
+    for file in &files_to_check {
+        let content = match std::fs::read_to_string(file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let comments = detector.detect(&content, file, false);
+
+        for comment in comments {
+            if filter_chain.should_skip(&comment) {
+                continue;
+            }
+            comment_count += 1;
+
+            println!(
+                "{}:{}: {}",
+                file.dimmed(),
+                comment.line_number,
+                comment.text.trim().yellow()
+            );
+        }
+    }
+
+    println!();
+    if comment_count > 0 {
+        println!(
+            "{} Found {} comment(s). Use --ai to analyze with AI.",
+            "!".yellow().bold(),
+            comment_count
+        );
+    } else {
+        println!("{} No actionable comments found", "✓".green().bold());
+    }
+
+    Ok(())
 }
 
 async fn goals_command_async(action: GoalsCommands) -> anyhow::Result<()> {

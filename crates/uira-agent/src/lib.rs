@@ -33,5 +33,5 @@ pub use goals::GoalVerifier;
 pub use ralph::{RalphConfig, RalphController, RalphDecision};
 pub use rollout::{EventWrapper, RolloutItem, RolloutRecorder, SessionMetaLine};
 pub use session::Session;
-pub use streaming::StreamController;
+pub use streaming::{StreamController, StreamOutput};
 pub use turn::{TurnContext, TurnState};
