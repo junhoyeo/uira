@@ -87,6 +87,7 @@ pub struct App {
     scroll: u16,
     input_focused: bool,
     streaming_buffer: Option<String>,
+    thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
     agent_input_tx: Option<mpsc::Sender<String>>,
     current_model: Option<String>,
@@ -107,6 +108,7 @@ impl App {
             scroll: 0,
             input_focused: true,
             streaming_buffer: None,
+            thinking_buffer: None,
             approval_overlay: ApprovalOverlay::new(),
             agent_input_tx: None,
             current_model: None,
@@ -243,6 +245,26 @@ impl App {
                 ]))
             })
             .collect();
+
+        if let Some(ref buffer) = self.thinking_buffer {
+            if !buffer.is_empty() {
+                let thinking_item = ListItem::new(Line::from(vec![
+                    Span::styled(
+                        "> Thinking: ",
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                    Span::styled(
+                        buffer.as_str(),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC),
+                    ),
+                ]));
+                items.push(thinking_item);
+            }
+        }
 
         // Render streaming buffer as in-progress message with blinking cursor
         if let Some(ref buffer) = self.streaming_buffer {
@@ -621,6 +643,15 @@ impl App {
                     self.streaming_buffer = Some(delta);
                 }
             }
+            ThreadEvent::ThinkingDelta { thinking } => {
+                if let Some(ref mut buffer) = self.thinking_buffer {
+                    if buffer.len() + thinking.len() <= MAX_STREAMING_BUFFER_SIZE {
+                        buffer.push_str(&thinking);
+                    }
+                } else {
+                    self.thinking_buffer = Some(thinking);
+                }
+            }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { name, .. } => {
                     self.agent_state = AgentState::ExecutingTool;
@@ -661,8 +692,8 @@ impl App {
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
-                    // Complete message
                     self.streaming_buffer = None;
+                    self.thinking_buffer = None;
                     self.messages.push(ChatMessage {
                         role: "assistant".to_string(),
                         content,
@@ -692,7 +723,8 @@ impl App {
                     usage.input_tokens, usage.output_tokens
                 );
 
-                // Flush streaming buffer if present
+                self.thinking_buffer = None;
+
                 if let Some(buffer) = self.streaming_buffer.take() {
                     if !buffer.is_empty() {
                         self.messages.push(ChatMessage {

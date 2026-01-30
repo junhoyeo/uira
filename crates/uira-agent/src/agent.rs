@@ -354,14 +354,21 @@ impl Agent {
 
         while let Some(result) = stream.next().await {
             let chunk = result.map_err(AgentLoopError::Provider)?;
-            let new_lines = controller.push(chunk);
+            let outputs = controller.push(chunk);
 
-            // Emit each committed line as ContentDelta
-            for line in new_lines {
-                self.emit_event(ThreadEvent::ContentDelta {
-                    delta: format!("{}\n", line),
-                })
-                .await;
+            for output in outputs {
+                match output {
+                    crate::streaming::StreamOutput::Text(line) => {
+                        self.emit_event(ThreadEvent::ContentDelta {
+                            delta: format!("{}\n", line),
+                        })
+                        .await;
+                    }
+                    crate::streaming::StreamOutput::Thinking(thinking) => {
+                        self.emit_event(ThreadEvent::ThinkingDelta { thinking })
+                            .await;
+                    }
+                }
             }
         }
 

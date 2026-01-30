@@ -19,6 +19,7 @@
 - **MCP Server** - LSP and AST-grep tools via Model Context Protocol
 - **Git Hooks** - Configurable pre/post commit hooks via `uira.yml`
 - **Goal Verification** - Score-based verification for persistent work loops
+- **AI-Assisted Workflows** - Typos, diagnostics, and comments with AI decision-making
 
 ## Quick Start
 
@@ -115,6 +116,152 @@ uira-agent --model claude-sonnet-4-20250514
 | **uira-goals** | Score-based goal verification |
 | **uira-core** | Shared types and utilities |
 
+## AI Agent Harness System
+
+Uira provides an AI-assisted workflow system that integrates with git hooks to automatically invoke AI agents at commit time. The system orchestrates coding agents through a CUI (Command User Interface) that can be triggered manually or automatically via git hooks.
+
+### Workflow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Developer Workflow                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                     ┌─────────────────┴─────────────────┐
+                     ▼                                   ▼
+            ┌────────────────┐                  ┌────────────────┐
+            │  Manual CLI    │                  │   Git Commit   │
+            │  Invocation    │                  │    Trigger     │
+            └────────────────┘                  └────────────────┘
+                     │                                   │
+                     │                                   ▼
+                     │                          ┌────────────────┐
+                     │                          │  .git/hooks/   │
+                     │                          │  pre-commit    │
+                     │                          └────────────────┘
+                     │                                   │
+                     │                                   ▼
+                     │                          ┌────────────────┐
+                     │                          │  uira run      │
+                     │                          │  pre-commit    │
+                     │                          └────────────────┘
+                     │                                   │
+                     └─────────────────┬─────────────────┘
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            uira CLI (AI Harness)                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │  uira typos     │  │ uira diagnostics│  │  uira comments  │                  │
+│  │     --ai        │  │      --ai       │  │      --ai       │                  │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘                  │
+│           │                    │                    │                           │
+│           └────────────────────┼────────────────────┘                           │
+│                                ▼                                                 │
+│                    ┌───────────────────────┐                                    │
+│                    │   AiDecisionClient    │                                    │
+│                    │  (Shared AI Infra)    │                                    │
+│                    └───────────┬───────────┘                                    │
+│                                │                                                 │
+└────────────────────────────────┼────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           OpenCode Server                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                         Session Management                               │    │
+│  │  POST /session/new  →  Create AI session                                │    │
+│  │  POST /session/{id}/message  →  Send prompt, receive decision           │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                       │                                          │
+│                                       ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                           Model Providers                                │    │
+│  │                                                                          │    │
+│  │    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐             │    │
+│  │    │  Anthropic   │    │   OpenAI     │    │   Gemini     │             │    │
+│  │    │   Claude     │    │    GPT       │    │              │             │    │
+│  │    └──────────────┘    └──────────────┘    └──────────────┘             │    │
+│  │                                                                          │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            AI Decision Flow                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Detect Issues         2. Present to AI          3. Apply Decision           │
+│  ┌───────────────┐        ┌───────────────┐        ┌───────────────┐            │
+│  │ typos CLI     │───────▶│ "Should I fix │───────▶│ FIX → Apply   │            │
+│  │ lsp_diagnostics│       │  'teh'→'the'?│        │ IGNORE → Skip │            │
+│  │ comment-checker│       │  Context: ... │        │ SKIP → Next   │            │
+│  └───────────────┘        └───────────────┘        └───────────────┘            │
+│                                                                                  │
+│  4. Stage Changes (--stage)    5. Continue/Fail Hook                            │
+│  ┌───────────────┐             ┌───────────────┐                                │
+│  │ git add <file>│────────────▶│ Exit 0 (pass) │                                │
+│  │               │             │ Exit 1 (fail) │                                │
+│  └───────────────┘             └───────────────┘                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### AI-Assisted Commands
+
+| Command | Description | AI Decisions |
+|---------|-------------|--------------|
+| `uira typos --ai` | Check and fix typos | FIX, IGNORE per typo |
+| `uira diagnostics --ai` | Fix LSP errors/warnings | FIX:HIGH, FIX:LOW, IGNORE |
+| `uira comments --ai` | Review/remove comments | REMOVE, KEEP per comment |
+
+### Git Hook Integration
+
+```bash
+# 1. Initialize configuration
+uira init
+
+# 2. Install git hooks
+uira install
+
+# 3. Commit normally - hooks run automatically
+git commit -m "feat: add new feature"
+```
+
+When you commit, the pre-commit hook executes:
+```
+.git/hooks/pre-commit
+    └── exec uira run pre-commit
+            └── Runs configured commands from uira.yml
+                    ├── uira typos --ai --stage
+                    ├── uira diagnostics --ai --stage
+                    └── uira comments --ai --stage
+```
+
+### Hook Configuration Example
+
+```yaml
+# uira.yml
+pre-commit:
+  parallel: false
+  commands:
+    - name: format
+      run: uira format --check
+    - name: typos
+      run: uira typos --ai --stage
+      on_fail: stop
+    - name: diagnostics
+      run: uira diagnostics --ai --staged --stage --severity error
+      on_fail: stop
+    - name: comments
+      run: uira comments --ai --staged --stage
+      on_fail: warn
+```
+
 ## Configuration
 
 Create `uira.yml` in your project root:
@@ -152,7 +299,44 @@ goals:
     - name: tests
       command: cargo test
       target: 100.0
+
+# AI-Assisted Workflow Settings
+typos:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
+    host: 127.0.0.1
+    port: 4096
+    disable_tools: true    # Disable built-in tools for focused decisions
+    disable_mcp: true      # Disable MCP servers for faster responses
+
+diagnostics:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
+    severity: error                    # Default severity filter: error, warning, all
+    confidence_threshold: 0.8          # Skip FIX:LOW when threshold > 0.5
+    languages: [js, ts, tsx, jsx, rs]  # Filter files by language
+
+comments:
+  ai:
+    model: anthropic/claude-sonnet-4-20250514
+    pragma_format: "@uira-allow"       # Pragma format for preserved comments
+    include_docstrings: false          # Whether to review docstrings
 ```
+
+### AI Workflow Configuration
+
+| Section | Option | Default | Description |
+|---------|--------|---------|-------------|
+| `typos.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for typo decisions |
+| | `disable_tools` | `true` | Disable built-in tools |
+| | `disable_mcp` | `true` | Disable MCP servers |
+| `diagnostics.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for diagnostic decisions |
+| | `severity` | `error` | Default severity filter |
+| | `confidence_threshold` | `0.8` | Skip low-confidence fixes above threshold |
+| | `languages` | `[]` (all) | File extensions to check |
+| `comments.ai` | `model` | `anthropic/claude-sonnet-4-20250514` | Model for comment decisions |
+| | `pragma_format` | `@uira-allow` | Pragma for preserving comments |
+| | `include_docstrings` | `false` | Include docstrings in review |
 
 ## Multi-Provider Model Routing
 

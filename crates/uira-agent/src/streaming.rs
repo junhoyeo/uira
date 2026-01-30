@@ -6,6 +6,12 @@
 
 use uira_protocol::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
 
+#[derive(Debug, Clone)]
+pub enum StreamOutput {
+    Text(String),
+    Thinking(String),
+}
+
 /// Controller for processing streaming model responses
 ///
 /// Implements the Codex newline-gated streaming pattern:
@@ -82,8 +88,8 @@ impl StreamController {
         }
     }
 
-    /// Push a stream chunk, returns newly committed lines
-    pub fn push(&mut self, chunk: StreamChunk) -> Vec<String> {
+    /// Push a stream chunk, returns newly committed outputs (text lines or thinking)
+    pub fn push(&mut self, chunk: StreamChunk) -> Vec<StreamOutput> {
         match chunk {
             StreamChunk::MessageStart { message } => {
                 self.message_id = Some(message.id);
@@ -125,7 +131,7 @@ impl StreamController {
                 }
                 ContentDelta::ThinkingDelta { thinking } => {
                     self.thinking_buffer.push_str(&thinking);
-                    vec![]
+                    vec![StreamOutput::Thinking(thinking)]
                 }
                 ContentDelta::SignatureDelta { signature } => {
                     if let Some(ref mut sig) = self.thinking_signature {
@@ -164,16 +170,14 @@ impl StreamController {
         }
     }
 
-    /// Push text, committing on newlines (Codex pattern)
-    fn push_text(&mut self, text: &str) -> Vec<String> {
+    fn push_text(&mut self, text: &str) -> Vec<StreamOutput> {
         let mut new_lines = Vec::new();
 
         for ch in text.chars() {
             if ch == '\n' {
-                // Commit the pending line
                 let line = std::mem::take(&mut self.pending_text);
                 self.committed_lines.push(line.clone());
-                new_lines.push(line);
+                new_lines.push(StreamOutput::Text(line));
             } else {
                 self.pending_text.push(ch);
             }
@@ -182,17 +186,12 @@ impl StreamController {
         new_lines
     }
 
-    /// Drain any remaining partial line (for UI streaming)
-    /// Note: This returns the pending text for display but doesn't add it to
-    /// committed_lines since it's already been included in the finalized content block.
-    fn drain_pending(&mut self) -> Vec<String> {
+    fn drain_pending(&mut self) -> Vec<StreamOutput> {
         if self.pending_text.is_empty() {
             vec![]
         } else {
             let line = std::mem::take(&mut self.pending_text);
-            // Don't add to committed_lines - it's already in the content block
-            // from finalize_current_block(). Just return for UI streaming.
-            vec![line]
+            vec![StreamOutput::Text(line)]
         }
     }
 

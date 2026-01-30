@@ -30,6 +30,9 @@ pub enum ThreadEvent {
     /// Content is being streamed
     ContentDelta { delta: String },
 
+    /// Thinking/reasoning content is being streamed
+    ThinkingDelta { thinking: String },
+
     /// Waiting for user input
     WaitingForInput { prompt: String },
 
