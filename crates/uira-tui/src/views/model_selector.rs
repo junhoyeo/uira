@@ -72,7 +72,8 @@ impl ModelSelector {
         if let Some(ref model) = current_model {
             for (gi, group) in MODEL_GROUPS.iter().enumerate() {
                 for (mi, m) in group.models.iter().enumerate() {
-                    if *m == model {
+                    let full_name = format!("{}/{}", group.provider, m);
+                    if *m == model || full_name == *model {
                         self.group_index = gi;
                         self.model_index = mi;
                         return;
@@ -194,7 +195,12 @@ impl ModelSelector {
 
             for (mi, model) in group.models.iter().enumerate() {
                 let is_selected = gi == self.group_index && mi == self.model_index;
-                let is_current = self.current_model.as_deref() == Some(*model);
+                let full_name = format!("{}/{}", group.provider, model);
+                let is_current = self
+                    .current_model
+                    .as_deref()
+                    .map(|cm| cm == *model || cm == full_name)
+                    .unwrap_or(false);
 
                 let prefix = if is_current { "→ " } else { "  " };
                 let style = if is_selected {

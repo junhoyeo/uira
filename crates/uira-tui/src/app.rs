@@ -361,9 +361,10 @@ impl App {
     }
 
     fn scroll_up(&mut self) {
+        let total = self.total_items();
         let i = match self.list_state.selected() {
             Some(i) => i.saturating_sub(1),
-            None if !self.messages.is_empty() => self.messages.len() - 1,
+            None if total > 0 => total - 1,
             None => 0,
         };
         self.list_state.select(Some(i));

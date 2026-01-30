@@ -246,7 +246,13 @@ async fn run_auth(
 
                 let mut code_input = String::new();
                 std::io::stdin().read_line(&mut code_input)?;
-                code_input.trim().to_string()
+                let code = code_input.trim().to_string();
+
+                if code.is_empty() {
+                    return Err("Authorization code cannot be empty. Please try again.".into());
+                }
+
+                code
             } else {
                 // Use localhost callback server for other providers
                 let server = Arc::new(OAuthCallbackServer::new(oauth_port));
