@@ -95,7 +95,7 @@ async fn run_exec(
                         let _ = std::io::stdout().flush();
                     }
                     ThreadEvent::ThinkingDelta { thinking } => {
-                        print!("{}", thinking.dimmed());
+                        print!("{} {}", "thinking:".magenta(), thinking.dimmed());
                         use std::io::Write;
                         let _ = std::io::stdout().flush();
                     }
@@ -108,12 +108,7 @@ async fn run_exec(
                     ThreadEvent::ItemCompleted {
                         item: Item::ToolResult { output, .. },
                     } => {
-                        let preview = if output.len() > 200 {
-                            format!("{}...", &output[..200])
-                        } else {
-                            output.clone()
-                        };
-                        println!("{}", preview.dimmed());
+                        println!("{}", output.dimmed());
                     }
                     ThreadEvent::ItemCompleted { .. } => {}
                     ThreadEvent::TurnCompleted { turn_number, usage } => {
@@ -128,6 +123,21 @@ async fn run_exec(
                     }
                     ThreadEvent::Error { message, .. } => {
                         println!("{}: {}", "Error".red().bold(), message);
+                    }
+                    ThreadEvent::ThreadCompleted { usage } => {
+                        println!(
+                            "{}",
+                            format!(
+                                "✓ completed (total: {}in/{}out)",
+                                usage.input_tokens, usage.output_tokens
+                            )
+                            .green()
+                        );
+                        break;
+                    }
+                    ThreadEvent::ThreadCancelled => {
+                        println!("{}", "Thread cancelled".yellow());
+                        break;
                     }
                     _ => {}
                 }
