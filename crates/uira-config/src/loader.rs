@@ -130,6 +130,8 @@ pub fn find_all_config_files() -> Vec<PathBuf> {
 fn expand_env_vars(config: UiraConfig) -> UiraConfig {
     UiraConfig {
         typos: expand_typos_settings(config.typos),
+        diagnostics: expand_diagnostics_settings(config.diagnostics),
+        comments: expand_comments_settings(config.comments),
         opencode: expand_opencode_settings(config.opencode),
         mcp: expand_mcp_settings(config.mcp),
         agents: config.agents,
@@ -150,6 +152,20 @@ fn expand_typos_settings(mut typos: crate::schema::TyposSettings) -> crate::sche
     typos.ai.model = expand_env_string(&typos.ai.model);
     typos.ai.host = expand_env_string(&typos.ai.host);
     typos
+}
+
+fn expand_diagnostics_settings(
+    mut diagnostics: crate::schema::DiagnosticsSettings,
+) -> crate::schema::DiagnosticsSettings {
+    diagnostics.ai.model = expand_env_string(&diagnostics.ai.model);
+    diagnostics
+}
+
+fn expand_comments_settings(
+    mut comments: crate::schema::CommentsSettings,
+) -> crate::schema::CommentsSettings {
+    comments.ai.model = expand_env_string(&comments.ai.model);
+    comments
 }
 
 fn expand_goals_settings(mut goals: crate::schema::GoalsConfig) -> crate::schema::GoalsConfig {
