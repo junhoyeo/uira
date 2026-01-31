@@ -1,0 +1,597 @@
+# npm Packages Distribution Plan
+
+## Overview
+
+Distribute uira as npm packages using napi-rs bindings. Two packages with modular subpath exports.
+
+## Package Structure
+
+```
+npm packages:
+├── @uiradev/uira              # Main package (CLI + all features)
+│   ├── bin/uira               # CLI entry point
+│   ├── ./                     # Full API
+│   ├── ./comments             # Comment checker module
+│   ├── ./hooks                # Git hooks module
+│   ├── ./oxc                  # Linter module
+│   └── ./agent                # AI agent module
+│
+└── @uiradev/hook              # Lightweight hooks-only package
+    └── Re-exports @uiradev/uira/hooks + CLI
+```
+
+## Phase 1: Package Scaffolding
+
+### 1.1 Create npm workspace structure
+
+```
+packages/
+├── uira/                      # @uiradev/uira
+│   ├── package.json
+│   ├── npm/                   # Platform-specific binaries
+│   │   ├── darwin-arm64/
+│   │   ├── darwin-x64/
+│   │   ├── linux-x64-gnu/
+│   │   ├── linux-x64-musl/
+│   │   └── win32-x64-msvc/
+│   ├── bin/
+│   │   └── uira.js            # CLI wrapper
+│   ├── src/
+│   │   ├── index.ts           # Main exports
+│   │   ├── comments.ts        # Comment checker exports
+│   │   ├── hooks.ts           # Hooks exports
+│   │   ├── oxc.ts             # Linter exports
+│   │   └── agent.ts           # Agent exports
+│   └── scripts/
+│       └── postinstall.js
+│
+└── hook/                      # @uiradev/hook
+    ├── package.json
+    ├── bin/
+    │   └── uira-hook.js
+    └── src/
+        └── index.ts
+```
+
+### 1.2 @uiradev/uira package.json
+
+```json
+{
+  "name": "@uiradev/uira",
+  "version": "0.1.0",
+  "description": "Lightning-fast AI coding agent & git hooks manager built in Rust",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "uira": "./bin/uira.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./comments": {
+      "import": "./dist/comments.mjs",
+      "require": "./dist/comments.js",
+      "types": "./dist/comments.d.ts"
+    },
+    "./hooks": {
+      "import": "./dist/hooks.mjs",
+      "require": "./dist/hooks.js",
+      "types": "./dist/hooks.d.ts"
+    },
+    "./oxc": {
+      "import": "./dist/oxc.mjs",
+      "require": "./dist/oxc.js",
+      "types": "./dist/oxc.d.ts"
+    },
+    "./agent": {
+      "import": "./dist/agent.mjs",
+      "require": "./dist/agent.js",
+      "types": "./dist/agent.d.ts"
+    }
+  },
+  "napi": {
+    "name": "uira",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "x86_64-pc-windows-msvc"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "optionalDependencies": {
+    "@uiradev/uira-darwin-arm64": "0.1.0",
+    "@uiradev/uira-darwin-x64": "0.1.0",
+    "@uiradev/uira-linux-x64-gnu": "0.1.0",
+    "@uiradev/uira-linux-x64-musl": "0.1.0",
+    "@uiradev/uira-win32-x64-msvc": "0.1.0"
+  }
+}
+```
+
+### 1.3 @uiradev/hook package.json
+
+```json
+{
+  "name": "@uiradev/hook",
+  "version": "0.1.0",
+  "description": "Git hooks made easy with AI assistance",
+  "bin": {
+    "uira-hook": "./bin/uira-hook.js"
+  },
+  "main": "./dist/index.js",
+  "peerDependencies": {
+    "@uiradev/uira": "^0.1.0"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  }
+}
+```
+
+## Phase 2: napi-rs Bindings
+
+### 2.1 Refactor crates/uira-napi
+
+```rust
+// crates/uira-napi/src/lib.rs
+
+use napi_derive::napi;
+
+// Re-export modules
+pub mod comments;
+pub mod hooks;
+pub mod oxc;
+pub mod agent;
+pub mod cli;
+```
+
+### 2.2 Comments module
+
+```rust
+// crates/uira-napi/src/comments.rs
+
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+use uira_comment_checker::{CommentDetector, FilterChain, Comment as RustComment};
+
+#[napi(object)]
+pub struct Comment {
+    pub text: String,
+    pub line_number: u32,
+    pub column: u32,
+    pub file: String,
+    pub comment_type: String,
+}
+
+#[napi]
+pub struct CommentChecker {
+    detector: CommentDetector,
+    filter: FilterChain,
+}
+
+#[napi]
+impl CommentChecker {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            detector: CommentDetector::new(),
+            filter: FilterChain::new(),
+        }
+    }
+
+    #[napi]
+    pub fn detect(&self, code: String, filename: String, include_docstrings: bool) -> Vec<Comment> {
+        self.detector
+            .detect(&code, &filename, include_docstrings)
+            .into_iter()
+            .filter(|c| !self.filter.should_skip(c))
+            .map(|c| Comment {
+                text: c.text,
+                line_number: c.line_number as u32,
+                column: c.column as u32,
+                file: c.file,
+                comment_type: format!("{:?}", c.comment_type),
+            })
+            .collect()
+    }
+}
+```
+
+### 2.3 Hooks module
+
+```rust
+// crates/uira-napi/src/hooks.rs
+
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+use std::path::PathBuf;
+
+#[napi(object)]
+pub struct HookConfig {
+    pub pre_commit: Option<bool>,
+    pub pre_push: Option<bool>,
+    pub commit_msg: Option<bool>,
+}
+
+#[napi]
+pub async fn install_hooks(config: HookConfig) -> Result<()> {
+    // Implementation using uira hooks logic
+    todo!()
+}
+
+#[napi]
+pub async fn run_hook(hook_name: String) -> Result<bool> {
+    // Implementation
+    todo!()
+}
+```
+
+### 2.4 OXC module
+
+```rust
+// crates/uira-napi/src/oxc.rs
+
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+use uira_oxc::{Linter as RustLinter, LintRule, Diagnostic as RustDiagnostic, Severity};
+
+#[napi(object)]
+pub struct Diagnostic {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub message: String,
+    pub rule: String,
+    pub severity: String,
+    pub suggestion: Option<String>,
+}
+
+#[napi]
+pub struct Linter {
+    inner: RustLinter,
+}
+
+#[napi]
+impl Linter {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: RustLinter::new(LintRule::recommended()),
+        }
+    }
+
+    #[napi]
+    pub fn lint_files(&self, files: Vec<String>) -> Vec<Diagnostic> {
+        self.inner
+            .lint_files(&files)
+            .into_iter()
+            .map(|d| Diagnostic {
+                file: d.file,
+                line: d.line as u32,
+                column: d.column as u32,
+                message: d.message,
+                rule: d.rule,
+                severity: format!("{:?}", d.severity),
+                suggestion: d.suggestion,
+            })
+            .collect()
+    }
+}
+```
+
+### 2.5 Agent module
+
+```rust
+// crates/uira-napi/src/agent.rs
+
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+
+#[napi(object)]
+pub struct AgentConfig {
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub api_key: Option<String>,
+    pub working_directory: Option<String>,
+}
+
+#[napi(object)]
+pub struct AgentResult {
+    pub success: bool,
+    pub output: String,
+    pub turns: u32,
+    pub error: Option<String>,
+}
+
+#[napi]
+pub struct Agent {
+    // Internal agent state
+}
+
+#[napi]
+impl Agent {
+    #[napi(constructor)]
+    pub fn new(config: AgentConfig) -> Result<Self> {
+        todo!()
+    }
+
+    #[napi]
+    pub async fn run(&self, prompt: String) -> Result<AgentResult> {
+        todo!()
+    }
+}
+```
+
+### 2.6 CLI module
+
+```rust
+// crates/uira-napi/src/cli.rs
+
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+
+#[napi]
+pub async fn run_cli(args: Vec<String>) -> Result<i32> {
+    // Run the CLI with given args, return exit code
+    todo!()
+}
+```
+
+## Phase 3: TypeScript Wrapper
+
+### 3.1 Main index.ts
+
+```typescript
+// packages/uira/src/index.ts
+
+export { CommentChecker, type Comment } from './comments';
+export { installHooks, runHook, type HookConfig } from './hooks';
+export { Linter, type Diagnostic } from './oxc';
+export { Agent, type AgentConfig, type AgentResult } from './agent';
+export { runCli } from './cli';
+```
+
+### 3.2 Comments wrapper
+
+```typescript
+// packages/uira/src/comments.ts
+
+import { CommentChecker as NativeCommentChecker } from './native';
+
+export interface Comment {
+  text: string;
+  lineNumber: number;
+  column: number;
+  file: string;
+  commentType: 'line' | 'block' | 'doc';
+}
+
+export class CommentChecker {
+  private native: NativeCommentChecker;
+
+  constructor() {
+    this.native = new NativeCommentChecker();
+  }
+
+  detect(code: string, filename: string, includeDocstrings = false): Comment[] {
+    return this.native.detect(code, filename, includeDocstrings);
+  }
+}
+```
+
+## Phase 4: CLI Wrapper
+
+### 4.1 bin/uira.js
+
+```javascript
+#!/usr/bin/env node
+
+const { runCli } = require('../dist/cli');
+
+runCli(process.argv.slice(2))
+  .then((exitCode) => process.exit(exitCode))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+```
+
+### 4.2 bin/uira-hook.js (for @uiradev/hook)
+
+```javascript
+#!/usr/bin/env node
+
+const { installHooks, runHook } = require('@uiradev/uira/hooks');
+
+const args = process.argv.slice(2);
+const command = args[0];
+
+async function main() {
+  switch (command) {
+    case 'install':
+      await installHooks({ preCommit: true, prePush: true });
+      console.log('Git hooks installed');
+      break;
+    case 'run':
+      const hookName = args[1];
+      const success = await runHook(hookName);
+      process.exit(success ? 0 : 1);
+      break;
+    default:
+      console.log('Usage: uira-hook <install|run> [hook-name]');
+  }
+}
+
+main().catch(console.error);
+```
+
+## Phase 5: Build & Publish
+
+### 5.1 GitHub Actions workflow
+
+```yaml
+# .github/workflows/npm-publish.yml
+
+name: Publish npm packages
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g @napi-rs/cli
+      - run: napi build --platform --release --target ${{ matrix.target }}
+        working-directory: packages/uira
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: packages/uira/*.node
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages/uira/artifacts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - run: napi prepublish -t npm
+        working-directory: packages/uira
+      - run: npm publish --access public
+        working-directory: packages/uira
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --access public
+        working-directory: packages/hook
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+## Checklist
+
+### Phase 1: Package Scaffolding
+- [ ] Create `packages/` directory structure
+- [ ] Create `packages/uira/package.json` with exports
+- [ ] Create `packages/hook/package.json`
+- [ ] Set up TypeScript config
+- [ ] Set up build scripts
+
+### Phase 2: napi-rs Bindings
+- [ ] Refactor `crates/uira-napi/src/lib.rs`
+- [ ] Implement `comments` module bindings
+- [ ] Implement `hooks` module bindings
+- [ ] Implement `oxc` module bindings
+- [ ] Implement `agent` module bindings
+- [ ] Implement `cli` module bindings
+- [ ] Test bindings locally
+
+### Phase 3: TypeScript Wrappers
+- [ ] Create type definitions
+- [ ] Create wrapper classes with nice API
+- [ ] Write documentation
+- [ ] Add examples
+
+### Phase 4: CLI Wrapper
+- [ ] Create `bin/uira.js`
+- [ ] Create `bin/uira-hook.js`
+- [ ] Test CLI locally
+
+### Phase 5: Build & Publish
+- [ ] Set up GitHub Actions for multi-platform builds
+- [ ] Configure npm authentication
+- [ ] Test publish to npm (dry-run)
+- [ ] Publish v0.1.0
+
+## Usage Examples
+
+### CLI Usage
+
+```bash
+# Install globally
+npm install -g @uiradev/uira
+
+# Run AI agent
+uira exec "Fix the TypeScript errors"
+
+# Check typos with AI
+uira typos --ai
+
+# Run diagnostics
+uira diagnostics --ai
+```
+
+### Library Usage
+
+```typescript
+// Comment checker
+import { CommentChecker } from '@uiradev/uira/comments';
+
+const checker = new CommentChecker();
+const comments = checker.detect(code, 'file.ts');
+
+// Linter
+import { Linter } from '@uiradev/uira/oxc';
+
+const linter = new Linter();
+const diagnostics = linter.lintFiles(['src/**/*.ts']);
+
+// AI Agent
+import { Agent } from '@uiradev/uira/agent';
+
+const agent = new Agent({ model: 'claude-sonnet-4' });
+const result = await agent.run('Explain this code');
+```
+
+### Hooks Integration
+
+```bash
+# Install hooks package
+npm install -D @uiradev/hook
+
+# package.json
+{
+  "scripts": {
+    "prepare": "uira-hook install"
+  }
+}
+```
