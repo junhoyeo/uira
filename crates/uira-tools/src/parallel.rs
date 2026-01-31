@@ -118,7 +118,7 @@ impl ToolCallRuntime {
         // Execute parallel tools: spawn for true parallelism, join_all for concurrent collection
         if !parallel.is_empty() {
             let _guard = self.parallel_lock.read().await;
-            let handles: Vec<_> = parallel
+            let (metadata, handles): (Vec<_>, Vec<_>) = parallel
                 .into_iter()
                 .map(|(idx, (id, name, input))| {
                     let router = self.router.clone();
@@ -128,26 +128,19 @@ impl ToolCallRuntime {
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
                     };
-                    let handle = tokio::spawn(async move {
-                        let result = router.dispatch(&name, input, &ctx).await;
-                        (idx, id, result)
-                    });
-                    handle
+                    let handle = tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
+                    ((idx, id), handle)
                 })
-                .collect();
+                .unzip();
 
             let join_results = join_all(handles).await;
-            for join_result in join_results {
-                match join_result {
-                    Ok((idx, id, result)) => indexed_results.push((idx, id, result)),
-                    Err(e) => indexed_results.push((
-                        usize::MAX,
-                        String::new(),
-                        Err(ToolError::ExecutionFailed {
-                            message: format!("Task panicked: {}", e),
-                        }),
-                    )),
-                }
+            for ((idx, id), join_result) in metadata.into_iter().zip(join_results) {
+                let result = join_result.unwrap_or_else(|e| {
+                    Err(ToolError::ExecutionFailed {
+                        message: format!("Task panicked: {}", e),
+                    })
+                });
+                indexed_results.push((idx, id, result));
             }
         }
 
