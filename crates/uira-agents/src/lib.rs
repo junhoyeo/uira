@@ -18,5 +18,6 @@ pub use crate::registry::{AgentFactory, AgentRegistry};
 pub use crate::tier_builder::{ModelTier, TierBuilder};
 pub use crate::tool_restrictions::{ToolRestrictions, ToolRestrictionsRegistry};
 pub use crate::types::{
-    AgentCategory, AgentConfig, AgentCost, AgentPromptMetadata, DelegationTrigger, ModelType,
+    AgentCategory, AgentConfig, AgentCost, AgentOverrideConfig, AgentOverrides,
+    AgentPromptMetadata, DelegationTrigger, ModelType, RoutingTier,
 };

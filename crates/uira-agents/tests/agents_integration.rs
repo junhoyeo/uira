@@ -1,8 +1,8 @@
 use uira_agents::{
-    get_agent_definitions, prompt_loader::strip_yaml_frontmatter, AgentRegistry, ModelTier,
-    PromptLoader, TierBuilder, ToolRestrictionsRegistry,
+    get_agent_definitions, prompt_loader::strip_yaml_frontmatter, AgentConfig,
+    AgentOverrideConfig, AgentOverrides, AgentRegistry, ModelTier, PromptLoader, TierBuilder,
+    ToolRestrictionsRegistry,
 };
-use uira_sdk::{AgentOverrideConfig, AgentOverrides};
 
 #[test]
 fn get_agent_definitions_applies_disable_override() {
@@ -41,7 +41,7 @@ fn tier_builder_prefers_dedicated_prompt_file_when_present() {
     let loader = PromptLoader::from_fs(tmp.path());
     let builder = TierBuilder::new(loader);
 
-    let base = uira_sdk::AgentConfig {
+    let base = AgentConfig {
         name: "executor".to_string(),
         description: "Executes".to_string(),
         prompt: "Base".to_string(),
@@ -60,7 +60,7 @@ fn tier_builder_prefers_dedicated_prompt_file_when_present() {
 fn tool_restrictions_registry_inherits_for_tier_variants() {
     let reg = ToolRestrictionsRegistry::with_default_allowlists();
 
-    let mut cfg = uira_sdk::AgentConfig {
+    let mut cfg = AgentConfig {
         name: "executor-high".to_string(),
         description: "".to_string(),
         prompt: "".to_string(),
@@ -85,7 +85,7 @@ fn tool_restrictions_registry_inherits_for_tier_variants() {
 #[test]
 fn registry_factory_produces_cloned_configs() {
     let mut reg = AgentRegistry::new();
-    reg.register_config(uira_sdk::AgentConfig {
+    reg.register_config(AgentConfig {
         name: "a".to_string(),
         description: "d".to_string(),
         prompt: "p".to_string(),
