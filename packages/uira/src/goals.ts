@@ -6,7 +6,7 @@ import {
   type JsGoalConfig,
   type JsGoalCheckResult,
   type JsVerificationResult,
-} from './native';
+} from '../index';
 
 export type {
   JsGoalConfig as GoalConfig,

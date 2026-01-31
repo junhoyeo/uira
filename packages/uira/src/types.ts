@@ -11,7 +11,7 @@ export type {
   JsGoalCheckResult,
   JsVerificationResult,
   JsGoalConfig,
-} from './native';
+} from '../index';
 
 export type HookEvent =
   | 'user-prompt-submit'

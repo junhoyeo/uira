@@ -58,18 +58,20 @@
     "./package.json": "./package.json"
   },
   "napi": {
-    "name": "uira",
-    "triples": {
-      "defaults": true,
-      "additional": [
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "x86_64-unknown-linux-gnu",
-        "x86_64-unknown-linux-musl",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-pc-windows-msvc"
-      ]
-    }
+    "binaryName": "uira",
+    "package": {
+      "name": "@uiradev/uira"
+    },
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ],
+    "cargoWorkspace": true,
+    "cargoName": "uira-napi"
   },
   "files": [
     "bin",

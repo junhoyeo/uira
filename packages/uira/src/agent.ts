@@ -16,7 +16,7 @@ import {
   type JsComplexityAnalysis,
   type JsSkillDefinition,
   type JsNotificationResult,
-} from './native';
+} from '../index';
 
 export type {
   JsAgentDefinition as AgentDefinition,

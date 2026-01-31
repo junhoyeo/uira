@@ -193,9 +193,8 @@ jobs:
             esac
           done
           
-          # Copy generated NAPI files
-          cp artifacts/napi-generated/index.js packages/uira/
-          cp artifacts/napi-generated/index.d.ts packages/uira/
+          # Generated NAPI files (index.js, index.d.ts) are committed to packages/uira/
+          # No need to copy from artifacts
 
       - name: Update versions
         run: |

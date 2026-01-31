@@ -10,7 +10,7 @@ import {
   type JsHookInput,
   type JsHookOutput,
   type DetectedKeyword,
-} from './native';
+} from '../index';
 import type { HookEvent } from './types';
 
 export type { JsHookInput as HookInput, JsHookOutput, DetectedKeyword };
