@@ -4971,7 +4971,9 @@ dependencies = [
  "uira-features",
  "uira-goals",
  "uira-hooks",
+ "uira-oxc",
  "uira-sdk",
+ "uira-tools",
 ]
 
 [[package]]

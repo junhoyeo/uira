@@ -128,7 +128,8 @@ impl ToolCallRuntime {
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
                     };
-                    let handle = tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
+                    let handle =
+                        tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
                     ((idx, id), handle)
                 })
                 .unzip();

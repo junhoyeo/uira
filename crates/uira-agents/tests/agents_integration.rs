@@ -1,7 +1,6 @@
 use uira_agents::{
-    get_agent_definitions, prompt_loader::strip_yaml_frontmatter, AgentConfig,
-    AgentOverrideConfig, AgentOverrides, AgentRegistry, ModelTier, PromptLoader, TierBuilder,
-    ToolRestrictionsRegistry,
+    get_agent_definitions, prompt_loader::strip_yaml_frontmatter, AgentConfig, AgentOverrideConfig,
+    AgentOverrides, AgentRegistry, ModelTier, PromptLoader, TierBuilder, ToolRestrictionsRegistry,
 };
 
 #[test]
