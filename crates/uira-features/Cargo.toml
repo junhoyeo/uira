@@ -8,9 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Internal crates
 uira-core = { workspace = true }
-uira-hooks = { path = "../uira-hooks" }
+uira-hooks = { workspace = true }
 uira-sdk = { workspace = true }
 
 # Serialization

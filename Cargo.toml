@@ -32,22 +32,35 @@ license = "MIT"
 repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
-# Internal crates
+# Internal crates - Core
 uira-core = { path = "crates/uira-core" }
-uira-sdk = { path = "crates/uira-sdk" }
-uira-comment-checker = { path = "crates/uira-comment-checker" }
-uira-tools = { path = "crates/uira-tools" }
+uira-protocol = { path = "crates/uira-protocol" }
+uira-config = { path = "crates/uira-config" }
+
+# Internal crates - Features
 uira-agents = { path = "crates/uira-agents" }
 uira-features = { path = "crates/uira-features" }
 uira-hooks = { path = "crates/uira-hooks" }
 uira-goals = { path = "crates/uira-goals" }
-uira-config = { path = "crates/uira-config" }
-# New agent harness crates
-uira-protocol = { path = "crates/uira-protocol" }
+uira-sdk = { path = "crates/uira-sdk" }
+
+# Internal crates - Tools
+uira-tools = { path = "crates/uira-tools" }
+uira-oxc = { path = "crates/uira-oxc" }
+uira-comment-checker = { path = "crates/uira-comment-checker" }
+
+# Internal crates - Agent harness
 uira-providers = { path = "crates/uira-providers" }
 uira-sandbox = { path = "crates/uira-sandbox" }
 uira-context = { path = "crates/uira-context" }
 uira-agent = { path = "crates/uira-agent" }
+uira-auth = { path = "crates/uira-auth" }
+
+# Internal crates - Applications
+uira-cli = { path = "crates/uira-cli" }
+uira-tui = { path = "crates/uira-tui" }
+uira-mcp-server = { path = "crates/uira-mcp-server" }
+uira-napi = { path = "crates/uira-napi" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -58,7 +71,7 @@ clap = { version = "4.5", features = ["derive", "cargo"] }
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
+serde_yaml_ng = "0.10"
 json5 = "0.4"
 
 # HTTP

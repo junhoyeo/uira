@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-uira-config = { path = "../uira-config" }
+uira-config = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

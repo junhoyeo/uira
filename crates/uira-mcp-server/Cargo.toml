@@ -12,10 +12,10 @@ name = "uira-mcp"
 path = "src/main.rs"
 
 [dependencies]
-uira-tools = { path = "../uira-tools" }
-uira-oxc = { path = "../uira-oxc" }
-uira-config = { path = "../uira-config" }
-uira-features = { path = "../uira-features" }
+uira-tools = { workspace = true }
+uira-oxc = { workspace = true }
+uira-config = { workspace = true }
+uira-features = { workspace = true }
 claude-agent-sdk-rs = "0.6.3"
 serde = { workspace = true }
 serde_json = { workspace = true }

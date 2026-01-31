@@ -322,7 +322,7 @@ async fn test_interactive_mode() {
     client.queue_text("Second response");
 
     let (agent, event_stream) = Agent::new(make_config(), client.clone()).with_event_stream();
-    let (mut agent, input_tx, _approval_rx) = agent.with_interactive();
+    let (mut agent, input_tx, _approval_rx, _command_tx) = agent.with_interactive();
 
     // Spawn the interactive loop
     let handle = tokio::spawn(async move {
@@ -385,7 +385,7 @@ async fn test_interactive_quit_command() {
     // No responses needed, /quit should exit immediately
 
     let (agent, _event_stream) = Agent::new(make_config(), client.clone()).with_event_stream();
-    let (mut agent, input_tx, _approval_rx) = agent.with_interactive();
+    let (mut agent, input_tx, _approval_rx, _command_tx) = agent.with_interactive();
 
     // Spawn the interactive loop
     let handle = tokio::spawn(async move { agent.run_interactive().await });

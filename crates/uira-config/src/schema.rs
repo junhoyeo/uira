@@ -674,7 +674,7 @@ commands:
     run: cargo clippy -- -D warnings
     glob: "**/*.rs"
 "#;
-        let hook: HookConfig = serde_yaml::from_str(yaml).unwrap();
+        let hook: HookConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(hook.parallel);
         assert_eq!(hook.commands.len(), 2);
         assert_eq!(hook.commands[0].name, "fmt");
@@ -696,7 +696,7 @@ hooks:
       - name: auto-push
         run: git push origin HEAD
 "#;
-        let config: UiraConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert!(config.hooks.pre_commit.is_some());
         assert!(config.hooks.post_commit.is_some());
     }
@@ -709,7 +709,7 @@ workspace: .uira/goals/pixel-match/
 command: bun run check.ts
 target: 99.9
 "#;
-        let goal: GoalConfig = serde_yaml::from_str(yaml).unwrap();
+        let goal: GoalConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(goal.name, "pixel-match");
         assert_eq!(goal.workspace, Some(".uira/goals/pixel-match/".to_string()));
         assert_eq!(goal.command, "bun run check.ts");
@@ -733,7 +733,7 @@ goals:
 check_interval_secs: 15
 max_iterations: 50
 "#;
-        let config: GoalsConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: GoalsConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.goals.len(), 2);
         assert_eq!(config.goals[0].name, "pixel-match");
         assert_eq!(config.goals[1].name, "test-coverage");
@@ -755,7 +755,7 @@ goals:
       command: ./scripts/lighthouse-check.sh
       target: 90
 "#;
-        let config: UiraConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.goals.goals.len(), 1);
         assert_eq!(config.goals.goals[0].name, "lighthouse-perf");
         assert!((config.goals.goals[0].target - 90.0).abs() < 0.01);
@@ -768,7 +768,7 @@ name: simple
 command: echo 100
 target: 100
 "#;
-        let goal: GoalConfig = serde_yaml::from_str(yaml).unwrap();
+        let goal: GoalConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(goal.timeout_secs, 60);
         assert!(goal.enabled);
         assert!(goal.workspace.is_none());
@@ -804,7 +804,7 @@ ai:
     - ts
     - rust
 "#;
-        let settings: DiagnosticsSettings = serde_yaml::from_str(yaml).unwrap();
+        let settings: DiagnosticsSettings = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(settings.ai.model, "openai/gpt-4o");
         assert_eq!(settings.ai.severity, "warning");
         assert!((settings.ai.confidence_threshold - 0.9).abs() < 0.01);
@@ -831,7 +831,7 @@ ai:
   pragma_format: "@allow-comment"
   include_docstrings: true
 "#;
-        let settings: CommentsSettings = serde_yaml::from_str(yaml).unwrap();
+        let settings: CommentsSettings = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(settings.ai.model, "anthropic/claude-opus-4");
         assert_eq!(settings.ai.pragma_format, "@allow-comment");
         assert!(settings.ai.include_docstrings);
@@ -855,7 +855,7 @@ comments:
   ai:
     include_docstrings: true
 "#;
-        let config: UiraConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.diagnostics.ai.severity, "error");
         assert_eq!(config.diagnostics.ai.languages, vec!["ts", "tsx"]);
         assert!(config.comments.ai.include_docstrings);

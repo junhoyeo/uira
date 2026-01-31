@@ -11,7 +11,7 @@ repository.workspace = true
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yaml_ng = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -20,9 +20,8 @@ anyhow = { workspace = true }
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 
-# Internal crates
-uira-config = { path = "../uira-config" }
-uira-agents = { path = "../uira-agents" }
+uira-config = { workspace = true }
+uira-agents = { workspace = true }
 
 # napi-rs for Node.js interop (will be used for SDK calls)
 # napi = { version = "2.16", features = ["async", "serde-json"] }

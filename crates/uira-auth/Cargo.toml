@@ -48,8 +48,7 @@ dirs = { workspace = true }
 # File locking for concurrent access safety
 fs2 = "0.4"
 
-# Secure atomic writes
-uira-core = { path = "../uira-core" }
+uira-core = { workspace = true }
 
 # HTTP server for OAuth callbacks
 actix-web = { workspace = true, optional = true }
