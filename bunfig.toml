@@ -1,0 +1,15 @@
+# Bun workspace configuration
+# https://bun.com/docs/pm/workspaces
+
+[install]
+# Use hardlinks for faster installs
+frozenLockfile = false
+
+[install.cache]
+# Cache packages globally for faster installs across projects
+dir = "~/.bun/install/cache"
+
+[install.lockfile]
+# Save lockfile in binary format (faster)
+save = true
+print = "yarn"
