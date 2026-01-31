@@ -18,6 +18,8 @@ uira-features = { workspace = true }
 uira-sdk = { workspace = true }
 uira-config = { path = "../uira-config" }
 uira-goals = { path = "../uira-goals" }
+uira-tools = { workspace = true }
+uira-oxc = { path = "../uira-oxc" }
 napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }
 napi-derive = "3"
 serde = { workspace = true }

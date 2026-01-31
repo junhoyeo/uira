@@ -1,0 +1,51 @@
+{
+  "name": "@uiradev/hook",
+  "version": "0.1.0",
+  "description": "Git hooks made easy with AI assistance",
+  "keywords": [
+    "git",
+    "hooks",
+    "husky",
+    "pre-commit",
+    "ai"
+  ],
+  "author": "Junho Yeo <i@junho.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junhoyeo/uira"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "uira-hook": "./bin/uira-hook.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "postinstall": "node scripts/install.js"
+  },
+  "dependencies": {
+    "@uiradev/uira": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  }
+}
