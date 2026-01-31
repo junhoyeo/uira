@@ -5060,6 +5060,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures",
  "glob",
  "lsp-types 0.95.1",
  "once_cell",

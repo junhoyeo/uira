@@ -1,5 +1,6 @@
 //! Parallel tool execution runtime with RwLock pattern
 
+use futures::future::join_all;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uira_protocol::ToolOutput;
@@ -114,11 +115,10 @@ impl ToolCallRuntime {
         let mut indexed_results: Vec<(usize, String, Result<ToolOutput, ToolError>)> =
             Vec::with_capacity(total_count);
 
-        // Execute parallel tools concurrently
+        // Execute parallel tools: spawn for true parallelism, join_all for concurrent collection
         if !parallel.is_empty() {
             let _guard = self.parallel_lock.read().await;
-            // Capture (idx, id) before spawning so we retain metadata if task panics
-            let handles: Vec<_> = parallel
+            let (metadata, handles): (Vec<_>, Vec<_>) = parallel
                 .into_iter()
                 .map(|(idx, (id, name, input))| {
                     let router = self.router.clone();
@@ -129,12 +129,13 @@ impl ToolCallRuntime {
                         env: ctx.env.clone(),
                     };
                     let handle = tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
-                    (idx, id, handle)
+                    ((idx, id), handle)
                 })
-                .collect();
+                .unzip();
 
-            for (idx, id, handle) in handles {
-                let result = handle.await.unwrap_or_else(|e| {
+            let join_results = join_all(handles).await;
+            for ((idx, id), join_result) in metadata.into_iter().zip(join_results) {
+                let result = join_result.unwrap_or_else(|e| {
                     Err(ToolError::ExecutionFailed {
                         message: format!("Task panicked: {}", e),
                     })
@@ -221,5 +222,63 @@ mod tests {
         let results = runtime.execute_batch(calls, &ctx).await;
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.is_ok()));
+    }
+
+    #[tokio::test]
+    async fn test_parallel_speedup() {
+        use std::time::{Duration, Instant};
+
+        let mut router = ToolRouter::new();
+        router.register(
+            FunctionTool::new(
+                "slow_parallel",
+                "Slow parallel tool",
+                JsonSchema::object(),
+                |_| async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    Ok(ToolOutput::text("done"))
+                },
+            )
+            .with_parallel(true),
+        );
+
+        let runtime = ToolCallRuntime::new(Arc::new(router));
+        let ctx = ToolContext::default();
+
+        let calls: Vec<_> = (0..5)
+            .map(|i| (format!("id_{}", i), "slow_parallel".to_string(), json!({})))
+            .collect();
+
+        let start = Instant::now();
+        let results = runtime.execute_batch_with_ids(calls, &ctx).await;
+        let parallel_time = start.elapsed();
+
+        assert_eq!(results.len(), 5);
+        assert!(results.iter().all(|(_, r)| r.is_ok()));
+        assert!(
+            parallel_time < Duration::from_millis(150),
+            "5 parallel 50ms tasks should complete in <150ms, took {:?}",
+            parallel_time
+        );
+    }
+
+    #[tokio::test]
+    async fn test_batch_with_ids_preserves_order() {
+        let router = create_test_router();
+        let runtime = ToolCallRuntime::new(router);
+        let ctx = ToolContext::default();
+
+        let calls = vec![
+            ("id_0".to_string(), "parallel_tool".to_string(), json!({})),
+            ("id_1".to_string(), "sequential_tool".to_string(), json!({})),
+            ("id_2".to_string(), "parallel_tool".to_string(), json!({})),
+        ];
+
+        let results = runtime.execute_batch_with_ids(calls, &ctx).await;
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].0, "id_0");
+        assert_eq!(results[1].0, "id_1");
+        assert_eq!(results[2].0, "id_2");
     }
 }
