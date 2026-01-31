@@ -1,23 +1,28 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 
-/**
- * Native bindings loaded from the Rust napi module.
- * The .node file is built by napi-rs during `npm run build`.
- */
-
-// Try to load the native module
-let nativeBindings: NativeBindings;
+let nativeBindings: NativeBindings | null = null;
+let loadError: Error | null = null;
 
 try {
   nativeBindings = require('../uira.node');
-} catch {
-  // During development or when native module isn't built yet
-  nativeBindings = {} as NativeBindings;
+} catch (e) {
+  loadError = e instanceof Error ? e : new Error(String(e));
 }
 
-// ============================================================================
-// Hook System
-// ============================================================================
+function assertNativeLoaded<T>(fn: T | undefined, name: string): T {
+  if (!nativeBindings) {
+    const message = loadError
+      ? `Native module failed to load: ${loadError.message}. ` +
+        'Make sure you have installed the correct platform-specific package ' +
+        '(@uiradev/uira-darwin-arm64, @uiradev/uira-linux-x64-gnu, etc.)'
+      : `Native module not available. Function '${name}' requires the native module.`;
+    throw new Error(message);
+  }
+  if (fn === undefined) {
+    throw new Error(`Function '${name}' is not available in the native module.`);
+  }
+  return fn;
+}
 
 export interface JsHookInput {
   sessionId?: string;
@@ -47,10 +52,6 @@ export interface DetectedKeyword {
   message: string;
 }
 
-// ============================================================================
-// Agent System
-// ============================================================================
-
 export interface JsAgentDefinition {
   name: string;
   description: string;
@@ -59,10 +60,6 @@ export interface JsAgentDefinition {
   prompt: string;
   tools: string[];
 }
-
-// ============================================================================
-// Model Routing
-// ============================================================================
 
 export interface JsRoutingResult {
   model: string;
@@ -78,10 +75,6 @@ export interface JsComplexityAnalysis {
   analysis: string;
 }
 
-// ============================================================================
-// Skill System
-// ============================================================================
-
 export interface JsSkillDefinition {
   name: string;
   description: string;
@@ -90,10 +83,6 @@ export interface JsSkillDefinition {
   model?: string;
   argumentHint?: string;
 }
-
-// ============================================================================
-// Background Tasks
-// ============================================================================
 
 export interface JsBackgroundTask {
   id: string;
@@ -111,10 +100,6 @@ export interface JsNotificationResult {
   message?: string;
   notificationCount: number;
 }
-
-// ============================================================================
-// Goal Verification
-// ============================================================================
 
 export interface JsGoalCheckResult {
   name: string;
@@ -141,12 +126,7 @@ export interface JsGoalConfig {
   description?: string;
 }
 
-// ============================================================================
-// Native Bindings Interface
-// ============================================================================
-
 interface NativeBindings {
-  // Hook System
   executeHook(event: string, input: JsHookInput): Promise<JsHookOutput>;
   listHooks(): string[];
   getHookCount(): number;
@@ -156,22 +136,18 @@ interface NativeBindings {
   createHookOutputDeny(reason: string): JsHookOutput;
   createHookOutputStop(reason: string): JsHookOutput;
 
-  // Agent System
   listAgents(): JsAgentDefinition[];
   getAgent(name: string): JsAgentDefinition | null;
   listAgentNames(): string[];
 
-  // Model Routing
   routeTaskPrompt(prompt: string): JsRoutingResult;
   routeTaskWithAgent(prompt: string, agentType?: string): JsRoutingResult;
   analyzeComplexity(prompt: string, agentType?: string): JsComplexityAnalysis;
 
-  // Skill System
   getSkill(name: string): string | null;
   getSkillDefinition(name: string): JsSkillDefinition | null;
   listSkills(): string[];
 
-  // Background Tasks
   checkNotifications(sessionId: string): JsNotificationResult;
   notifyBackgroundEvent(eventJson: string): void;
   registerBackgroundTask(
@@ -182,49 +158,92 @@ interface NativeBindings {
     agent: string
   ): void;
 
-  // Goal Verification
   checkGoal(directory: string, goal: JsGoalConfig): Promise<JsGoalCheckResult>;
   checkGoals(directory: string, goals: JsGoalConfig[]): Promise<JsVerificationResult>;
   checkGoalsFromConfig(directory: string): Promise<JsVerificationResult | null>;
   listGoalsFromConfig(directory: string): JsGoalConfig[];
 }
 
-// ============================================================================
-// Exports
-// ============================================================================
+export const executeHook = (event: string, input: JsHookInput) =>
+  assertNativeLoaded(nativeBindings?.executeHook, 'executeHook')(event, input);
 
-// Hook System
-export const executeHook = nativeBindings.executeHook;
-export const listHooks = nativeBindings.listHooks;
-export const getHookCount = nativeBindings.getHookCount;
-export const detectKeywords = nativeBindings.detectKeywords;
-export const detectAllKeywords = nativeBindings.detectAllKeywords;
-export const createHookOutputWithMessage = nativeBindings.createHookOutputWithMessage;
-export const createHookOutputDeny = nativeBindings.createHookOutputDeny;
-export const createHookOutputStop = nativeBindings.createHookOutputStop;
+export const listHooks = () =>
+  assertNativeLoaded(nativeBindings?.listHooks, 'listHooks')();
 
-// Agent System
-export const listAgents = nativeBindings.listAgents;
-export const getAgent = nativeBindings.getAgent;
-export const listAgentNames = nativeBindings.listAgentNames;
+export const getHookCount = () =>
+  assertNativeLoaded(nativeBindings?.getHookCount, 'getHookCount')();
 
-// Model Routing
-export const routeTaskPrompt = nativeBindings.routeTaskPrompt;
-export const routeTaskWithAgent = nativeBindings.routeTaskWithAgent;
-export const analyzeComplexity = nativeBindings.analyzeComplexity;
+export const detectKeywords = (prompt: string, agent?: string) =>
+  assertNativeLoaded(nativeBindings?.detectKeywords, 'detectKeywords')(prompt, agent);
 
-// Skill System
-export const getSkill = nativeBindings.getSkill;
-export const getSkillDefinition = nativeBindings.getSkillDefinition;
-export const listSkills = nativeBindings.listSkills;
+export const detectAllKeywords = (prompt: string, agent?: string) =>
+  assertNativeLoaded(nativeBindings?.detectAllKeywords, 'detectAllKeywords')(prompt, agent);
 
-// Background Tasks
-export const checkNotifications = nativeBindings.checkNotifications;
-export const notifyBackgroundEvent = nativeBindings.notifyBackgroundEvent;
-export const registerBackgroundTask = nativeBindings.registerBackgroundTask;
+export const createHookOutputWithMessage = (message: string) =>
+  assertNativeLoaded(nativeBindings?.createHookOutputWithMessage, 'createHookOutputWithMessage')(message);
 
-// Goal Verification
-export const checkGoal = nativeBindings.checkGoal;
-export const checkGoals = nativeBindings.checkGoals;
-export const checkGoalsFromConfig = nativeBindings.checkGoalsFromConfig;
-export const listGoalsFromConfig = nativeBindings.listGoalsFromConfig;
+export const createHookOutputDeny = (reason: string) =>
+  assertNativeLoaded(nativeBindings?.createHookOutputDeny, 'createHookOutputDeny')(reason);
+
+export const createHookOutputStop = (reason: string) =>
+  assertNativeLoaded(nativeBindings?.createHookOutputStop, 'createHookOutputStop')(reason);
+
+export const listAgents = () =>
+  assertNativeLoaded(nativeBindings?.listAgents, 'listAgents')();
+
+export const getAgent = (name: string) =>
+  assertNativeLoaded(nativeBindings?.getAgent, 'getAgent')(name);
+
+export const listAgentNames = () =>
+  assertNativeLoaded(nativeBindings?.listAgentNames, 'listAgentNames')();
+
+export const routeTaskPrompt = (prompt: string) =>
+  assertNativeLoaded(nativeBindings?.routeTaskPrompt, 'routeTaskPrompt')(prompt);
+
+export const routeTaskWithAgent = (prompt: string, agentType?: string) =>
+  assertNativeLoaded(nativeBindings?.routeTaskWithAgent, 'routeTaskWithAgent')(prompt, agentType);
+
+export const analyzeComplexity = (prompt: string, agentType?: string) =>
+  assertNativeLoaded(nativeBindings?.analyzeComplexity, 'analyzeComplexity')(prompt, agentType);
+
+export const getSkill = (name: string) =>
+  assertNativeLoaded(nativeBindings?.getSkill, 'getSkill')(name);
+
+export const getSkillDefinition = (name: string) =>
+  assertNativeLoaded(nativeBindings?.getSkillDefinition, 'getSkillDefinition')(name);
+
+export const listSkills = () =>
+  assertNativeLoaded(nativeBindings?.listSkills, 'listSkills')();
+
+export const checkNotifications = (sessionId: string) =>
+  assertNativeLoaded(nativeBindings?.checkNotifications, 'checkNotifications')(sessionId);
+
+export const notifyBackgroundEvent = (eventJson: string) =>
+  assertNativeLoaded(nativeBindings?.notifyBackgroundEvent, 'notifyBackgroundEvent')(eventJson);
+
+export const registerBackgroundTask = (
+  taskId: string,
+  sessionId: string,
+  parentSessionId: string,
+  description: string,
+  agent: string
+) =>
+  assertNativeLoaded(nativeBindings?.registerBackgroundTask, 'registerBackgroundTask')(
+    taskId,
+    sessionId,
+    parentSessionId,
+    description,
+    agent
+  );
+
+export const checkGoal = (directory: string, goal: JsGoalConfig) =>
+  assertNativeLoaded(nativeBindings?.checkGoal, 'checkGoal')(directory, goal);
+
+export const checkGoals = (directory: string, goals: JsGoalConfig[]) =>
+  assertNativeLoaded(nativeBindings?.checkGoals, 'checkGoals')(directory, goals);
+
+export const checkGoalsFromConfig = (directory: string) =>
+  assertNativeLoaded(nativeBindings?.checkGoalsFromConfig, 'checkGoalsFromConfig')(directory);
+
+export const listGoalsFromConfig = (directory: string) =>
+  assertNativeLoaded(nativeBindings?.listGoalsFromConfig, 'listGoalsFromConfig')(directory);

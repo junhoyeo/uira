@@ -844,6 +844,21 @@ impl From<LintDiagnostic> for JsLintDiagnostic {
     }
 }
 
+fn pascal_to_kebab(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            result.push('-');
+        }
+        result.push(c.to_ascii_lowercase());
+    }
+    result
+}
+
+fn lint_rule_to_string(rule: &LintRule) -> String {
+    pascal_to_kebab(&format!("{:?}", rule))
+}
+
 fn parse_lint_rules(rules: &[String]) -> Vec<LintRule> {
     rules
         .iter()
@@ -903,29 +918,27 @@ impl JsLinter {
     }
 
     #[napi]
-    pub fn lint_source(&self, filename: String, source: String) -> Vec<JsLintDiagnostic> {
-        match self.inner.lint_source(&filename, &source) {
-            Ok(diagnostics) => diagnostics
-                .into_iter()
-                .map(JsLintDiagnostic::from)
-                .collect(),
-            Err(_) => vec![],
-        }
+    pub fn lint_source(
+        &self,
+        filename: String,
+        source: String,
+    ) -> napi::Result<Vec<JsLintDiagnostic>> {
+        self.inner
+            .lint_source(&filename, &source)
+            .map(|diagnostics| diagnostics.into_iter().map(JsLintDiagnostic::from).collect())
+            .map_err(|e| napi::Error::from_reason(e))
     }
 
     #[napi]
     pub fn all_rules() -> Vec<String> {
-        LintRule::all()
-            .iter()
-            .map(|r| format!("{:?}", r).to_lowercase().replace('_', "-"))
-            .collect()
+        LintRule::all().iter().map(lint_rule_to_string).collect()
     }
 
     #[napi]
     pub fn recommended_rules() -> Vec<String> {
         LintRule::recommended()
             .iter()
-            .map(|r| format!("{:?}", r).to_lowercase().replace('_', "-"))
+            .map(lint_rule_to_string)
             .collect()
     }
 }

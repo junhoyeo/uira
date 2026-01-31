@@ -270,14 +270,23 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          failed_packages=""
           for pkg_dir in packages/uira/npm/*/; do
             if [ -f "$pkg_dir/package.json" ]; then
-              echo "Publishing $(basename $pkg_dir)..."
+              pkg_name=$(basename "$pkg_dir")
+              echo "Publishing $pkg_name..."
               cd "$pkg_dir"
-              npm publish --access public || true
+              if ! npm publish --access public 2>&1; then
+                echo "::warning::Failed to publish $pkg_name"
+                failed_packages="$failed_packages $pkg_name"
+              fi
               cd -
             fi
           done
+          if [ -n "$failed_packages" ]; then
+            echo "::error::Failed to publish:$failed_packages"
+            exit 1
+          fi
 
       - name: Publish main package
         if: ${{ !inputs.dry_run }}
