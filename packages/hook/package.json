@@ -39,7 +39,7 @@
     "postinstall": "node scripts/install.js"
   },
   "dependencies": {
-    "@uiradev/uira": "^0.1.0"
+    "@uiradev/uira": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
