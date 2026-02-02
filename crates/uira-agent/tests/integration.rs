@@ -308,11 +308,11 @@ async fn test_recorded_messages_context() {
 
     let recorded = client.recorded_messages();
 
-    // First call: just user message
-    assert_eq!(recorded[0].len(), 1);
+    // First call: system prompt + user message
+    assert_eq!(recorded[0].len(), 2);
 
-    // Second call: user + assistant (tool call) + user (tool result)
-    assert!(recorded[1].len() >= 2);
+    // Second call: system + user + assistant (tool call) + user (tool result)
+    assert!(recorded[1].len() >= 4);
 }
 
 #[tokio::test]
