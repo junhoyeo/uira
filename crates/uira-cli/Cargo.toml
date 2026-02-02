@@ -14,15 +14,15 @@ path = "src/main.rs"
 [dependencies]
 uira-protocol = { workspace = true }
 uira-agent = { workspace = true }
-uira-agents = { path = "../uira-agents" }
+uira-agents = { workspace = true }
 uira-config = { workspace = true }
-uira-core = { path = "../uira-core" }
+uira-core = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
-uira-features = { path = "../uira-features" }
-uira-goals = { path = "../uira-goals" }
-uira-tui = { path = "../uira-tui" }
-uira-auth = { path = "../uira-auth", features = ["oauth-server"] }
+uira-features = { workspace = true }
+uira-goals = { workspace = true }
+uira-tui = { workspace = true }
+uira-auth = { workspace = true, features = ["oauth-server"] }
 secrecy = "0.10"
 webbrowser = "1.0"
 clap = { workspace = true }

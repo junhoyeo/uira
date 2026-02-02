@@ -64,7 +64,7 @@ fn parse_config_content(content: &str, format: ConfigFormat) -> Result<UiraConfi
     match format {
         ConfigFormat::Jsonc => json5::from_str(content).context("Failed to parse JSONC"),
         ConfigFormat::Json => serde_json::from_str(content).context("Failed to parse JSON"),
-        ConfigFormat::Yaml => serde_yaml::from_str(content).context("Failed to parse YAML"),
+        ConfigFormat::Yaml => serde_yaml_ng::from_str(content).context("Failed to parse YAML"),
     }
 }
 
@@ -289,7 +289,7 @@ pre-commit:
     - name: fmt
       run: cargo fmt --check
 "#;
-        let config: UiraConfig = serde_yaml::from_str(yaml_content).unwrap();
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml_content).unwrap();
         assert_eq!(config.opencode.port, 4096);
     }
 

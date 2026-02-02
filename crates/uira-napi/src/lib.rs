@@ -257,7 +257,7 @@ fn load_agent_model_config() -> AgentModelConfig {
     let config_path = find_uira_yml();
     if let Some(path) = config_path {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(yaml_config) = serde_yaml::from_str::<UiraYamlConfig>(&content) {
+            if let Ok(yaml_config) = serde_yaml_ng::from_str::<UiraYamlConfig>(&content) {
                 for (agent_name, agent_config) in yaml_config.agents {
                     if let Some(model) = agent_config.model {
                         model_config.insert(agent_name, model);
@@ -925,8 +925,13 @@ impl JsLinter {
     ) -> napi::Result<Vec<JsLintDiagnostic>> {
         self.inner
             .lint_source(&filename, &source)
-            .map(|diagnostics| diagnostics.into_iter().map(JsLintDiagnostic::from).collect())
-            .map_err(|e| napi::Error::from_reason(e))
+            .map(|diagnostics| {
+                diagnostics
+                    .into_iter()
+                    .map(JsLintDiagnostic::from)
+                    .collect()
+            })
+            .map_err(napi::Error::from_reason)
     }
 
     #[napi]

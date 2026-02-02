@@ -10,17 +10,14 @@ keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-# Core crates
 uira-core = { workspace = true }
 uira-sdk = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }
-uira-config = { path = "../uira-config" }
-uira-goals = { path = "../uira-goals" }
-uira-oxc = { path = "../uira-oxc" }
-uira-comment-checker = { path = "../uira-comment-checker" }
-
-# Agent harness crates (NEW)
+uira-config = { workspace = true }
+uira-goals = { workspace = true }
+uira-oxc = { workspace = true }
+uira-comment-checker = { workspace = true }
 uira-agent = { workspace = true }
 uira-providers = { workspace = true }
 uira-protocol = { workspace = true }
@@ -34,7 +31,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yaml_ng = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 colored = { workspace = true }

@@ -47,7 +47,7 @@ fn default_on_fail() -> OnFail {
 impl Config {
     pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = fs::read_to_string(path)?;
-        let config: Config = serde_yaml::from_str(&content)?;
+        let config: Config = serde_yaml_ng::from_str(&content)?;
         Ok(config)
     }
 
@@ -86,7 +86,7 @@ impl Config {
     }
 
     pub fn to_yaml(&self) -> anyhow::Result<String> {
-        Ok(serde_yaml::to_string(self)?)
+        Ok(serde_yaml_ng::to_string(self)?)
     }
 }
 
@@ -113,7 +113,7 @@ mod tests {
     fn test_yaml_roundtrip() {
         let config = Config::default_config();
         let yaml = config.to_yaml().unwrap();
-        let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+        let parsed: Config = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(config.hooks.len(), parsed.hooks.len());
     }

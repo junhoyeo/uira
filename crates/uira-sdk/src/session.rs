@@ -253,7 +253,7 @@ continue working until everything is done."#
             if path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     // Try YAML first
-                    if let Ok(config) = serde_yaml::from_str::<PluginConfig>(&content) {
+                    if let Ok(config) = serde_yaml_ng::from_str::<PluginConfig>(&content) {
                         return Some(config);
                     }
                     // Try JSON
@@ -263,7 +263,7 @@ continue working until everything is done."#
 
                     // Try loading as UiraConfig and convert
                     if let Ok(uira_config) =
-                        serde_yaml::from_str::<uira_config::UiraConfig>(&content)
+                        serde_yaml_ng::from_str::<uira_config::UiraConfig>(&content)
                     {
                         return Some(Self::convert_uira_to_plugin_config(&uira_config));
                     }

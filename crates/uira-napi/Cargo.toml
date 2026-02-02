@@ -16,15 +16,15 @@ uira-hooks = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }
 uira-sdk = { workspace = true }
-uira-config = { path = "../uira-config" }
-uira-goals = { path = "../uira-goals" }
+uira-config = { workspace = true }
+uira-goals = { workspace = true }
 uira-tools = { workspace = true }
-uira-oxc = { path = "../uira-oxc" }
+uira-oxc = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }
 napi-derive = "3"
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yaml_ng = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 

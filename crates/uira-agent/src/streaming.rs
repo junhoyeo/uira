@@ -6,10 +6,28 @@
 
 use uira_protocol::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamOutput {
     Text(String),
     Thinking(String),
+}
+
+impl PartialEq<&str> for StreamOutput {
+    fn eq(&self, other: &&str) -> bool {
+        match self {
+            StreamOutput::Text(s) => s == *other,
+            StreamOutput::Thinking(s) => s == *other,
+        }
+    }
+}
+
+impl PartialEq<String> for StreamOutput {
+    fn eq(&self, other: &String) -> bool {
+        match self {
+            StreamOutput::Text(s) => s == other,
+            StreamOutput::Thinking(s) => s == other,
+        }
+    }
 }
 
 /// Controller for processing streaming model responses
@@ -172,11 +190,15 @@ impl StreamController {
             StreamChunk::MessageDelta { usage, .. } => {
                 tracing::debug!("StreamController: MessageDelta - usage: {:?}", usage);
                 if let Some(u) = usage {
-                    // Accumulate: keep input_tokens from MessageStart, update output_tokens
                     self.usage.output_tokens = u.output_tokens;
-                    // If MessageDelta has input_tokens (rare), use them
                     if u.input_tokens > 0 {
                         self.usage.input_tokens = u.input_tokens;
+                    }
+                    if u.cache_read_tokens > 0 {
+                        self.usage.cache_read_tokens = u.cache_read_tokens;
+                    }
+                    if u.cache_creation_tokens > 0 {
+                        self.usage.cache_creation_tokens = u.cache_creation_tokens;
                     }
                 }
                 vec![]
@@ -414,12 +436,18 @@ mod tests {
 
         // Push more with newline - should commit
         let lines = controller.push(make_text_delta(" world\n"));
-        assert_eq!(lines, vec!["Hello world"]);
+        assert_eq!(lines, vec![StreamOutput::Text("Hello world".to_string())]);
         assert!(controller.pending_text().is_empty());
 
         // Push multiple lines at once
         let lines = controller.push(make_text_delta("Line 1\nLine 2\nLine 3"));
-        assert_eq!(lines, vec!["Line 1", "Line 2"]);
+        assert_eq!(
+            lines,
+            vec![
+                StreamOutput::Text("Line 1".to_string()),
+                StreamOutput::Text("Line 2".to_string())
+            ]
+        );
         assert_eq!(controller.pending_text(), "Line 3");
     }
 
