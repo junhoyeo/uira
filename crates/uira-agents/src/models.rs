@@ -2,8 +2,8 @@
 //!
 //! Maps abstract model tiers (Opus/Sonnet/Haiku) to actual model IDs per provider.
 
-use std::collections::HashMap;
 use crate::types::ModelType;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ProviderModels {

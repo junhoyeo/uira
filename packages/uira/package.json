@@ -1,0 +1,106 @@
+{
+  "name": "@uiradev/uira",
+  "version": "0.1.0",
+  "description": "Lightning-fast AI coding agent & git hooks manager built in Rust",
+  "keywords": [
+    "ai",
+    "agent",
+    "rust",
+    "git-hooks",
+    "linter",
+    "claude",
+    "openai",
+    "napi"
+  ],
+  "author": "Junho Yeo <i@junho.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junhoyeo/uira"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "uira": "./bin/uira.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./comments": {
+      "types": "./dist/comments.d.ts",
+      "import": "./dist/comments.mjs",
+      "require": "./dist/comments.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.mjs",
+      "require": "./dist/hooks.js"
+    },
+    "./oxc": {
+      "types": "./dist/oxc.d.ts",
+      "import": "./dist/oxc.mjs",
+      "require": "./dist/oxc.js"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "import": "./dist/agent.mjs",
+      "require": "./dist/agent.js"
+    },
+    "./goals": {
+      "types": "./dist/goals.d.ts",
+      "import": "./dist/goals.mjs",
+      "require": "./dist/goals.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "napi": {
+    "binaryName": "uira",
+    "package": {
+      "name": "@uiradev/uira"
+    },
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ],
+    "cargoWorkspace": true,
+    "cargoName": "uira-napi"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "npm"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:ts": "tsup",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node bin/uira.js --version"
+  },
+  "dependencies": {
+    "detect-libc": "^2.0.3"
+  },
+  "optionalDependencies": {
+    "@uiradev/uira-darwin-arm64": "0.1.0",
+    "@uiradev/uira-darwin-x64": "0.1.0",
+    "@uiradev/uira-linux-x64-gnu": "0.1.0",
+    "@uiradev/uira-linux-x64-musl": "0.1.0",
+    "@uiradev/uira-linux-arm64-gnu": "0.1.0",
+    "@uiradev/uira-win32-x64-msvc": "0.1.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0-alpha.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  }
+}

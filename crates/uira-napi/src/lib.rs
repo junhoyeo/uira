@@ -757,6 +757,193 @@ pub fn list_goals_from_config(directory: String) -> napi::Result<Vec<JsGoalConfi
 }
 
 // ============================================================================
+// Comment Checker Bindings
+// ============================================================================
+
+use uira_tools::CommentChecker;
+
+#[napi(js_name = "CommentChecker")]
+pub struct JsCommentChecker {
+    inner: CommentChecker,
+}
+
+#[napi]
+impl JsCommentChecker {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: CommentChecker::new(),
+        }
+    }
+
+    #[napi]
+    pub fn should_check_tool(&self, tool_name: String) -> bool {
+        self.inner.should_check_tool(&tool_name)
+    }
+
+    #[napi]
+    pub fn check_write(&self, file_path: String, content: String) -> Option<String> {
+        self.inner.check_write(&file_path, &content)
+    }
+
+    #[napi]
+    pub fn check_edit(
+        &self,
+        file_path: String,
+        old_string: String,
+        new_string: String,
+    ) -> Option<String> {
+        self.inner.check_edit(&file_path, &old_string, &new_string)
+    }
+
+    #[napi]
+    pub fn check_tool_result(&self, tool_name: String, tool_input: String) -> Option<String> {
+        let input: serde_json::Value = serde_json::from_str(&tool_input).ok()?;
+        self.inner.check_tool_result(&tool_name, &input)
+    }
+}
+
+impl Default for JsCommentChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// Linter Bindings
+// ============================================================================
+
+use uira_oxc::linter::{LintDiagnostic, LintRule, Linter, Severity};
+
+#[napi(object)]
+pub struct JsLintDiagnostic {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub message: String,
+    pub rule: String,
+    pub severity: String,
+    pub suggestion: Option<String>,
+}
+
+impl From<LintDiagnostic> for JsLintDiagnostic {
+    fn from(d: LintDiagnostic) -> Self {
+        Self {
+            file: d.file,
+            line: d.line,
+            column: d.column,
+            message: d.message,
+            rule: d.rule,
+            severity: match d.severity {
+                Severity::Error => "error".to_string(),
+                Severity::Warning => "warning".to_string(),
+                Severity::Info => "info".to_string(),
+            },
+            suggestion: d.suggestion,
+        }
+    }
+}
+
+fn pascal_to_kebab(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            result.push('-');
+        }
+        result.push(c.to_ascii_lowercase());
+    }
+    result
+}
+
+fn lint_rule_to_string(rule: &LintRule) -> String {
+    pascal_to_kebab(&format!("{:?}", rule))
+}
+
+fn parse_lint_rules(rules: &[String]) -> Vec<LintRule> {
+    rules
+        .iter()
+        .filter_map(|r| match r.as_str() {
+            "no-console" => Some(LintRule::NoConsole),
+            "no-debugger" => Some(LintRule::NoDebugger),
+            "no-alert" => Some(LintRule::NoAlert),
+            "no-eval" => Some(LintRule::NoEval),
+            "no-var" => Some(LintRule::NoVar),
+            "prefer-const" => Some(LintRule::PreferConst),
+            "no-unused-vars" => Some(LintRule::NoUnusedVars),
+            "no-empty-function" => Some(LintRule::NoEmptyFunction),
+            "no-duplicate-keys" => Some(LintRule::NoDuplicateKeys),
+            "no-param-reassign" => Some(LintRule::NoParamReassign),
+            _ => None,
+        })
+        .collect()
+}
+
+#[napi(js_name = "Linter")]
+pub struct JsLinter {
+    inner: Linter,
+}
+
+#[napi]
+impl JsLinter {
+    #[napi(constructor)]
+    pub fn new(rules: Option<Vec<String>>) -> Self {
+        let linter = match rules {
+            Some(r) => Linter::new(parse_lint_rules(&r)),
+            None => Linter::default(),
+        };
+        Self { inner: linter }
+    }
+
+    #[napi(factory)]
+    pub fn recommended() -> Self {
+        Self {
+            inner: Linter::default(),
+        }
+    }
+
+    #[napi(factory)]
+    pub fn strict() -> Self {
+        Self {
+            inner: Linter::strict(),
+        }
+    }
+
+    #[napi]
+    pub fn lint_files(&self, files: Vec<String>) -> Vec<JsLintDiagnostic> {
+        self.inner
+            .lint_files(&files)
+            .into_iter()
+            .map(JsLintDiagnostic::from)
+            .collect()
+    }
+
+    #[napi]
+    pub fn lint_source(
+        &self,
+        filename: String,
+        source: String,
+    ) -> napi::Result<Vec<JsLintDiagnostic>> {
+        self.inner
+            .lint_source(&filename, &source)
+            .map(|diagnostics| diagnostics.into_iter().map(JsLintDiagnostic::from).collect())
+            .map_err(|e| napi::Error::from_reason(e))
+    }
+
+    #[napi]
+    pub fn all_rules() -> Vec<String> {
+        LintRule::all().iter().map(lint_rule_to_string).collect()
+    }
+
+    #[napi]
+    pub fn recommended_rules() -> Vec<String> {
+        LintRule::recommended()
+            .iter()
+            .map(lint_rule_to_string)
+            .collect()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
