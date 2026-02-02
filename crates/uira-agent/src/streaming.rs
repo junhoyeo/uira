@@ -190,11 +190,15 @@ impl StreamController {
             StreamChunk::MessageDelta { usage, .. } => {
                 tracing::debug!("StreamController: MessageDelta - usage: {:?}", usage);
                 if let Some(u) = usage {
-                    // Accumulate: keep input_tokens from MessageStart, update output_tokens
                     self.usage.output_tokens = u.output_tokens;
-                    // If MessageDelta has input_tokens (rare), use them
                     if u.input_tokens > 0 {
                         self.usage.input_tokens = u.input_tokens;
+                    }
+                    if u.cache_read_tokens > 0 {
+                        self.usage.cache_read_tokens = u.cache_read_tokens;
+                    }
+                    if u.cache_creation_tokens > 0 {
+                        self.usage.cache_creation_tokens = u.cache_creation_tokens;
                     }
                 }
                 vec![]
