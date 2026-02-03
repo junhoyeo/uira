@@ -42,6 +42,38 @@ pub enum ToolError {
 
     #[error("execution failed: {message}")]
     ExecutionFailed { message: String },
+
+    #[error("sandbox denied: {message}")]
+    SandboxDenied { message: String, retryable: bool },
+
+    #[error("permission denied: {message}")]
+    PermissionDenied { message: String },
+}
+
+impl ToolError {
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            ToolError::SandboxDenied {
+                retryable: true,
+                ..
+            }
+        )
+    }
+
+    pub fn sandbox_denied(message: impl Into<String>) -> Self {
+        ToolError::SandboxDenied {
+            message: message.into(),
+            retryable: true,
+        }
+    }
+
+    pub fn sandbox_denied_final(message: impl Into<String>) -> Self {
+        ToolError::SandboxDenied {
+            message: message.into(),
+            retryable: false,
+        }
+    }
 }
 
 pub type ToolFuture = Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + 'static>>;

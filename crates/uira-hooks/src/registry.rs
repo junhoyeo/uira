@@ -5,12 +5,16 @@ use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::*;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
-/// Registry for managing and executing hooks
+#[deprecated(
+    since = "0.2.0",
+    note = "Use uira_events::HandlerRegistry with LegacyHookAdapter instead. See uira_agent::EventSystem for the recommended integration pattern."
+)]
 pub struct HookRegistry {
     hooks: HashMap<String, Arc<dyn Hook>>,
     event_hooks: HashMap<HookEvent, Vec<String>>,
 }
 
+#[allow(deprecated)]
 impl HookRegistry {
     pub fn new() -> Self {
         Self {
@@ -113,13 +117,18 @@ impl HookRegistry {
     }
 }
 
+#[allow(deprecated)]
 impl Default for HookRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Create a HookRegistry with all default hooks pre-registered
+#[deprecated(
+    since = "0.2.0",
+    note = "Use uira_hooks::create_legacy_adapter() with uira_events::HandlerRegistry instead"
+)]
+#[allow(deprecated)]
 pub fn default_hooks() -> HookRegistry {
     let mut registry = HookRegistry::new();
 

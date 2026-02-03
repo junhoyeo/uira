@@ -1,4 +1,5 @@
 #![deny(clippy::all)]
+#![allow(deprecated)] // Legacy hook API used for backward compatibility with JS bindings
 
 use std::collections::HashMap;
 

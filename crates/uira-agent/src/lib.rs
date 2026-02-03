@@ -13,6 +13,7 @@ pub mod approval;
 mod config;
 mod control;
 mod error;
+pub mod event_system;
 pub mod events;
 mod executor;
 pub mod goals;
@@ -27,11 +28,13 @@ use uira_providers::ModelClient;
 
 pub use agent::Agent;
 pub use approval::{
-    approval_channel, ApprovalError, ApprovalPending, ApprovalReceiver, ApprovalSender,
+    approval_channel, ApprovalCache, ApprovalError, ApprovalKey, ApprovalPending, ApprovalReceiver,
+    ApprovalSender, CacheDecision, CachedApproval,
 };
 pub use config::AgentConfig;
 pub use control::AgentControl;
 pub use error::AgentLoopError;
+pub use event_system::{create_event_system, EventSystem};
 pub use events::{EventSender, EventStream};
 pub use executor::{ExecutorConfig, RecursiveAgentExecutor};
 pub use goals::GoalVerifier;
@@ -43,6 +46,10 @@ pub use turn::{TurnContext, TurnState};
 
 pub enum AgentCommand {
     SwitchClient(Arc<dyn ModelClient>),
+    Fork {
+        message_count: Option<usize>,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Sender for agent commands

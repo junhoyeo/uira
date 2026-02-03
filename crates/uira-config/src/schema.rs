@@ -46,6 +46,14 @@ pub struct UiraConfig {
     /// Score-based verification goals
     #[serde(default)]
     pub goals: GoalsConfig,
+
+    /// Context compaction settings
+    #[serde(default)]
+    pub compaction: CompactionSettings,
+
+    /// Permission rules for tool execution
+    #[serde(default)]
+    pub permissions: PermissionsSettings,
 }
 
 // ============================================================================
@@ -628,6 +636,90 @@ fn default_auto_verify() -> bool {
     true
 }
 
+// ============================================================================
+// Compaction Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionSettings {
+    #[serde(default = "default_compaction_enabled")]
+    pub enabled: bool,
+
+    #[serde(default = "default_compaction_threshold")]
+    pub threshold: f64,
+
+    #[serde(default = "default_protected_tokens")]
+    pub protected_tokens: usize,
+
+    #[serde(default = "default_compaction_strategy")]
+    pub strategy: String,
+
+    #[serde(default)]
+    pub summarization_model: Option<String>,
+}
+
+impl Default for CompactionSettings {
+    fn default() -> Self {
+        Self {
+            enabled: default_compaction_enabled(),
+            threshold: default_compaction_threshold(),
+            protected_tokens: default_protected_tokens(),
+            strategy: default_compaction_strategy(),
+            summarization_model: None,
+        }
+    }
+}
+
+fn default_compaction_enabled() -> bool {
+    true
+}
+
+fn default_compaction_threshold() -> f64 {
+    0.8
+}
+
+fn default_protected_tokens() -> usize {
+    40_000
+}
+
+fn default_compaction_strategy() -> String {
+    "prune".to_string()
+}
+
+// ============================================================================
+// Permissions Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PermissionsSettings {
+    #[serde(default)]
+    pub rules: Vec<PermissionRuleConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermissionRuleConfig {
+    #[serde(default)]
+    pub name: Option<String>,
+
+    pub permission: String,
+
+    pub pattern: String,
+
+    pub action: PermissionActionConfig,
+
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionActionConfig {
+    #[default]
+    Allow,
+    Deny,
+    Ask,
+}
+
 // Default value functions
 
 fn default_hud_preset() -> String {
@@ -859,5 +951,51 @@ comments:
         assert_eq!(config.diagnostics.ai.severity, "error");
         assert_eq!(config.diagnostics.ai.languages, vec!["ts", "tsx"]);
         assert!(config.comments.ai.include_docstrings);
+    }
+
+    #[test]
+    fn test_permissions_settings_defaults() {
+        let settings = PermissionsSettings::default();
+        assert!(settings.rules.is_empty());
+    }
+
+    #[test]
+    fn test_permissions_settings_parse() {
+        let yaml = r#"
+rules:
+  - permission: "file:read"
+    pattern: "**"
+    action: allow
+  - permission: "file:write"
+    pattern: "src/**"
+    action: allow
+    name: "allow-src-writes"
+  - permission: "shell:execute"
+    pattern: "**"
+    action: ask
+"#;
+        let settings: PermissionsSettings = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(settings.rules.len(), 3);
+        assert_eq!(settings.rules[0].permission, "file:read");
+        assert_eq!(settings.rules[0].action, PermissionActionConfig::Allow);
+        assert_eq!(settings.rules[1].name, Some("allow-src-writes".to_string()));
+        assert_eq!(settings.rules[2].action, PermissionActionConfig::Ask);
+    }
+
+    #[test]
+    fn test_full_config_with_permissions() {
+        let yaml = r#"
+permissions:
+  rules:
+    - permission: "file:write"
+      pattern: "**/.env*"
+      action: deny
+"#;
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.permissions.rules.len(), 1);
+        assert_eq!(
+            config.permissions.rules[0].action,
+            PermissionActionConfig::Deny
+        );
     }
 }

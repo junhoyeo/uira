@@ -14,12 +14,15 @@ members = [
   "crates/uira-mcp-server",
   "crates/uira-oxc",
   "crates/uira-goals",
-  # New agent harness crates
-  "crates/uira-protocol",
-  "crates/uira-providers",
-  "crates/uira-sandbox",
-  "crates/uira-context",
-  "crates/uira-agent",
+# New agent harness crates
+"crates/uira-protocol",
+"crates/uira-providers",
+"crates/uira-sandbox",
+"crates/uira-context",
+"crates/uira-agent",
+"crates/uira-events",
+"crates/uira-permissions",
+"crates/uira-telemetry",
     "crates/uira-cli",
     "crates/uira-tui",
     "crates/uira-auth",
@@ -55,6 +58,9 @@ uira-sandbox = { path = "crates/uira-sandbox" }
 uira-context = { path = "crates/uira-context" }
 uira-agent = { path = "crates/uira-agent" }
 uira-auth = { path = "crates/uira-auth" }
+uira-events = { path = "crates/uira-events" }
+uira-permissions = { path = "crates/uira-permissions" }
+uira-telemetry = { path = "crates/uira-telemetry" }
 
 # Internal crates - Applications
 uira-cli = { path = "crates/uira-cli" }
@@ -104,6 +110,9 @@ toml = "0.8"
 
 # Regex for keyword detection
 regex = "1.12"
+
+# Glob pattern matching
+globset = "0.4"
 
 # Directories
 dirs = "5.0"

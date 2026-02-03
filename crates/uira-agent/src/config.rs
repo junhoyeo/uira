@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_config::schema::GoalConfig;
+use uira_config::schema::{GoalConfig, PermissionActionConfig, PermissionRuleConfig};
+use uira_permissions::{ConfigAction, ConfigRule};
 use uira_protocol::SandboxPreference;
 use uira_sandbox::SandboxPolicy;
 
@@ -52,6 +53,10 @@ pub struct AgentConfig {
     /// System prompt
     #[serde(default = "default_system_prompt_option")]
     pub system_prompt: Option<String>,
+
+    /// Permission rules for tool execution
+    #[serde(default)]
+    pub permission_rules: Vec<PermissionRuleConfig>,
 }
 
 fn default_system_prompt_option() -> Option<String> {
@@ -115,6 +120,7 @@ impl Default for AgentConfig {
             goals: AgentGoalsConfig::default(),
             model: None,
             system_prompt: Some(default_system_prompt()),
+            permission_rules: Vec::new(),
         }
     }
 }
@@ -158,6 +164,28 @@ impl AgentConfig {
     pub fn with_goals(mut self, goals: AgentGoalsConfig) -> Self {
         self.goals = goals;
         self
+    }
+
+    pub fn with_permission_rules(mut self, rules: Vec<PermissionRuleConfig>) -> Self {
+        self.permission_rules = rules;
+        self
+    }
+
+    pub fn to_permission_config_rules(&self) -> Vec<ConfigRule> {
+        self.permission_rules
+            .iter()
+            .map(|r| ConfigRule {
+                name: r.name.clone(),
+                permission: r.permission.clone(),
+                pattern: r.pattern.clone(),
+                action: match r.action {
+                    PermissionActionConfig::Allow => ConfigAction::Allow,
+                    PermissionActionConfig::Deny => ConfigAction::Deny,
+                    PermissionActionConfig::Ask => ConfigAction::Ask,
+                },
+                comment: r.comment.clone(),
+            })
+            .collect()
     }
 }
 

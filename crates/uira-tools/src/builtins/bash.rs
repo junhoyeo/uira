@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::time::timeout;
 use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 
 use crate::{Tool, ToolContext, ToolError};
 
@@ -166,10 +166,37 @@ impl Tool for BashTool {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.cwd.clone());
 
-        let mut cmd = Command::new("bash");
+        let result = match ctx.sandbox_type {
+            SandboxType::Native => {
+                self.execute_sandboxed(
+                    &input.command,
+                    &working_dir,
+                    timeout_duration,
+                    &ctx.sandbox_policy,
+                )
+                .await
+            }
+            SandboxType::None | SandboxType::Container => {
+                self.execute_direct(&input.command, &working_dir, timeout_duration)
+                    .await
+            }
+        };
+
+        result
+    }
+}
+
+impl BashTool {
+    async fn execute_direct(
+        &self,
+        command: &str,
+        working_dir: &std::path::Path,
+        timeout_duration: Duration,
+    ) -> Result<ToolOutput, ToolError> {
+        let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-c")
-            .arg(&input.command)
-            .current_dir(&working_dir)
+            .arg(command)
+            .current_dir(working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -194,6 +221,54 @@ impl Tool for BashTool {
             }),
             Err(_) => Err(ToolError::ExecutionFailed {
                 message: format!("Command timed out after {}ms", timeout_duration.as_millis()),
+            }),
+        }
+    }
+
+    async fn execute_sandboxed(
+        &self,
+        command: &str,
+        working_dir: &std::path::Path,
+        timeout_duration: Duration,
+        sandbox_policy: &SandboxPolicy,
+    ) -> Result<ToolOutput, ToolError> {
+        let sandbox_manager = SandboxManager::new(sandbox_policy.clone());
+
+        let mut cmd = std::process::Command::new("bash");
+        cmd.arg("-c")
+            .arg(command)
+            .current_dir(working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Err(e) = sandbox_manager.wrap_command(&mut cmd, SandboxType::Native) {
+            tracing::warn!(error = %e, "sandbox_wrap_failed, falling back to direct execution");
+            return self
+                .execute_direct(command, working_dir, timeout_duration)
+                .await;
+        }
+
+        let result = tokio::task::spawn_blocking(move || cmd.output()).await;
+
+        match result {
+            Ok(Ok(output)) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let exit_code = output.status.code().unwrap_or(-1);
+
+                let bash_output = BashOutput {
+                    stdout,
+                    stderr,
+                    exit_code,
+                };
+
+                Ok(ToolOutput::json(serde_json::to_value(bash_output).unwrap()))
+            }
+            Ok(Err(e)) => Err(ToolError::ExecutionFailed {
+                message: format!("Failed to execute sandboxed command: {}", e),
+            }),
+            Err(e) => Err(ToolError::ExecutionFailed {
+                message: format!("Sandbox task panicked: {}", e),
             }),
         }
     }

@@ -64,6 +64,20 @@ pub enum Commands {
     Resume {
         /// Session ID to resume
         session_id: Option<String>,
+
+        /// Fork from a parent session instead of resuming directly
+        #[arg(long)]
+        fork: bool,
+
+        /// Number of messages to keep when forking (default: all)
+        #[arg(long)]
+        fork_at: Option<usize>,
+    },
+
+    /// List and manage sessions
+    Sessions {
+        #[command(subcommand)]
+        command: SessionsCommands,
     },
 
     /// Authentication commands
@@ -150,6 +164,30 @@ pub enum TasksCommands {
     Cancel {
         /// Task ID to cancel
         task_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SessionsCommands {
+    /// List all sessions (with fork relationships)
+    List {
+        /// Show only recent N sessions
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Show fork tree structure
+        #[arg(long)]
+        tree: bool,
+    },
+    /// Show session details
+    Info {
+        /// Session ID to inspect
+        session_id: String,
+    },
+    /// Delete a session
+    Delete {
+        /// Session ID to delete
+        session_id: String,
     },
 }
 

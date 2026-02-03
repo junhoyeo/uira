@@ -22,6 +22,7 @@ use uira_agents::get_agent_definitions;
 use uira_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
 use uira_features::uira_state::has_uira_state;
 use uira_sdk::{create_uira_session, SessionOptions};
+use uira_telemetry::{init_subscriber, TelemetryConfig};
 
 #[derive(Parser)]
 #[command(name = "uira")]
@@ -170,6 +171,9 @@ enum GoalsCommands {
 }
 
 fn main() {
+    let telemetry_config = TelemetryConfig::default();
+    init_subscriber(&telemetry_config);
+
     let cli = Cli::parse();
 
     let result = match cli.command {

@@ -3,12 +3,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use uira_context::ContextManager;
-use uira_protocol::{SessionId, TokenUsage};
+use uira_permissions::build_evaluator_from_rules;
+use uira_protocol::{MessageId, SessionId, TokenUsage};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
 use uira_tools::{
-    create_builtin_router, AgentExecutor, AstToolProvider, DelegationToolProvider, LspToolProvider,
-    ToolCallRuntime, ToolContext, ToolOrchestrator, ToolRouter,
+    create_builtin_router, AgentExecutor, ApprovalCache, AstToolProvider, DelegationToolProvider,
+    LspToolProvider, ToolCallRuntime, ToolContext, ToolOrchestrator, ToolRouter,
 };
 
 use crate::AgentConfig;
@@ -17,6 +18,15 @@ use crate::AgentConfig;
 pub struct Session {
     /// Unique session identifier
     pub id: SessionId,
+
+    /// Parent session ID (for forked sessions)
+    pub parent_id: Option<SessionId>,
+
+    /// Message ID where the fork occurred
+    pub forked_from_message: Option<MessageId>,
+
+    /// Number of child forks from this session
+    pub fork_count: u32,
 
     /// Agent configuration
     pub config: AgentConfig,
@@ -76,9 +86,30 @@ impl Session {
 
         let tool_router = Arc::new(tool_router);
         let full_auto = Self::is_full_auto(&config);
-        let orchestrator =
+        let mut orchestrator =
             ToolOrchestrator::new(tool_router.clone(), config.sandbox_policy.clone())
                 .with_full_auto(full_auto);
+
+        if !config.permission_rules.is_empty() {
+            let config_rules = config.to_permission_config_rules();
+            match build_evaluator_from_rules(config_rules) {
+                Ok(evaluator) => {
+                    orchestrator = orchestrator.with_permission_evaluator(evaluator);
+                    tracing::debug!(
+                        rule_count = config.permission_rules.len(),
+                        "permission_evaluator_wired"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to build permission evaluator, using defaults");
+                }
+            }
+        }
+
+        let session_id = SessionId::new();
+        let approval_cache = ApprovalCache::new(session_id.to_string());
+        orchestrator = orchestrator.with_approval_cache(approval_cache);
+        tracing::debug!("approval_cache_wired");
 
         let mut context = ContextManager::new(client.max_tokens());
 
@@ -91,7 +122,10 @@ impl Session {
         let parallel_runtime = ToolCallRuntime::new(tool_router.clone());
 
         Self {
-            id: SessionId::new(),
+            id: session_id,
+            parent_id: None,
+            forked_from_message: None,
+            fork_count: 0,
             context,
             sandbox: SandboxManager::new(config.sandbox_policy.clone()),
             tool_router,
@@ -109,13 +143,20 @@ impl Session {
         !config.require_approval_for_writes && !config.require_approval_for_commands
     }
 
-    /// Create a tool context for execution
     pub fn tool_context(&self) -> ToolContext {
+        let sandbox_type = if self.config.sandbox_policy.is_restrictive() {
+            uira_sandbox::SandboxType::Native
+        } else {
+            uira_sandbox::SandboxType::None
+        };
+
         ToolContext {
             cwd: self.cwd.clone(),
             session_id: self.id.to_string(),
             full_auto: Self::is_full_auto(&self.config),
             env: std::collections::HashMap::new(),
+            sandbox_type,
+            sandbox_policy: self.config.sandbox_policy.clone(),
         }
     }
 
@@ -129,6 +170,17 @@ impl Session {
     pub fn record_usage(&mut self, usage: TokenUsage) {
         self.usage += usage.clone();
         self.context.record_usage(usage);
+
+        if self.context.needs_compaction() {
+            if let Some(result) = self.context.compact() {
+                tracing::info!(
+                    tokens_before = result.tokens_before,
+                    tokens_after = result.tokens_after,
+                    messages_removed = result.messages_removed,
+                    "context_compacted"
+                );
+            }
+        }
     }
 
     /// Check if max turns exceeded
@@ -145,5 +197,80 @@ impl Session {
     /// Get tool specifications for the model API
     pub fn tool_specs(&self) -> Vec<uira_protocol::ToolSpec> {
         self.tool_router.specs()
+    }
+
+    /// Fork this session at the current point
+    ///
+    /// Creates a new session with copied context. The new session inherits
+    /// all messages and configuration from this session.
+    pub fn fork(&mut self) -> Self {
+        self.fork_count += 1;
+
+        let mut forked = Self::new_with_executor(self.config.clone(), self.client.clone(), None);
+
+        forked.parent_id = Some(self.id.clone());
+        forked.forked_from_message = None;
+
+        for msg in self.context.messages().to_vec() {
+            let _ = forked.context.add_message(msg);
+        }
+
+        forked
+    }
+
+    /// Fork this session, keeping only messages up to a certain count
+    pub fn fork_at_message(&mut self, message_count: usize) -> Self {
+        self.fork_count += 1;
+
+        let mut forked = Self::new_with_executor(self.config.clone(), self.client.clone(), None);
+
+        forked.parent_id = Some(self.id.clone());
+        forked.forked_from_message = Some(MessageId::new());
+
+        let messages: Vec<_> = self
+            .context
+            .messages()
+            .iter()
+            .take(message_count)
+            .cloned()
+            .collect();
+        for msg in messages {
+            let _ = forked.context.add_message(msg);
+        }
+
+        forked
+    }
+
+    pub fn is_fork(&self) -> bool {
+        self.parent_id.is_some()
+    }
+
+    pub fn generate_fork_title(&self, base_title: &str) -> String {
+        format!("{} (fork #{})", base_title, self.fork_count.max(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_id_different() {
+        let id1 = SessionId::new();
+        let id2 = SessionId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_message_id_different() {
+        let id1 = MessageId::new();
+        let id2 = MessageId::new();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_message_id_prefix() {
+        let id = MessageId::new();
+        assert!(id.0.starts_with("msg_"));
     }
 }

@@ -6,19 +6,18 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_sandbox::{SandboxPolicy, SandboxType};
 
 use crate::ToolError;
 
 /// Context passed to tool execution
 pub struct ToolContext {
-    /// Working directory
     pub cwd: std::path::PathBuf,
-    /// Session ID
     pub session_id: String,
-    /// Whether we're in full-auto mode
     pub full_auto: bool,
-    /// Environment variables
     pub env: std::collections::HashMap<String, String>,
+    pub sandbox_type: SandboxType,
+    pub sandbox_policy: SandboxPolicy,
 }
 
 impl Default for ToolContext {
@@ -28,7 +27,16 @@ impl Default for ToolContext {
             session_id: String::new(),
             full_auto: false,
             env: std::collections::HashMap::new(),
+            sandbox_type: SandboxType::None,
+            sandbox_policy: SandboxPolicy::default(),
         }
+    }
+}
+
+impl ToolContext {
+    pub fn with_sandbox(mut self, sandbox_type: SandboxType) -> Self {
+        self.sandbox_type = sandbox_type;
+        self
     }
 }
 

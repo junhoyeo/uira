@@ -21,6 +21,7 @@ uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-features = { workspace = true }
 uira-goals = { workspace = true }
+uira-telemetry = { workspace = true }
 uira-tui = { workspace = true }
 uira-auth = { workspace = true, features = ["oauth-server"] }
 secrecy = "0.10"

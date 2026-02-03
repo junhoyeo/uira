@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use uira_events::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_protocol::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
@@ -30,6 +31,7 @@ pub struct Agent {
     control: AgentControl,
     state: AgentState,
     event_sender: Option<EventSender>,
+    event_bus: Option<Arc<dyn EventBus>>,
     pending_tool_calls: Option<Vec<ToolCall>>,
     rollout: Option<RolloutRecorder>,
     streaming_enabled: bool,
@@ -55,6 +57,7 @@ impl Agent {
             control: AgentControl::default(),
             state: AgentState::Idle,
             event_sender: None,
+            event_bus: None,
             pending_tool_calls: None,
             rollout: None,
             streaming_enabled: true,
@@ -93,6 +96,23 @@ impl Agent {
     pub fn with_streaming(mut self, enabled: bool) -> Self {
         self.streaming_enabled = enabled;
         self
+    }
+
+    /// Attach an EventBus for unified event publishing
+    ///
+    /// Events will be converted from ThreadEvent to Event and published to the bus.
+    /// This allows the new subscriber-based event system to receive agent events.
+    pub fn with_event_bus(mut self, bus: Arc<dyn EventBus>) -> Self {
+        self.event_bus = Some(bus);
+        self
+    }
+
+    /// Attach an EventSystem which includes EventBus and LegacyHookAdapter
+    ///
+    /// This is the recommended way to integrate the new event system.
+    /// The EventSystem must be started separately after calling this method.
+    pub fn with_event_system(self, event_system: &crate::event_system::EventSystem) -> Self {
+        self.with_event_bus(event_system.bus())
     }
 
     pub fn with_interactive(
@@ -139,6 +159,10 @@ impl Agent {
                             self.session.set_client(new_client);
                             tracing::info!("Switched to {} ({})", model, provider);
                             self.emit_event(ThreadEvent::ModelSwitched { model, provider }).await;
+                        }
+                        AgentCommand::Fork { message_count, response_tx } => {
+                            let result = self.handle_fork(message_count).await;
+                            let _ = response_tx.send(result);
                         }
                     }
                     continue;
@@ -246,6 +270,46 @@ impl Agent {
     /// Get the rollout path if recording is enabled
     pub fn rollout_path(&self) -> Option<&PathBuf> {
         self.rollout.as_ref().map(|r| r.path())
+    }
+
+    async fn handle_fork(&mut self, message_count: Option<usize>) -> Result<String, String> {
+        let forked_session = match message_count {
+            Some(count) => self.session.fork_at_message(count),
+            None => self.session.fork(),
+        };
+
+        let forked_session_id = forked_session.id.to_string();
+        let parent_session_id = self.session.id.to_string();
+        let fork_point_message_id = forked_session.forked_from_message.clone();
+        let msg_count = forked_session.context.messages().len();
+
+        if let Some(ref mut rollout) = self.rollout {
+            if let Err(e) = rollout.record_fork(
+                forked_session.id.clone(),
+                fork_point_message_id.clone(),
+                msg_count,
+            ) {
+                tracing::warn!("Failed to record fork event: {}", e);
+            }
+        }
+
+        if let Some(bus) = &self.event_bus {
+            let event = uira_events::Event::SessionForked {
+                session_id: forked_session_id.clone(),
+                parent_id: parent_session_id.clone(),
+                fork_point_message_id: fork_point_message_id.map(|id| id.to_string()),
+            };
+            bus.publish(event);
+        }
+
+        tracing::info!(
+            "Forked session {} from {} at message {}",
+            forked_session_id,
+            parent_session_id,
+            message_count.map_or("end".to_string(), |c| c.to_string())
+        );
+
+        Ok(forked_session_id)
     }
 
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
@@ -623,7 +687,12 @@ impl Agent {
 
     async fn emit_event(&self, event: ThreadEvent) {
         if let Some(ref sender) = self.event_sender {
-            let _ = sender.send(event).await;
+            let _ = sender.send(event.clone()).await;
+        }
+
+        if let Some(ref bus) = self.event_bus {
+            let unified_event: Event = event.into();
+            bus.publish(unified_event);
         }
     }
 
@@ -695,6 +764,39 @@ impl Agent {
                 return Err(AgentLoopError::Cancelled);
             }
 
+            if let Some(permission_action) = self
+                .session
+                .orchestrator
+                .evaluate_permission(&call.name, &call.input)
+            {
+                use uira_permissions::Action as PermAction;
+                match permission_action {
+                    PermAction::Deny => {
+                        let error_msg = format!("Permission denied for tool: {}", call.name);
+                        results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                        self.record_tool_result(&call.id, &error_msg, true);
+                        self.emit_event(ThreadEvent::ItemCompleted {
+                            item: Item::ToolResult {
+                                tool_call_id: call.id.clone(),
+                                output: error_msg,
+                                is_error: true,
+                            },
+                        })
+                        .await;
+                        continue;
+                    }
+                    PermAction::Allow => {
+                        approved_calls.push((
+                            call.id.clone(),
+                            call.name.clone(),
+                            call.input.clone(),
+                        ));
+                        continue;
+                    }
+                    PermAction::Ask => {}
+                }
+            }
+
             // ALWAYS check for Forbidden tools (security critical)
             if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
                 let requirement = tool.approval_requirement(&call.input);
@@ -711,6 +813,27 @@ impl Agent {
                 if !ctx.full_auto {
                     match requirement {
                         ApprovalRequirement::NeedsApproval { reason } => {
+                            if let Some(cached) = self
+                                .session
+                                .orchestrator
+                                .check_approval_cache(&call.name, &call.input)
+                                .await
+                            {
+                                if cached.is_approve() {
+                                    tracing::debug!(
+                                        tool = %call.name,
+                                        cached_decision = ?cached,
+                                        "approval_cache_hit"
+                                    );
+                                    approved_calls.push((
+                                        call.id.clone(),
+                                        call.name.clone(),
+                                        call.input.clone(),
+                                    ));
+                                    continue;
+                                }
+                            }
+
                             if let Some(ref approval_tx) = self.approval_tx {
                                 self.emit_event(ThreadEvent::ItemStarted {
                                     item: Item::ApprovalRequest {
@@ -738,6 +861,11 @@ impl Agent {
                                         timeout_secs: APPROVAL_TIMEOUT.as_secs(),
                                     }
                                 })??;
+
+                                self.session
+                                    .orchestrator
+                                    .store_approval(&call.name, &call.input, &decision)
+                                    .await;
 
                                 self.emit_event(ThreadEvent::ItemCompleted {
                                     item: Item::ApprovalDecision {

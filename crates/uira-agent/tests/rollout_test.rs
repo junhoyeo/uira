@@ -67,6 +67,9 @@ fn test_rollout_save_load() {
         git_branch: None,
         turns: 0,
         total_usage: TokenUsage::default(),
+        parent_id: None,
+        forked_from_message: None,
+        fork_count: 0,
     };
 
     // Create rollout file in temp directory
@@ -141,6 +144,9 @@ fn test_extract_metadata() {
         git_branch: Some("main".to_string()),
         turns: 3,
         total_usage: TokenUsage::default(),
+        parent_id: None,
+        forked_from_message: None,
+        fork_count: 0,
     };
 
     // Write metadata

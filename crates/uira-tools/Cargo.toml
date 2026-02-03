@@ -29,6 +29,7 @@ uira-sdk = { workspace = true }
 uira-protocol = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-comment-checker = { workspace = true }
+uira-permissions = { workspace = true }
 once_cell = "1.19"
 
 [dev-dependencies]

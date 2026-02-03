@@ -128,6 +128,10 @@ pub enum ApprovalError {
     Timeout,
 }
 
+pub use uira_tools::{
+    ApprovalCache, ApprovalCacheFile, ApprovalKey, CacheDecision, CachedApproval,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +182,55 @@ mod tests {
 
         assert!(matches!(decision, ReviewDecision::Deny { .. }));
         handle.await.unwrap();
+    }
+
+    #[test]
+    fn test_approval_cache_lookup() {
+        let mut cache = ApprovalCache::new("test_session");
+        let key = ApprovalKey::from_tool_and_path("edit", "src/main.rs");
+
+        assert!(cache.lookup("edit", "src/main.rs").is_none());
+
+        cache.insert(key.clone(), CacheDecision::ApproveForSession);
+
+        assert_eq!(
+            cache.lookup("edit", "src/main.rs"),
+            Some(CacheDecision::ApproveForSession)
+        );
+    }
+
+    #[test]
+    fn test_approval_key_hash() {
+        let key1 = ApprovalKey::new("edit", "src/**");
+        let key2 = ApprovalKey::new("edit", "src/**");
+        let key3 = ApprovalKey::new("bash", "src/**");
+
+        assert_eq!(key1.key_hash, key2.key_hash);
+        assert_ne!(key1.key_hash, key3.key_hash);
+    }
+
+    #[test]
+    fn test_cache_decision_properties() {
+        assert!(CacheDecision::ApproveOnce.is_approve());
+        assert!(CacheDecision::ApproveForSession.is_approve());
+        assert!(!CacheDecision::DenyOnce.is_approve());
+
+        assert!(!CacheDecision::ApproveOnce.should_cache());
+        assert!(CacheDecision::ApproveForSession.should_cache());
+        assert!(CacheDecision::ApproveForPattern.should_cache());
+    }
+
+    #[test]
+    fn test_cached_approval_expiry() {
+        let key = ApprovalKey::new("test", "pattern");
+        let approval = CachedApproval::new(key, CacheDecision::ApproveForSession);
+        assert!(!approval.is_expired());
+
+        let expired = CachedApproval::new(
+            ApprovalKey::new("test", "pattern"),
+            CacheDecision::ApproveForSession,
+        )
+        .with_ttl(chrono::Duration::seconds(-1));
+        assert!(expired.is_expired());
     }
 }

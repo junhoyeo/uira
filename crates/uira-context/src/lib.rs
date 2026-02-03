@@ -10,10 +10,12 @@ mod compact;
 mod error;
 mod history;
 mod manager;
+mod monitor;
 mod truncate;
 
-pub use compact::CompactionStrategy;
+pub use compact::{CompactionConfig, CompactionResult, CompactionStrategy, PruningStrategy};
 pub use error::ContextError;
 pub use history::MessageHistory;
 pub use manager::ContextManager;
+pub use monitor::{TokenMonitor, TokenMonitorSnapshot};
 pub use truncate::TruncationPolicy;

@@ -2,15 +2,20 @@
 
 use uira_protocol::{Message, TokenUsage};
 
-use crate::{CompactionStrategy, ContextError, MessageHistory, TruncationPolicy};
+use crate::{
+    CompactionResult, CompactionStrategy, ContextError, MessageHistory, PruningStrategy,
+    TokenMonitor, TruncationPolicy,
+};
 
-/// Manages conversation context within token limits
 pub struct ContextManager {
     history: MessageHistory,
     max_tokens: usize,
     truncation_policy: TruncationPolicy,
     compaction_strategy: CompactionStrategy,
+    pruning_strategy: PruningStrategy,
+    token_monitor: TokenMonitor,
     total_usage: TokenUsage,
+    protected_message_count: usize,
 }
 
 impl ContextManager {
@@ -20,7 +25,10 @@ impl ContextManager {
             max_tokens,
             truncation_policy: TruncationPolicy::default(),
             compaction_strategy: CompactionStrategy::default(),
+            pruning_strategy: PruningStrategy::new(),
+            token_monitor: TokenMonitor::new(max_tokens),
             total_usage: TokenUsage::default(),
+            protected_message_count: 10,
         }
     }
 
@@ -31,6 +39,26 @@ impl ContextManager {
 
     pub fn with_compaction_strategy(mut self, strategy: CompactionStrategy) -> Self {
         self.compaction_strategy = strategy;
+        self
+    }
+
+    pub fn with_pruning_strategy(mut self, strategy: PruningStrategy) -> Self {
+        self.pruning_strategy = strategy;
+        self
+    }
+
+    pub fn with_threshold(mut self, threshold: f64) -> Self {
+        self.token_monitor = self.token_monitor.with_threshold(threshold);
+        self
+    }
+
+    pub fn with_protected_tokens(mut self, protected_tokens: usize) -> Self {
+        self.token_monitor = self.token_monitor.with_protected_tokens(protected_tokens);
+        self
+    }
+
+    pub fn with_protected_message_count(mut self, count: usize) -> Self {
+        self.protected_message_count = count;
         self
     }
 
@@ -66,9 +94,58 @@ impl ContextManager {
         &self.total_usage
     }
 
-    /// Clear the context
     pub fn clear(&mut self) {
         self.history.clear();
+    }
+
+    pub fn needs_compaction(&self) -> bool {
+        self.token_monitor.needs_compaction(self.current_tokens())
+    }
+
+    pub fn compact(&mut self) -> Option<CompactionResult> {
+        let tokens_before = self.current_tokens();
+
+        if !self.needs_compaction() {
+            return None;
+        }
+
+        let messages_before = self.history.len();
+        let mut messages_pruned = 0;
+
+        match &self.compaction_strategy {
+            CompactionStrategy::None => return None,
+            CompactionStrategy::Prune => {
+                let mut messages = self.history.messages().to_vec();
+                self.pruning_strategy
+                    .prune_messages(&mut messages, self.protected_message_count);
+                messages_pruned = messages_before;
+                self.history = MessageHistory::from_messages(messages);
+            }
+            CompactionStrategy::Summarize { .. } => {
+                tracing::debug!("summarize compaction requires external model, skipping");
+                return None;
+            }
+            CompactionStrategy::Hybrid { prune_first, .. } => {
+                if *prune_first {
+                    let mut messages = self.history.messages().to_vec();
+                    self.pruning_strategy
+                        .prune_messages(&mut messages, self.protected_message_count);
+                    messages_pruned = messages_before;
+                    self.history = MessageHistory::from_messages(messages);
+                }
+            }
+        }
+
+        let tokens_after = self.current_tokens();
+        let messages_after = self.history.len();
+
+        Some(CompactionResult {
+            tokens_before,
+            tokens_after,
+            messages_removed: messages_before.saturating_sub(messages_after),
+            messages_pruned,
+            strategy_used: self.compaction_strategy.clone(),
+        })
     }
 
     fn maybe_truncate(&mut self) -> Result<(), ContextError> {
@@ -109,7 +186,7 @@ impl ContextManager {
 
 impl Default for ContextManager {
     fn default() -> Self {
-        Self::new(100_000) // 100k tokens default
+        Self::new(100_000)
     }
 }
 

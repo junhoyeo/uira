@@ -280,13 +280,28 @@ impl App {
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
     ) -> std::io::Result<()> {
-        let (agent, event_stream) = Agent::new(config, client).with_event_stream();
+        let working_directory = config
+            .working_directory
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+        let mut event_system = uira_agent::create_event_system(working_directory);
+        event_system.start();
+
+        let (agent, event_stream) = Agent::new(config, client)
+            .with_event_system(&event_system)
+            .with_event_stream();
         let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
         self.agent_input_tx = Some(input_tx);
         self.agent_command_tx = Some(command_tx);
 
-        // Spawn event handler - forwards agent events to app
         let event_tx = self.event_tx.clone();
         tokio::spawn(async move {
             let mut stream = event_stream;
@@ -295,10 +310,8 @@ impl App {
             }
         });
 
-        // Spawn approval handler - forwards approval requests to app with oneshot channels
         spawn_approval_handler(approval_rx, self.event_tx.clone());
 
-        // Spawn agent's interactive loop
         tokio::spawn(async move {
             if let Err(e) = agent.run_interactive().await {
                 tracing::error!("Agent error: {}", e);
@@ -681,7 +694,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /clear            - Clear chat history".to_string(),
+                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /fork [count]     - Fork session (optional: keep only first N messages)\n  /clear            - Clear chat history".to_string(),
                 });
             }
             "/auth" | "/status" => {
@@ -698,6 +711,10 @@ impl App {
             "/clear" => {
                 self.messages.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/fork" => {
+                let message_count = parts.get(1).and_then(|s| s.parse::<usize>().ok());
+                self.fork_session(message_count);
             }
             "/models" => {
                 self.model_selector.open(self.current_model.clone());
@@ -1044,6 +1061,58 @@ impl App {
                     content: format!("Failed to create client for {}: {}", model_str, e),
                 });
             }
+        }
+    }
+
+    fn fork_session(&mut self, message_count: Option<usize>) {
+        let msg_desc = message_count
+            .map(|c| format!("at message {}", c))
+            .unwrap_or_else(|| "at current point".to_string());
+        self.status = format!("Forking session {}...", msg_desc);
+
+        if let Some(ref tx) = self.agent_command_tx {
+            let tx = tx.clone();
+            let event_tx = self.event_tx.clone();
+            tokio::spawn(async move {
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                if tx
+                    .send(AgentCommand::Fork {
+                        message_count,
+                        response_tx,
+                    })
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Failed to send fork command");
+                    return;
+                }
+
+                match response_rx.await {
+                    Ok(Ok(new_session_id)) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!(
+                                "Session forked! New session ID: {}",
+                                new_session_id
+                            )))
+                            .await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!("Fork failed: {}", e)))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error("Fork response channel closed".to_string()))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            self.messages.push(ChatMessage {
+                role: "error".to_string(),
+                content: "No agent connected. Cannot fork session.".to_string(),
+            });
         }
     }
 }

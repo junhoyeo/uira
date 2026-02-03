@@ -13,6 +13,10 @@ impl MessageHistory {
         Self::default()
     }
 
+    pub fn from_messages(messages: Vec<Message>) -> Self {
+        Self { messages }
+    }
+
     pub fn push(&mut self, message: Message) {
         self.messages.push(message);
     }

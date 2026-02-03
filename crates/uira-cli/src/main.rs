@@ -3,7 +3,6 @@
 use clap::Parser;
 use colored::Colorize;
 use std::sync::Arc;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
 use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_protocol::ExecutionResult;
@@ -12,29 +11,36 @@ use uira_providers::{
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
+use uira_telemetry::{init_subscriber, TelemetryConfig};
 
 mod commands;
 mod config;
 mod session;
 
-use commands::{AuthCommands, Cli, Commands, ConfigCommands, GoalsCommands, TasksCommands};
+use commands::{
+    AuthCommands, Cli, Commands, ConfigCommands, GoalsCommands, SessionsCommands, TasksCommands,
+};
 use config::CliConfig;
-use session::SessionStorage;
+use session::{
+    display_sessions_list, display_sessions_tree, list_rollout_sessions, SessionStorage,
+};
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
+    let telemetry_config = TelemetryConfig::default();
+    init_subscriber(&telemetry_config);
 
     let cli = Cli::parse();
     let config = CliConfig::load();
 
     let result = match &cli.command {
         Some(Commands::Exec { prompt, json }) => run_exec(&cli, &config, prompt, *json).await,
-        Some(Commands::Resume { session_id }) => run_resume(session_id.as_deref()).await,
+        Some(Commands::Resume {
+            session_id,
+            fork,
+            fork_at,
+        }) => run_resume(session_id.as_deref(), *fork, *fork_at).await,
+        Some(Commands::Sessions { command }) => run_sessions(command).await,
         Some(Commands::Auth { command }) => run_auth(command, &config).await,
         Some(Commands::Config { command }) => run_config(command, &config).await,
         Some(Commands::Goals { command }) => run_goals(command).await,
@@ -69,7 +75,7 @@ async fn run_exec(
     let registry = ModelRegistry::new();
     let (client, provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs);
+    let agent_config = create_agent_config(cli, config, &agent_defs, uira_config.as_ref());
 
     let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
@@ -168,12 +174,34 @@ async fn run_exec(
     Ok(())
 }
 
-async fn run_resume(session_id: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_resume(
+    session_id: Option<&str>,
+    fork: bool,
+    fork_at: Option<usize>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let storage = SessionStorage::new()?;
 
     match session_id {
         Some(id) => {
-            println!("{} {}", "Resuming session:".cyan().bold(), id.yellow());
+            let action = if fork { "Forking from" } else { "Resuming" };
+            println!(
+                "{} {}",
+                format!("{} session:", action).cyan().bold(),
+                id.yellow()
+            );
+
+            if fork {
+                println!(
+                    "{}",
+                    format!(
+                        "Creating fork{}",
+                        fork_at
+                            .map(|n| format!(" at message {}", n))
+                            .unwrap_or_default()
+                    )
+                    .dimmed()
+                );
+            }
 
             let session = storage.load(id)?;
 
@@ -189,8 +217,13 @@ async fn run_resume(session_id: Option<&str>) -> Result<(), Box<dyn std::error::
             println!("{}", "─".repeat(50).dimmed());
             println!();
 
-            // Show conversation history
-            for msg in &session.messages {
+            let messages_to_show = if let Some(count) = fork_at {
+                &session.messages[..count.min(session.messages.len())]
+            } else {
+                &session.messages
+            };
+
+            for msg in messages_to_show {
                 let role = match msg.role {
                     uira_protocol::Role::User => "User".green(),
                     uira_protocol::Role::Assistant => "Assistant".blue(),
@@ -202,10 +235,17 @@ async fn run_resume(session_id: Option<&str>) -> Result<(), Box<dyn std::error::
                 println!();
             }
 
-            println!(
-                "{}",
-                "To continue this session, use the messages above as context.".dimmed()
-            );
+            if fork {
+                println!(
+                    "{}",
+                    "Fork created. Start a new conversation from this point.".green()
+                );
+            } else {
+                println!(
+                    "{}",
+                    "To continue this session, use the messages above as context.".dimmed()
+                );
+            }
         }
         None => {
             println!("{}", "Recent sessions:".cyan().bold());
@@ -244,6 +284,72 @@ async fn run_resume(session_id: Option<&str>) -> Result<(), Box<dyn std::error::
                 "{}",
                 "Use 'uira resume <session_id>' to resume a session".dimmed()
             );
+            println!(
+                "{}",
+                "Use 'uira resume <session_id> --fork' to create a fork".dimmed()
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_sessions(command: &SessionsCommands) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        SessionsCommands::List { limit, tree } => {
+            println!("{}", "Sessions (from rollout files):".cyan().bold());
+            println!("{}", "─".repeat(82).dimmed());
+
+            let entries = list_rollout_sessions(*limit)?;
+
+            if *tree {
+                display_sessions_tree(&entries);
+            } else {
+                display_sessions_list(&entries);
+            }
+
+            println!("{}", "─".repeat(82).dimmed());
+            println!(
+                "{}",
+                "Use 'uira sessions list --tree' to show fork relationships".dimmed()
+            );
+        }
+        SessionsCommands::Info { session_id } => {
+            println!("{} {}", "Session info:".cyan().bold(), session_id.yellow());
+
+            let entries = list_rollout_sessions(1000)?;
+            let entry = entries
+                .iter()
+                .find(|e| e.thread_id == *session_id || e.thread_id.starts_with(session_id))
+                .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+            println!("{}", "─".repeat(50).dimmed());
+            println!("{}: {}", "Session ID".cyan(), entry.thread_id.yellow());
+            println!("{}: {}", "Timestamp".cyan(), entry.timestamp);
+            println!("{}: {}", "Provider".cyan(), entry.provider.yellow());
+            println!("{}: {}", "Model".cyan(), entry.model.yellow());
+            println!("{}: {}", "Turns".cyan(), entry.turns);
+            println!("{}: {}", "Fork count".cyan(), entry.fork_count);
+            if let Some(ref parent) = entry.parent_id {
+                println!("{}: {}", "Parent session".cyan(), parent.yellow());
+            }
+            println!("{}: {}", "Path".cyan(), entry.path.display());
+            println!("{}", "─".repeat(50).dimmed());
+        }
+        SessionsCommands::Delete { session_id } => {
+            println!(
+                "{} {}",
+                "Deleting session:".red().bold(),
+                session_id.yellow()
+            );
+
+            let entries = list_rollout_sessions(1000)?;
+            let entry = entries
+                .iter()
+                .find(|e| e.thread_id == *session_id || e.thread_id.starts_with(session_id))
+                .ok_or_else(|| format!("Session not found: {}", session_id))?;
+
+            std::fs::remove_file(&entry.path)?;
+            println!("{} Session deleted", "✓".green().bold());
         }
     }
     Ok(())
@@ -771,7 +877,7 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let registry = ModelRegistry::new();
     let (client, _provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs);
+    let agent_config = create_agent_config(cli, config, &agent_defs, uira_config.as_ref());
 
     // Setup terminal
     enable_raw_mode()?;
@@ -918,6 +1024,7 @@ fn create_agent_config(
     cli: &Cli,
     _config: &CliConfig,
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
+    uira_config: Option<&uira_config::schema::UiraConfig>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
@@ -945,6 +1052,12 @@ fn create_agent_config(
     if let Some(ref agent_name) = cli.agent {
         if let Some(agent_def) = agent_defs.get(agent_name) {
             config = config.with_system_prompt(&agent_def.prompt);
+        }
+    }
+
+    if let Some(uira_cfg) = uira_config {
+        if !uira_cfg.permissions.rules.is_empty() {
+            config = config.with_permission_rules(uira_cfg.permissions.rules.clone());
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod approval_cache;
 pub mod builtins;
 pub mod comment_hook;
 pub mod lsp;
@@ -10,6 +11,9 @@ pub mod router;
 pub mod traits;
 pub mod types;
 
+pub use approval_cache::{
+    ApprovalCache, ApprovalCacheFile, ApprovalKey, CacheDecision, CachedApproval,
+};
 pub use builtins::{
     builtin_tools, create_builtin_router, register_builtins, BashTool, EditTool, GlobTool,
     GrepTool, ReadTool, WriteTool,

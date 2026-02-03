@@ -152,6 +152,35 @@ impl std::fmt::Display for ThreadId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MessageId(pub String);
+
+impl MessageId {
+    pub fn new() -> Self {
+        Self(format!("msg_{}", uuid::Uuid::new_v4()))
+    }
+
+    pub fn from_string(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for MessageId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for MessageId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Workspace configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {

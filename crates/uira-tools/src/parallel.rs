@@ -70,6 +70,8 @@ impl ToolCallRuntime {
                         session_id: ctx.session_id.clone(),
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
+                        sandbox_type: ctx.sandbox_type,
+                        sandbox_policy: ctx.sandbox_policy.clone(),
                     };
                     tokio::spawn(async move { router.dispatch(&name, input, &ctx).await })
                 })
@@ -127,6 +129,8 @@ impl ToolCallRuntime {
                         session_id: ctx.session_id.clone(),
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
+                        sandbox_type: ctx.sandbox_type,
+                        sandbox_policy: ctx.sandbox_policy.clone(),
                     };
                     let handle =
                         tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });

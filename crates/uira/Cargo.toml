@@ -23,6 +23,7 @@ uira-providers = { workspace = true }
 uira-protocol = { workspace = true }
 uira-tools = { workspace = true }
 uira-sandbox = { workspace = true }
+uira-telemetry = { workspace = true }
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

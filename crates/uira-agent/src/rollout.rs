@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use uira_protocol::{Message, ThreadEvent, TokenUsage};
+use uira_protocol::{Message, MessageId, SessionId, ThreadEvent, TokenUsage};
 
 /// Items that can be recorded to the rollout
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +42,14 @@ pub enum RolloutItem {
 
     /// Turn context at end of turn
     TurnContext { turn: usize, usage: TokenUsage },
+
+    /// Session fork event
+    SessionForked {
+        child_session_id: SessionId,
+        forked_from_message: Option<MessageId>,
+        message_count: usize,
+        timestamp: DateTime<Utc>,
+    },
 }
 
 /// Wrapper for ThreadEvent to handle serialization properly
@@ -117,6 +125,19 @@ pub struct SessionMetaLine {
     /// Total token usage when metadata was last updated
     #[serde(default)]
     pub total_usage: TokenUsage,
+
+    // --- Fork metadata (Phase 2) ---
+    /// Parent session ID if this is a forked session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<SessionId>,
+
+    /// Message ID where the fork occurred
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forked_from_message: Option<MessageId>,
+
+    /// Number of child forks from this session
+    #[serde(default)]
+    pub fork_count: u32,
 }
 
 impl SessionMetaLine {
@@ -138,6 +159,35 @@ impl SessionMetaLine {
             git_branch: Self::get_git_branch(),
             turns: 0,
             total_usage: TokenUsage::default(),
+            parent_id: None,
+            forked_from_message: None,
+            fork_count: 0,
+        }
+    }
+
+    pub fn new_forked(
+        thread_id: impl Into<String>,
+        model: impl Into<String>,
+        provider: impl Into<String>,
+        cwd: PathBuf,
+        sandbox_policy: impl Into<String>,
+        parent_id: SessionId,
+        forked_from_message: Option<MessageId>,
+    ) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+            timestamp: Utc::now(),
+            model: model.into(),
+            provider: provider.into(),
+            cwd,
+            sandbox_policy: sandbox_policy.into(),
+            git_commit: Self::get_git_commit(),
+            git_branch: Self::get_git_branch(),
+            turns: 0,
+            total_usage: TokenUsage::default(),
+            parent_id: Some(parent_id),
+            forked_from_message,
+            fork_count: 0,
         }
     }
 
@@ -285,6 +335,21 @@ impl RolloutRecorder {
     pub fn record_event(&mut self, event: ThreadEvent) -> std::io::Result<()> {
         self.record(&RolloutItem::Event {
             event: EventWrapper::from(event),
+        })
+    }
+
+    pub fn record_fork(
+        &mut self,
+        child_session_id: SessionId,
+        forked_from_message: Option<MessageId>,
+        message_count: usize,
+    ) -> std::io::Result<()> {
+        self.meta.fork_count += 1;
+        self.record(&RolloutItem::SessionForked {
+            child_session_id,
+            forked_from_message,
+            message_count,
+            timestamp: Utc::now(),
         })
     }
 
@@ -535,5 +600,60 @@ mod tests {
         let usage = get_total_usage(&items);
         assert_eq!(usage.input_tokens, 300);
         assert_eq!(usage.output_tokens, 150);
+    }
+
+    #[test]
+    fn test_session_meta_fork_fields() {
+        let meta = SessionMetaLine::new(
+            "thread_123",
+            "claude-3",
+            "anthropic",
+            PathBuf::from("/home/user/project"),
+            "workspace-write",
+        );
+
+        assert!(meta.parent_id.is_none());
+        assert!(meta.forked_from_message.is_none());
+        assert_eq!(meta.fork_count, 0);
+    }
+
+    #[test]
+    fn test_session_meta_forked() {
+        let parent_id = SessionId::new();
+        let message_id = MessageId::new();
+
+        let meta = SessionMetaLine::new_forked(
+            "thread_456",
+            "claude-3",
+            "anthropic",
+            PathBuf::from("/home/user/project"),
+            "workspace-write",
+            parent_id.clone(),
+            Some(message_id.clone()),
+        );
+
+        assert_eq!(meta.parent_id, Some(parent_id));
+        assert_eq!(meta.forked_from_message, Some(message_id));
+        assert_eq!(meta.fork_count, 0);
+    }
+
+    #[test]
+    fn test_session_forked_item_serialization() {
+        let item = RolloutItem::SessionForked {
+            child_session_id: SessionId::new(),
+            forked_from_message: Some(MessageId::new()),
+            message_count: 5,
+            timestamp: Utc::now(),
+        };
+
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"type\":\"session_forked\""));
+
+        let parsed: RolloutItem = serde_json::from_str(&json).unwrap();
+        if let RolloutItem::SessionForked { message_count, .. } = parsed {
+            assert_eq!(message_count, 5);
+        } else {
+            panic!("Wrong variant");
+        }
     }
 }

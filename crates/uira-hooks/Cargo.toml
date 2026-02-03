@@ -11,6 +11,7 @@ repository.workspace = true
 uira-config = { workspace = true }
 uira-goals = { workspace = true }
 uira-comment-checker = { workspace = true }
+uira-events = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

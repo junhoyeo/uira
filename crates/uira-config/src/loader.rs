@@ -138,7 +138,18 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         hooks: config.hooks,
         ai_hooks: config.ai_hooks,
         goals: expand_goals_settings(config.goals),
+        compaction: expand_compaction_settings(config.compaction),
+        permissions: config.permissions,
     }
+}
+
+fn expand_compaction_settings(
+    mut compaction: crate::schema::CompactionSettings,
+) -> crate::schema::CompactionSettings {
+    if let Some(ref model) = compaction.summarization_model {
+        compaction.summarization_model = Some(expand_env_string(model));
+    }
+    compaction
 }
 
 fn expand_opencode_settings(
