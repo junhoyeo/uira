@@ -5294,6 +5294,7 @@ dependencies = [
  "uira-config",
  "uira-events",
  "uira-goals",
+ "uira-protocol",
 ]
 
 [[package]]

@@ -139,7 +139,7 @@ fn check_todo_continuation(
 
     let next_todo = TodoContinuationHook::get_next_pending_todo(&result);
     let next_task_info = next_todo
-        .map(|t| format!("\n\nNext task: \"{}\" ({:?})", t.content, t.status))
+        .map(|t| format!("\n\nNext task: \"{}\" ({})", t.content, t.status))
         .unwrap_or_default();
 
     let attempt_info = if attempt_count > 1 {

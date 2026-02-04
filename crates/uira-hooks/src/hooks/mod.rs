@@ -128,8 +128,7 @@ pub use thinking_block_validator::{
     PREVENTED_ERROR, SYNTHETIC_THINKING_ID_PREFIX, THINKING_MODEL_PATTERNS, THINKING_PART_TYPES,
 };
 pub use todo_continuation::{
-    IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
-    TODO_CONTINUATION_PROMPT,
+    IncompleteTodosResult, StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
 };
 pub use uira_orchestrator::{UiraOrchestratorHook, HOOK_NAME as UIRA_ORCHESTRATOR_HOOK_NAME};
 pub use ultrapilot::{

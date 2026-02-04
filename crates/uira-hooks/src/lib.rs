@@ -36,8 +36,7 @@ pub use hooks::{
     ralph::{CompletionSignal, CompletionSignals, RalphHook, RalphOptions, RalphState, SignalType},
     think_mode::{ThinkModeHook, ThinkModeState, ThinkingConfig, THINKING_CONFIGS},
     todo_continuation::{
-        IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
-        TODO_CONTINUATION_PROMPT,
+        IncompleteTodosResult, StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
     },
     ultrapilot::{
         FileOwnership, IntegrationResult, UltrapilotConfig, UltrapilotHook, UltrapilotState,

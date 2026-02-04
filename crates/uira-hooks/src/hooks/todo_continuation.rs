@@ -1,56 +1,58 @@
-//! Todo Continuation Enforcer Hook
-//!
-//! Prevents stopping when incomplete tasks remain in the todo list.
-//! Forces the agent to continue until all tasks are marked complete.
-
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::hook::{Hook, HookContext, HookResult};
-use crate::types::{HookEvent, HookInput, HookOutput};
+use uira_protocol::{TodoItem, TodoPriority, TodoStatus};
 
-/// Todo item structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Todo {
-    pub content: String,
-    pub status: TodoStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub priority: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+/// Lenient deserialization struct for backward-compatible parsing of todo files
+/// written by Claude Code (`~/.claude/todos/`) which use optional fields.
+#[derive(Deserialize)]
+struct RawTodo {
+    content: String,
+    status: RawTodoStatus,
+    #[serde(default)]
+    priority: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
 }
 
-/// Todo status
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TodoStatus {
+enum RawTodoStatus {
     Pending,
     InProgress,
     Completed,
     Cancelled,
 }
 
-impl Todo {
-    pub fn is_incomplete(&self) -> bool {
-        matches!(self.status, TodoStatus::Pending | TodoStatus::InProgress)
+impl RawTodo {
+    fn into_item(self, index: usize) -> TodoItem {
+        TodoItem {
+            id: self.id.unwrap_or_else(|| format!("todo-{}", index)),
+            content: self.content,
+            status: match self.status {
+                RawTodoStatus::Pending => TodoStatus::Pending,
+                RawTodoStatus::InProgress => TodoStatus::InProgress,
+                RawTodoStatus::Completed => TodoStatus::Completed,
+                RawTodoStatus::Cancelled => TodoStatus::Cancelled,
+            },
+            priority: match self.priority.as_deref() {
+                Some("high") => TodoPriority::High,
+                Some("low") => TodoPriority::Low,
+                _ => TodoPriority::Medium,
+            },
+        }
     }
 }
 
-/// Result of checking for incomplete todos
 #[derive(Debug, Clone)]
 pub struct IncompleteTodosResult {
-    /// Number of incomplete todos
     pub count: usize,
-    /// The incomplete todos
-    pub todos: Vec<Todo>,
-    /// Total number of todos
+    pub todos: Vec<TodoItem>,
     pub total: usize,
 }
 
-/// Stop context from hook event
 #[derive(Debug, Clone, Default)]
 pub struct StopContext {
     pub stop_reason: Option<String>,
@@ -58,7 +60,6 @@ pub struct StopContext {
 }
 
 impl StopContext {
-    /// Check if stop was due to user abort
     pub fn is_user_abort(&self) -> bool {
         if self.user_requested == Some(true) {
             return true;
@@ -86,36 +87,26 @@ impl StopContext {
     }
 }
 
-/// Todo Continuation Hook
 pub struct TodoContinuationHook {
-    max_attempts: usize,
+    _max_attempts: usize,
 }
 
 impl TodoContinuationHook {
     pub fn new() -> Self {
-        Self { max_attempts: 5 }
+        Self { _max_attempts: 5 }
     }
 
-    pub fn with_max_attempts(mut self, max: usize) -> Self {
-        self.max_attempts = max;
-        self
-    }
-
-    /// Get possible todo file locations
     fn get_todo_file_paths(session_id: Option<&str>, directory: &str) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // Get home directory
         if let Some(home) = dirs::home_dir() {
             let claude_dir = home.join(".claude");
 
-            // Session-specific todos
             if let Some(sid) = session_id {
                 paths.push(claude_dir.join("sessions").join(sid).join("todos.json"));
                 paths.push(claude_dir.join("todos").join(format!("{}.json", sid)));
             }
 
-            // Global todos directory
             let todos_dir = claude_dir.join("todos");
             if todos_dir.exists() {
                 if let Ok(entries) = fs::read_dir(&todos_dir) {
@@ -128,13 +119,11 @@ impl TodoContinuationHook {
                 }
             }
 
-            // Uira-native session todos (~/.uira/todos/{session_id}.json)
             let uira_dir = home.join(".uira");
             if let Some(sid) = session_id {
                 paths.push(uira_dir.join("todos").join(format!("{}.json", sid)));
             }
 
-            // All Uira session todo files
             let uira_todos_dir = uira_dir.join("todos");
             if uira_todos_dir.exists() {
                 if let Ok(entries) = fs::read_dir(&uira_todos_dir) {
@@ -148,7 +137,6 @@ impl TodoContinuationHook {
             }
         }
 
-        // Project-specific todos
         let dir = Path::new(directory);
         paths.push(dir.join(".uira").join("todos.json"));
         paths.push(dir.join(".claude").join("todos.json"));
@@ -156,38 +144,84 @@ impl TodoContinuationHook {
         paths
     }
 
-    /// Parse todo file content
-    fn parse_todo_file(path: &Path) -> Vec<Todo> {
+    fn parse_todo_file(path: &Path) -> Vec<TodoItem> {
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
 
-        // Try parsing as array
-        if let Ok(todos) = serde_json::from_str::<Vec<Todo>>(&content) {
+        // Uira-native format: Vec<TodoItem> (strict, all fields required)
+        if let Ok(todos) = serde_json::from_str::<Vec<TodoItem>>(&content) {
             return todos;
         }
 
-        // Try parsing as object with todos field
-        #[derive(Deserialize)]
-        struct TodosWrapper {
-            todos: Vec<Todo>,
+        // Claude Code format: Vec<RawTodo> (lenient, optional id/priority)
+        if let Ok(raw_todos) = serde_json::from_str::<Vec<RawTodo>>(&content) {
+            return raw_todos
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| t.into_item(i))
+                .collect();
         }
 
-        if let Ok(wrapper) = serde_json::from_str::<TodosWrapper>(&content) {
+        #[derive(Deserialize)]
+        struct ItemWrapper {
+            todos: Vec<TodoItem>,
+        }
+        if let Ok(wrapper) = serde_json::from_str::<ItemWrapper>(&content) {
             return wrapper.todos;
+        }
+
+        #[derive(Deserialize)]
+        struct RawWrapper {
+            todos: Vec<RawTodo>,
+        }
+        if let Ok(wrapper) = serde_json::from_str::<RawWrapper>(&content) {
+            return wrapper
+                .todos
+                .into_iter()
+                .enumerate()
+                .map(|(i, t)| t.into_item(i))
+                .collect();
         }
 
         Vec::new()
     }
 
-    /// Check for incomplete todos across all possible locations
+    /// Check for incomplete todos from in-memory items (e.g., from TodoStore).
+    pub fn check_incomplete_from_items(
+        items: &[TodoItem],
+        stop_context: Option<&StopContext>,
+    ) -> IncompleteTodosResult {
+        if let Some(ctx) = stop_context {
+            if ctx.is_user_abort() {
+                return IncompleteTodosResult {
+                    count: 0,
+                    todos: Vec::new(),
+                    total: 0,
+                };
+            }
+        }
+
+        let incomplete: Vec<TodoItem> = items
+            .iter()
+            .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+            .cloned()
+            .collect();
+
+        IncompleteTodosResult {
+            count: incomplete.len(),
+            todos: incomplete,
+            total: items.len(),
+        }
+    }
+
+    /// Check for incomplete todos across all filesystem locations.
     pub fn check_incomplete_todos(
         session_id: Option<&str>,
         directory: &str,
         stop_context: Option<&StopContext>,
     ) -> IncompleteTodosResult {
-        // If user aborted, don't force continuation
         if let Some(ctx) = stop_context {
             if ctx.is_user_abort() {
                 return IncompleteTodosResult {
@@ -200,8 +234,8 @@ impl TodoContinuationHook {
 
         let paths = Self::get_todo_file_paths(session_id, directory);
         let mut seen_contents: HashSet<String> = HashSet::new();
-        let mut all_todos: Vec<Todo> = Vec::new();
-        let mut incomplete_todos: Vec<Todo> = Vec::new();
+        let mut all_todos: Vec<TodoItem> = Vec::new();
+        let mut incomplete_todos: Vec<TodoItem> = Vec::new();
 
         for path in paths {
             if !path.exists() {
@@ -211,14 +245,13 @@ impl TodoContinuationHook {
             let todos = Self::parse_todo_file(&path);
 
             for todo in todos {
-                // Deduplicate by content + status
-                let key = format!("{}:{:?}", todo.content, todo.status);
+                let key = format!("{}:{}", todo.content, todo.status);
                 if seen_contents.contains(&key) {
                     continue;
                 }
                 seen_contents.insert(key);
 
-                if todo.is_incomplete() {
+                if matches!(todo.status, TodoStatus::Pending | TodoStatus::InProgress) {
                     incomplete_todos.push(todo.clone());
                 }
                 all_todos.push(todo);
@@ -232,9 +265,7 @@ impl TodoContinuationHook {
         }
     }
 
-    /// Get the next pending todo
-    pub fn get_next_pending_todo(result: &IncompleteTodosResult) -> Option<&Todo> {
-        // First try to find one that's in_progress
+    pub fn get_next_pending_todo(result: &IncompleteTodosResult) -> Option<&TodoItem> {
         if let Some(todo) = result
             .todos
             .iter()
@@ -243,14 +274,12 @@ impl TodoContinuationHook {
             return Some(todo);
         }
 
-        // Otherwise return first pending
         result
             .todos
             .iter()
             .find(|t| t.status == TodoStatus::Pending)
     }
 
-    /// Format todo status string
     pub fn format_todo_status(result: &IncompleteTodosResult) -> String {
         if result.count == 0 {
             return format!("All tasks complete ({} total)", result.total);
@@ -271,7 +300,6 @@ impl Default for TodoContinuationHook {
     }
 }
 
-/// The todo continuation prompt message
 pub const TODO_CONTINUATION_PROMPT: &str = r#"[SYSTEM REMINDER - TODO CONTINUATION]
 
 Incomplete tasks remain in your todo list. Continue working on the next pending task.
@@ -280,96 +308,44 @@ Incomplete tasks remain in your todo list. Continue working on the next pending 
 - Mark each task complete when finished
 - Do not stop until all tasks are done"#;
 
-#[async_trait]
-impl Hook for TodoContinuationHook {
-    fn name(&self) -> &str {
-        "todo-continuation"
-    }
-
-    fn events(&self) -> &[HookEvent] {
-        &[HookEvent::Stop]
-    }
-
-    async fn execute(
-        &self,
-        _event: HookEvent,
-        input: &HookInput,
-        context: &HookContext,
-    ) -> HookResult {
-        // Build stop context from input
-        let stop_context = StopContext {
-            stop_reason: input.stop_reason.clone(),
-            user_requested: input.user_requested,
-        };
-
-        // Check for incomplete todos
-        let result = Self::check_incomplete_todos(
-            input.session_id.as_deref(),
-            &context.directory,
-            Some(&stop_context),
-        );
-
-        if result.count == 0 {
-            return Ok(HookOutput::pass());
-        }
-
-        // Build continuation message
-        let next_todo = Self::get_next_pending_todo(&result);
-        let next_task_info = next_todo
-            .map(|t| format!("\n\nNext task: \"{}\" ({:?})", t.content, t.status))
-            .unwrap_or_default();
-
-        let message = format!(
-            "{}\n\n[Status: {} of {} tasks remaining]{}",
-            TODO_CONTINUATION_PROMPT, result.count, result.total, next_task_info
-        );
-
-        // Block stop and inject continuation message
-        Ok(HookOutput::block_with_reason(message))
-    }
-
-    fn priority(&self) -> i32 {
-        50 // Lower priority than ralph and ultrawork
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn make_item(id: &str, content: &str, status: TodoStatus) -> TodoItem {
+        TodoItem {
+            id: id.to_string(),
+            content: content.to_string(),
+            status,
+            priority: TodoPriority::Medium,
+        }
+    }
+
     #[test]
     fn test_todo_is_incomplete() {
-        let pending = Todo {
-            content: "Test".to_string(),
-            status: TodoStatus::Pending,
-            priority: None,
-            id: None,
-        };
-        assert!(pending.is_incomplete());
+        let pending = make_item("1", "Test", TodoStatus::Pending);
+        assert!(matches!(
+            pending.status,
+            TodoStatus::Pending | TodoStatus::InProgress
+        ));
 
-        let in_progress = Todo {
-            content: "Test".to_string(),
-            status: TodoStatus::InProgress,
-            priority: None,
-            id: None,
-        };
-        assert!(in_progress.is_incomplete());
+        let in_progress = make_item("2", "Test", TodoStatus::InProgress);
+        assert!(matches!(
+            in_progress.status,
+            TodoStatus::Pending | TodoStatus::InProgress
+        ));
 
-        let completed = Todo {
-            content: "Test".to_string(),
-            status: TodoStatus::Completed,
-            priority: None,
-            id: None,
-        };
-        assert!(!completed.is_incomplete());
+        let completed = make_item("3", "Test", TodoStatus::Completed);
+        assert!(!matches!(
+            completed.status,
+            TodoStatus::Pending | TodoStatus::InProgress
+        ));
 
-        let cancelled = Todo {
-            content: "Test".to_string(),
-            status: TodoStatus::Cancelled,
-            priority: None,
-            id: None,
-        };
-        assert!(!cancelled.is_incomplete());
+        let cancelled = make_item("4", "Test", TodoStatus::Cancelled);
+        assert!(!matches!(
+            cancelled.status,
+            TodoStatus::Pending | TodoStatus::InProgress
+        ));
     }
 
     #[test]
@@ -422,24 +398,9 @@ mod tests {
     #[test]
     fn test_get_next_pending_todo() {
         let todos = vec![
-            Todo {
-                content: "First pending".to_string(),
-                status: TodoStatus::Pending,
-                priority: None,
-                id: None,
-            },
-            Todo {
-                content: "In progress".to_string(),
-                status: TodoStatus::InProgress,
-                priority: None,
-                id: None,
-            },
-            Todo {
-                content: "Second pending".to_string(),
-                status: TodoStatus::Pending,
-                priority: None,
-                id: None,
-            },
+            make_item("1", "First pending", TodoStatus::Pending),
+            make_item("2", "In progress", TodoStatus::InProgress),
+            make_item("3", "Second pending", TodoStatus::Pending),
         ];
 
         let result = IncompleteTodosResult {
@@ -448,9 +409,35 @@ mod tests {
             total: 3,
         };
 
-        // Should return in_progress first
         let next = TodoContinuationHook::get_next_pending_todo(&result);
         assert!(next.is_some());
         assert_eq!(next.unwrap().content, "In progress");
+    }
+
+    #[test]
+    fn test_check_incomplete_from_items() {
+        let items = vec![
+            make_item("1", "Done", TodoStatus::Completed),
+            make_item("2", "Pending", TodoStatus::Pending),
+            make_item("3", "Working", TodoStatus::InProgress),
+            make_item("4", "Cancelled", TodoStatus::Cancelled),
+        ];
+
+        let result = TodoContinuationHook::check_incomplete_from_items(&items, None);
+        assert_eq!(result.count, 2);
+        assert_eq!(result.total, 4);
+        assert_eq!(result.todos.len(), 2);
+    }
+
+    #[test]
+    fn test_check_incomplete_from_items_respects_user_abort() {
+        let items = vec![make_item("1", "Pending", TodoStatus::Pending)];
+
+        let ctx = StopContext {
+            stop_reason: None,
+            user_requested: Some(true),
+        };
+        let result = TodoContinuationHook::check_incomplete_from_items(&items, Some(&ctx));
+        assert_eq!(result.count, 0);
     }
 }
