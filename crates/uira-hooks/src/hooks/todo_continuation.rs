@@ -127,6 +127,25 @@ impl TodoContinuationHook {
                     }
                 }
             }
+
+            // Uira-native session todos (~/.uira/todos/{session_id}.json)
+            let uira_dir = home.join(".uira");
+            if let Some(sid) = session_id {
+                paths.push(uira_dir.join("todos").join(format!("{}.json", sid)));
+            }
+
+            // All Uira session todo files
+            let uira_todos_dir = uira_dir.join("todos");
+            if uira_todos_dir.exists() {
+                if let Ok(entries) = fs::read_dir(&uira_todos_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|e| e == "json") {
+                            paths.push(path);
+                        }
+                    }
+                }
+            }
         }
 
         // Project-specific todos
