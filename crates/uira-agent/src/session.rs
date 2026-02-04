@@ -8,9 +8,9 @@ use uira_protocol::{MessageId, SessionId, TokenUsage};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
 use uira_tools::{
-    register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
-    DelegationToolProvider, LspToolProvider, TodoStore, ToolCallRuntime, ToolContext,
-    ToolOrchestrator, ToolRouter,
+    register_builtins_with_todos, register_builtins_without_todos, AgentExecutor, ApprovalCache,
+    AstToolProvider, DelegationToolProvider, LspToolProvider, TodoStore, ToolCallRuntime,
+    ToolContext, ToolOrchestrator, ToolRouter,
 };
 
 use crate::AgentConfig;
@@ -82,7 +82,12 @@ impl Session {
         };
 
         let mut tool_router = ToolRouter::new();
-        register_builtins_with_todos(&mut tool_router, todo_store.clone());
+        if config.task_system {
+            register_builtins_without_todos(&mut tool_router);
+            tracing::info!("task_system enabled: TodoWrite/TodoRead tools disabled");
+        } else {
+            register_builtins_with_todos(&mut tool_router, todo_store.clone());
+        }
         tool_router.register_provider(Arc::new(LspToolProvider::new()));
         tool_router.register_provider(Arc::new(AstToolProvider::new()));
 

@@ -1429,7 +1429,7 @@ fn detect_session_error_type(error: &serde_json::Value) -> SessionRecoveryErrorT
     if msg.contains("thinking")
         && (msg.contains("first block")
             || msg.contains("must start with")
-            || msg.contains("preceeding")
+            || msg.contains("preceding")
             || msg.contains("final block")
             || msg.contains("cannot be thinking")
             || (msg.contains("expected") && msg.contains("found")))

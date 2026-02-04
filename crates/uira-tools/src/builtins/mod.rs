@@ -16,7 +16,7 @@ pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use read::ReadTool;
-pub use todo::{TodoReadTool, TodoStore, TodoWriteTool};
+pub use todo::{TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool};
 pub use write::WriteTool;
 
 use crate::{BoxedTool, ToolRouter};
@@ -35,6 +35,13 @@ pub fn register_builtins_with_todos(router: &mut ToolRouter, store: TodoStore) {
     register_builtins(router);
     router.register(TodoWriteTool::new(store.clone()));
     router.register(TodoReadTool::new(store));
+}
+
+/// Register builtins without todo tools (when task_system is enabled).
+/// Ported from oh-my-opencode's tasks-todowrite-disabler hook which blocks
+/// TodoWrite/TodoRead when the experimental task system is active.
+pub fn register_builtins_without_todos(router: &mut ToolRouter) {
+    register_builtins(router);
 }
 
 pub fn create_builtin_router() -> ToolRouter {

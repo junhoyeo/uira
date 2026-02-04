@@ -21,6 +21,7 @@ pub mod ralph;
 pub mod rollout;
 mod session;
 pub mod streaming;
+pub mod todo_continuation;
 mod turn;
 
 use std::sync::Arc;
@@ -42,6 +43,7 @@ pub use ralph::{RalphConfig, RalphController, RalphDecision};
 pub use rollout::{EventWrapper, RolloutItem, RolloutRecorder, SessionMetaLine};
 pub use session::Session;
 pub use streaming::{StreamController, StreamOutput};
+pub use todo_continuation::TodoContinuationEnforcer;
 pub use turn::{TurnContext, TurnState};
 
 pub enum AgentCommand {

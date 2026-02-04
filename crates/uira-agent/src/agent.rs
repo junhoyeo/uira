@@ -20,6 +20,7 @@ use crate::{
     events::{EventSender, EventStream},
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
+    todo_continuation::TodoContinuationEnforcer,
     AgentCommand, AgentConfig, AgentControl, AgentLoopError, CommandReceiver, CommandSender,
     Session,
 };
@@ -40,6 +41,7 @@ pub struct Agent {
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
     keyword_detector: KeywordDetectorHook,
+    todo_enforcer: TodoContinuationEnforcer,
     last_tool_output: Option<String>,
 }
 
@@ -53,6 +55,9 @@ impl Agent {
         client: Arc<dyn ModelClient>,
         executor: Option<Arc<dyn uira_tools::AgentExecutor>>,
     ) -> Self {
+        let todo_enforcer = TodoContinuationEnforcer::new()
+            .enabled(config.todo_continuation)
+            .with_max_attempts(config.max_continuation_attempts);
         Self {
             session: Session::new_with_executor(config, client, executor),
             control: AgentControl::default(),
@@ -66,6 +71,7 @@ impl Agent {
             approval_tx: None,
             command_rx: None,
             keyword_detector: KeywordDetectorHook::new(),
+            todo_enforcer,
             last_tool_output: None,
         }
     }
@@ -186,26 +192,64 @@ impl Agent {
                 break;
             }
 
-            match self.run(&prompt).await {
-                Ok(result) => {
-                    tracing::debug!(
-                        "Turn completed: {} turns, success={}",
-                        result.turns,
-                        result.success
-                    );
-                }
-                Err(AgentLoopError::Cancelled) => {
-                    tracing::info!("Agent cancelled");
-                    self.emit_event(ThreadEvent::ThreadCancelled).await;
-                }
-                Err(e) => {
-                    tracing::error!("Agent error: {}", e);
-                    self.emit_event(ThreadEvent::Error {
-                        message: e.to_string(),
-                        recoverable: true,
+            // Reset continuation enforcer on genuine user input
+            self.todo_enforcer.reset();
+
+            let mut current_prompt = prompt;
+            loop {
+                let (was_error, was_cancel) = match self.run(&current_prompt).await {
+                    Ok(result) => {
+                        tracing::debug!(
+                            "Turn completed: {} turns, success={}",
+                            result.turns,
+                            result.success
+                        );
+                        (false, false)
+                    }
+                    Err(AgentLoopError::Cancelled) => {
+                        tracing::info!("Agent cancelled");
+                        self.emit_event(ThreadEvent::ThreadCancelled).await;
+                        (false, true)
+                    }
+                    Err(e) => {
+                        tracing::error!("Agent error: {}", e);
+                        self.emit_event(ThreadEvent::Error {
+                            message: e.to_string(),
+                            recoverable: true,
+                        })
+                        .await;
+                        (true, false)
+                    }
+                };
+
+                // Check todo continuation: if incomplete todos remain, auto-inject prompt
+                let todos = self
+                    .session
+                    .todo_store
+                    .get(&self.session.id.to_string())
+                    .await;
+                if let Some(continuation) = self
+                    .todo_enforcer
+                    .check_and_generate_prompt(&todos, was_error, was_cancel)
+                {
+                    self.emit_event(ThreadEvent::ContentDelta {
+                        delta: format!(
+                            "\n[Todo continuation: {} incomplete tasks, auto-resuming...]\n",
+                            todos
+                                .iter()
+                                .filter(|t| {
+                                    t.status != uira_protocol::TodoStatus::Completed
+                                        && t.status != uira_protocol::TodoStatus::Cancelled
+                                })
+                                .count()
+                        ),
                     })
                     .await;
+                    current_prompt = continuation;
+                    continue;
                 }
+
+                break;
             }
 
             self.state = AgentState::WaitingForUser;

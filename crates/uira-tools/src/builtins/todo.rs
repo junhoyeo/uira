@@ -63,6 +63,124 @@ impl TodoStore {
         let content = tokio::fs::read_to_string(path).await.ok()?;
         serde_json::from_str(&content).ok()
     }
+
+    /// List all session IDs that have persisted todo files.
+    /// Ported from oh-my-opencode `readSessionTodos` in session-manager/storage.ts.
+    pub async fn list_sessions_with_todos(&self) -> Vec<String> {
+        let dir = match self.persist_dir.as_ref() {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+        let mut sessions = Vec::new();
+        let mut entries = match tokio::fs::read_dir(dir).await {
+            Ok(e) => e,
+            Err(_) => return Vec::new(),
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if let Some(session_id) = name.strip_suffix(".json") {
+                sessions.push(session_id.to_string());
+            }
+        }
+        sessions
+    }
+
+    /// Read todos for a session from disk, matching by session ID substring.
+    /// Ported from oh-my-opencode `readSessionTodos` which filters todo files
+    /// by `f.includes(sessionID)`.
+    pub async fn read_session_todos(&self, session_id: &str) -> Vec<TodoItem> {
+        if let Some(todos) = self.load_from_disk(session_id).await {
+            return todos;
+        }
+
+        let dir = match self.persist_dir.as_ref() {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+        let mut entries = match tokio::fs::read_dir(dir).await {
+            Ok(e) => e,
+            Err(_) => return Vec::new(),
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.contains(session_id) && name_str.ends_with(".json") {
+                if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
+                    if let Ok(todos) = serde_json::from_str::<Vec<TodoItem>>(&content) {
+                        return todos;
+                    }
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// Get summary info about a session's todos.
+    /// Ported from oh-my-opencode `getSessionInfo` which includes `has_todos` and `todos`.
+    pub async fn session_todo_info(&self, session_id: &str) -> TodoSessionInfo {
+        let todos = {
+            let mem = self.get(session_id).await;
+            if !mem.is_empty() {
+                mem
+            } else {
+                self.read_session_todos(session_id).await
+            }
+        };
+        let total = todos.len();
+        let completed = todos
+            .iter()
+            .filter(|t| t.status == TodoStatus::Completed)
+            .count();
+        let cancelled = todos
+            .iter()
+            .filter(|t| t.status == TodoStatus::Cancelled)
+            .count();
+        let in_progress = todos
+            .iter()
+            .filter(|t| t.status == TodoStatus::InProgress)
+            .count();
+        let pending = todos
+            .iter()
+            .filter(|t| t.status == TodoStatus::Pending)
+            .count();
+
+        TodoSessionInfo {
+            has_todos: total > 0,
+            total,
+            completed,
+            cancelled,
+            in_progress,
+            pending,
+            todos,
+        }
+    }
+
+    /// Delete the persisted todo file for a session.
+    /// Ported from oh-my-opencode `deleteTodoFile`.
+    pub async fn delete_session_todos(&self, session_id: &str) -> Result<(), std::io::Error> {
+        let dir = match self.persist_dir.as_ref() {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+        let path = dir.join(format!("{}.json", session_id));
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TodoSessionInfo {
+    pub has_todos: bool,
+    pub total: usize,
+    pub completed: usize,
+    pub cancelled: usize,
+    pub in_progress: usize,
+    pub pending: usize,
+    pub todos: Vec<TodoItem>,
 }
 
 impl Default for TodoStore {
@@ -381,5 +499,117 @@ mod tests {
         let todo = item.into_todo_item();
         assert_eq!(todo.status, TodoStatus::Pending);
         assert_eq!(todo.priority, TodoPriority::Medium);
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_with_todos() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+        let items = vec![TodoItem {
+            id: "1".to_string(),
+            content: "Task".to_string(),
+            status: TodoStatus::Pending,
+            priority: TodoPriority::Medium,
+        }];
+        store.update("ses_aaa", items.clone()).await;
+        store.update("ses_bbb", items).await;
+
+        let sessions = store.list_sessions_with_todos().await;
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.contains(&"ses_aaa".to_string()));
+        assert!(sessions.contains(&"ses_bbb".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_read_session_todos() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+        let items = vec![TodoItem {
+            id: "1".to_string(),
+            content: "Persisted task".to_string(),
+            status: TodoStatus::InProgress,
+            priority: TodoPriority::High,
+        }];
+        store.update("ses_xyz", items).await;
+
+        let fresh_store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+        let todos = fresh_store.read_session_todos("ses_xyz").await;
+        assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].content, "Persisted task");
+    }
+
+    #[tokio::test]
+    async fn test_session_todo_info() {
+        let store = TodoStore::new();
+        let items = vec![
+            TodoItem {
+                id: "1".to_string(),
+                content: "Done".to_string(),
+                status: TodoStatus::Completed,
+                priority: TodoPriority::Low,
+            },
+            TodoItem {
+                id: "2".to_string(),
+                content: "Active".to_string(),
+                status: TodoStatus::InProgress,
+                priority: TodoPriority::High,
+            },
+            TodoItem {
+                id: "3".to_string(),
+                content: "Waiting".to_string(),
+                status: TodoStatus::Pending,
+                priority: TodoPriority::Medium,
+            },
+            TodoItem {
+                id: "4".to_string(),
+                content: "Skipped".to_string(),
+                status: TodoStatus::Cancelled,
+                priority: TodoPriority::Low,
+            },
+        ];
+        store.update("ses_info", items).await;
+
+        let info = store.session_todo_info("ses_info").await;
+        assert!(info.has_todos);
+        assert_eq!(info.total, 4);
+        assert_eq!(info.completed, 1);
+        assert_eq!(info.cancelled, 1);
+        assert_eq!(info.in_progress, 1);
+        assert_eq!(info.pending, 1);
+        assert_eq!(info.todos.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_todos() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+        let items = vec![TodoItem {
+            id: "1".to_string(),
+            content: "To delete".to_string(),
+            status: TodoStatus::Pending,
+            priority: TodoPriority::Medium,
+        }];
+        store.update("ses_del", items).await;
+
+        assert!(store.load_from_disk("ses_del").await.is_some());
+
+        store.delete_session_todos("ses_del").await.unwrap();
+
+        assert!(store.load_from_disk("ses_del").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_session_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+        assert!(store.delete_session_todos("nonexistent").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_session_todo_info_empty() {
+        let store = TodoStore::new();
+        let info = store.session_todo_info("nonexistent").await;
+        assert!(!info.has_todos);
+        assert_eq!(info.total, 0);
     }
 }
