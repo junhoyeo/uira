@@ -379,14 +379,30 @@ impl ToolOrchestrator {
     }
 
     fn extract_path_from_input(input: &serde_json::Value) -> String {
-        input
-            .get("file_path")
-            .or_else(|| input.get("filePath"))
-            .or_else(|| input.get("path"))
-            .or_else(|| input.get("command"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("*")
-            .to_string()
+        // Path field priority order - must match uira_permissions::evaluator::extract_path_from_input
+        let path_fields = [
+            "path",
+            "file_path",
+            "filePath",
+            "file",
+            "target",
+            "directory",
+            "dir",
+        ];
+
+        for field in path_fields {
+            if let Some(path) = input.get(field).and_then(|v| v.as_str()) {
+                return path.to_string();
+            }
+        }
+
+        // For bash/shell commands, use the command itself
+        if let Some(command) = input.get("command").and_then(|v| v.as_str()) {
+            return command.to_string();
+        }
+
+        // Fallback: wildcard for cache matching
+        "*".to_string()
     }
 
     fn review_to_cache_decision(decision: &ReviewDecision) -> CacheDecision {

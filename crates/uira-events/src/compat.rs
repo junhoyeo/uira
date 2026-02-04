@@ -177,6 +177,49 @@ impl From<ThreadEvent> for Event {
                 model,
                 provider,
             },
+            ThreadEvent::PermissionEvaluated {
+                permission,
+                path,
+                action,
+                rule_matched,
+            } => Event::PermissionEvaluated {
+                session_id: String::new(),
+                permission,
+                path,
+                action: match action.as_str() {
+                    "allow" => crate::events::PermissionAction::Allow,
+                    "deny" => crate::events::PermissionAction::Deny,
+                    _ => crate::events::PermissionAction::Ask,
+                },
+                rule_matched,
+            },
+            ThreadEvent::ApprovalCached {
+                tool_name,
+                pattern,
+                decision: _,
+            } => Event::ApprovalCached {
+                session_id: String::new(),
+                tool_name,
+                pattern,
+            },
+            ThreadEvent::CompactionStarted {
+                strategy,
+                token_count_before,
+            } => Event::CompactionStarted {
+                session_id: String::new(),
+                strategy,
+                token_count_before,
+            },
+            ThreadEvent::CompactionCompleted {
+                token_count_before,
+                token_count_after,
+                messages_removed,
+            } => Event::CompactionCompleted {
+                session_id: String::new(),
+                token_count_before,
+                token_count_after,
+                messages_removed,
+            },
             _ => Event::MessagesTransform {
                 session_id: String::new(),
             },
@@ -279,6 +322,47 @@ impl From<Event> for Option<ThreadEvent> {
             Event::ModelSwitched {
                 model, provider, ..
             } => Some(ThreadEvent::ModelSwitched { model, provider }),
+            Event::PermissionEvaluated {
+                permission,
+                path,
+                action,
+                rule_matched,
+                ..
+            } => Some(ThreadEvent::PermissionEvaluated {
+                permission,
+                path,
+                action: match action {
+                    crate::events::PermissionAction::Allow => "allow".to_string(),
+                    crate::events::PermissionAction::Deny => "deny".to_string(),
+                    crate::events::PermissionAction::Ask => "ask".to_string(),
+                },
+                rule_matched,
+            }),
+            Event::ApprovalCached {
+                tool_name, pattern, ..
+            } => Some(ThreadEvent::ApprovalCached {
+                tool_name,
+                pattern,
+                decision: "cached".to_string(),
+            }),
+            Event::CompactionStarted {
+                strategy,
+                token_count_before,
+                ..
+            } => Some(ThreadEvent::CompactionStarted {
+                strategy,
+                token_count_before,
+            }),
+            Event::CompactionCompleted {
+                token_count_before,
+                token_count_after,
+                messages_removed,
+                ..
+            } => Some(ThreadEvent::CompactionCompleted {
+                token_count_before,
+                token_count_after,
+                messages_removed,
+            }),
             _ => None,
         }
     }

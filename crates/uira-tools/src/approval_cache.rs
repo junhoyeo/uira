@@ -46,16 +46,18 @@ pub struct ApprovalKey {
 
 impl ApprovalKey {
     pub fn new(tool: &str, pattern: &str) -> Self {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        tool.hash(&mut hasher);
-        pattern.hash(&mut hasher);
-        let hash = hasher.finish();
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(tool.as_bytes());
+        hasher.update(b"|");
+        hasher.update(pattern.as_bytes());
+        let hash = hasher.finalize();
 
         Self {
             tool: tool.to_string(),
             pattern: pattern.to_string(),
-            key_hash: format!("{:016x}", hash),
+            key_hash: hex::encode(hash),
         }
     }
 
@@ -65,17 +67,20 @@ impl ApprovalKey {
     }
 
     pub fn for_bash_command(command: &str, working_dir: &str) -> Self {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        "bash".hash(&mut hasher);
-        command.hash(&mut hasher);
-        working_dir.hash(&mut hasher);
-        let hash = hasher.finish();
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"bash|");
+        hasher.update(command.as_bytes());
+        hasher.update(b"|");
+        hasher.update(working_dir.as_bytes());
+        let hash = hasher.finalize();
+        let hash_hex = hex::encode(hash);
 
         Self {
             tool: "Bash".to_string(),
-            pattern: format!("cmd:{:016x}", hash),
-            key_hash: format!("{:016x}", hash),
+            pattern: format!("cmd:{}", &hash_hex[..16]),
+            key_hash: hash_hex,
         }
     }
 

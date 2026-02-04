@@ -13,6 +13,7 @@ use uira_protocol::{
     Role, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
+use uira_telemetry::{SessionSpan, TurnSpan};
 
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
@@ -315,6 +316,10 @@ impl Agent {
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
         self.state = AgentState::Thinking;
 
+        let session_span =
+            SessionSpan::new(&self.session.id.to_string(), self.session.client.model());
+        let _session_guard = session_span.enter();
+
         self.emit_event(ThreadEvent::ThreadStarted {
             thread_id: self.session.id.to_string(),
         })
@@ -361,6 +366,9 @@ impl Agent {
 
             // Start a new turn
             let turn_number = self.session.start_turn();
+            let turn_span = TurnSpan::new(turn_number);
+            let _turn_guard = turn_span.enter();
+
             self.emit_event(ThreadEvent::TurnStarted { turn_number })
                 .await;
 

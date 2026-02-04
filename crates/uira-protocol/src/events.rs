@@ -102,6 +102,32 @@ pub enum ThreadEvent {
 
     /// Model was switched at runtime
     ModelSwitched { model: String, provider: String },
+
+    // Permission/Approval/Compaction Events
+    /// Permission was evaluated for a tool
+    PermissionEvaluated {
+        permission: String,
+        path: String,
+        action: String,
+        rule_matched: Option<String>,
+    },
+    /// Approval decision was cached
+    ApprovalCached {
+        tool_name: String,
+        pattern: String,
+        decision: String,
+    },
+    /// Context compaction started
+    CompactionStarted {
+        strategy: String,
+        token_count_before: usize,
+    },
+    /// Context compaction completed
+    CompactionCompleted {
+        token_count_before: usize,
+        token_count_after: usize,
+        messages_removed: usize,
+    },
 }
 
 /// Item types that can be processed

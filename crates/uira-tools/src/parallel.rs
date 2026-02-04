@@ -5,15 +5,20 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uira_protocol::ToolOutput;
 
-use crate::{ToolContext, ToolError, ToolRouter};
+use crate::{ToolContext, ToolError, ToolOrchestrator, ToolRouter};
 
 /// Runtime for executing tool calls with parallelism control
 ///
 /// Uses a RwLock pattern:
 /// - Parallel-safe tools acquire a read lock (multiple concurrent)
 /// - Mutating tools acquire a write lock (exclusive)
+///
+/// When an orchestrator is configured, tool calls route through permission
+/// and approval checks. Without an orchestrator, calls go directly to the router
+/// (use only in trusted/test contexts).
 pub struct ToolCallRuntime {
     router: Arc<ToolRouter>,
+    orchestrator: Option<Arc<ToolOrchestrator>>,
     parallel_lock: Arc<RwLock<()>>,
 }
 
@@ -21,8 +26,15 @@ impl ToolCallRuntime {
     pub fn new(router: Arc<ToolRouter>) -> Self {
         Self {
             router,
+            orchestrator: None,
             parallel_lock: Arc::new(RwLock::new(())),
         }
+    }
+
+    /// Configure an orchestrator to route tool calls through permission/approval checks
+    pub fn with_orchestrator(mut self, orchestrator: Arc<ToolOrchestrator>) -> Self {
+        self.orchestrator = Some(orchestrator);
+        self
     }
 
     /// Execute a tool call with proper parallelism control
@@ -35,12 +47,23 @@ impl ToolCallRuntime {
         let supports_parallel = self.router.tool_supports_parallel(tool_name);
 
         if supports_parallel {
-            // Parallel tools: read lock (multiple concurrent)
             let _guard = self.parallel_lock.read().await;
-            self.router.dispatch(tool_name, input, ctx).await
+            self.dispatch_tool(tool_name, input, ctx).await
         } else {
-            // Mutating tools: write lock (exclusive)
             let _guard = self.parallel_lock.write().await;
+            self.dispatch_tool(tool_name, input, ctx).await
+        }
+    }
+
+    async fn dispatch_tool(
+        &self,
+        tool_name: &str,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        if let Some(ref orchestrator) = self.orchestrator {
+            orchestrator.run(tool_name, input, ctx).await
+        } else {
             self.router.dispatch(tool_name, input, ctx).await
         }
     }
@@ -51,19 +74,18 @@ impl ToolCallRuntime {
         calls: Vec<(String, serde_json::Value)>,
         ctx: &ToolContext,
     ) -> Vec<Result<ToolOutput, ToolError>> {
-        // Partition into parallel and sequential
         let (parallel, sequential): (Vec<_>, Vec<_>) = calls
             .into_iter()
             .partition(|(name, _)| self.router.tool_supports_parallel(name));
 
         let mut results = Vec::new();
 
-        // Execute parallel tools concurrently
         if !parallel.is_empty() {
             let _guard = self.parallel_lock.read().await;
             let handles: Vec<_> = parallel
                 .into_iter()
                 .map(|(name, input)| {
+                    let orchestrator = self.orchestrator.clone();
                     let router = self.router.clone();
                     let ctx = ToolContext {
                         cwd: ctx.cwd.clone(),
@@ -73,7 +95,13 @@ impl ToolCallRuntime {
                         sandbox_type: ctx.sandbox_type,
                         sandbox_policy: ctx.sandbox_policy.clone(),
                     };
-                    tokio::spawn(async move { router.dispatch(&name, input, &ctx).await })
+                    tokio::spawn(async move {
+                        if let Some(ref orch) = orchestrator {
+                            orch.run(&name, input, &ctx).await
+                        } else {
+                            router.dispatch(&name, input, &ctx).await
+                        }
+                    })
                 })
                 .collect();
 
@@ -86,10 +114,9 @@ impl ToolCallRuntime {
             }
         }
 
-        // Execute sequential tools one at a time
         for (name, input) in sequential {
             let _guard = self.parallel_lock.write().await;
-            results.push(self.router.dispatch(&name, input, ctx).await);
+            results.push(self.dispatch_tool(&name, input, ctx).await);
         }
 
         results
@@ -107,7 +134,6 @@ impl ToolCallRuntime {
         calls: Vec<(String, String, serde_json::Value)>, // (id, name, input)
         ctx: &ToolContext,
     ) -> Vec<(String, Result<ToolOutput, ToolError>)> {
-        // Partition into parallel and sequential while preserving IDs
         let (parallel, sequential): (Vec<_>, Vec<_>) = calls
             .into_iter()
             .enumerate()
@@ -117,12 +143,12 @@ impl ToolCallRuntime {
         let mut indexed_results: Vec<(usize, String, Result<ToolOutput, ToolError>)> =
             Vec::with_capacity(total_count);
 
-        // Execute parallel tools: spawn for true parallelism, join_all for concurrent collection
         if !parallel.is_empty() {
             let _guard = self.parallel_lock.read().await;
             let (metadata, handles): (Vec<_>, Vec<_>) = parallel
                 .into_iter()
                 .map(|(idx, (id, name, input))| {
+                    let orchestrator = self.orchestrator.clone();
                     let router = self.router.clone();
                     let ctx = ToolContext {
                         cwd: ctx.cwd.clone(),
@@ -132,8 +158,13 @@ impl ToolCallRuntime {
                         sandbox_type: ctx.sandbox_type,
                         sandbox_policy: ctx.sandbox_policy.clone(),
                     };
-                    let handle =
-                        tokio::spawn(async move { router.dispatch(&name, input, &ctx).await });
+                    let handle = tokio::spawn(async move {
+                        if let Some(ref orch) = orchestrator {
+                            orch.run(&name, input, &ctx).await
+                        } else {
+                            router.dispatch(&name, input, &ctx).await
+                        }
+                    });
                     ((idx, id), handle)
                 })
                 .unzip();
@@ -149,17 +180,14 @@ impl ToolCallRuntime {
             }
         }
 
-        // Execute sequential tools one at a time
         for (idx, (id, name, input)) in sequential {
             let _guard = self.parallel_lock.write().await;
-            let result = self.router.dispatch(&name, input, ctx).await;
+            let result = self.dispatch_tool(&name, input, ctx).await;
             indexed_results.push((idx, id, result));
         }
 
-        // Sort by original index to preserve order
         indexed_results.sort_by_key(|(idx, _, _)| *idx);
 
-        // Return just (id, result)
         indexed_results
             .into_iter()
             .map(|(_, id, result)| (id, result))

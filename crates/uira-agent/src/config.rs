@@ -57,6 +57,10 @@ pub struct AgentConfig {
     /// Permission rules for tool execution
     #[serde(default)]
     pub permission_rules: Vec<PermissionRuleConfig>,
+
+    /// Directory for caching approval decisions
+    #[serde(default)]
+    pub cache_directory: Option<PathBuf>,
 }
 
 fn default_system_prompt_option() -> Option<String> {
@@ -121,6 +125,7 @@ impl Default for AgentConfig {
             model: None,
             system_prompt: Some(default_system_prompt()),
             permission_rules: Vec::new(),
+            cache_directory: None,
         }
     }
 }

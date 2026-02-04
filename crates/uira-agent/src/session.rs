@@ -107,7 +107,10 @@ impl Session {
         }
 
         let session_id = SessionId::new();
-        let approval_cache = ApprovalCache::new(session_id.to_string());
+        let mut approval_cache = ApprovalCache::new(session_id.to_string());
+        if let Some(ref cache_dir) = config.cache_directory {
+            approval_cache = approval_cache.with_persistence(cache_dir.clone());
+        }
         orchestrator = orchestrator.with_approval_cache(approval_cache);
         tracing::debug!("approval_cache_wired");
 
@@ -247,6 +250,15 @@ impl Session {
 
     pub fn generate_fork_title(&self, base_title: &str) -> String {
         format!("{} (fork #{})", base_title, self.fork_count.max(1))
+    }
+
+    pub async fn save_approval_cache(&self) {
+        if let Some(cache) = self.orchestrator.approval_cache() {
+            let cache = cache.read().await;
+            if let Err(e) = cache.save() {
+                tracing::warn!(error = %e, "failed to save approval cache");
+            }
+        }
     }
 }
 
