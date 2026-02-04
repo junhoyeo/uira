@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
-use uira_protocol::{AgentState, Item, ThreadEvent};
+use uira_protocol::{AgentState, Item, ThreadEvent, TodoItem, TodoStatus};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -210,6 +210,7 @@ pub struct App {
     agent_input_tx: Option<mpsc::Sender<String>>,
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
+    todos: Vec<TodoItem>,
 }
 
 impl App {
@@ -233,6 +234,7 @@ impl App {
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
+            todos: Vec::new(),
         }
     }
 
@@ -324,23 +326,28 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        // Main layout: Chat area, Status bar, Input area
+        let main_area = if !self.todos.is_empty() {
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
+                .split(area);
+            self.render_todo_sidebar(frame, h_chunks[1]);
+            h_chunks[0]
+        } else {
+            area
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(3),    // Chat
-                Constraint::Length(1), // Status
-                Constraint::Length(3), // Input
+                Constraint::Min(3),
+                Constraint::Length(1),
+                Constraint::Length(3),
             ])
-            .split(area);
+            .split(main_area);
 
-        // Render chat
         self.render_chat(frame, chunks[0]);
-
-        // Render status bar
         self.render_status(frame, chunks[1]);
-
-        // Render input
         self.render_input(frame, chunks[2]);
 
         // Render approval overlay on top if active
@@ -501,6 +508,57 @@ impl App {
 
         frame.render_widget(block, area);
         frame.render_widget(input_paragraph, inner);
+    }
+
+    fn render_todo_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let completed = self
+            .todos
+            .iter()
+            .filter(|t| t.status == TodoStatus::Completed)
+            .count();
+        let total = self.todos.len();
+        let title = format!(" Todos ({}/{}) ", completed, total);
+
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Yellow));
+
+        let inner = block.inner(area);
+        let max_width = inner.width.saturating_sub(1) as usize;
+
+        let items: Vec<ListItem> = self
+            .todos
+            .iter()
+            .map(|todo| {
+                let (indicator, color) = match todo.status {
+                    TodoStatus::Completed => ("✓", Color::Green),
+                    TodoStatus::InProgress => ("•", Color::Yellow),
+                    TodoStatus::Cancelled => ("✗", Color::DarkGray),
+                    TodoStatus::Pending => (" ", Color::Gray),
+                };
+
+                let prefix = format!("[{}] ", indicator);
+                let content = if prefix.len() + todo.content.len() > max_width
+                    && max_width > prefix.len() + 3
+                {
+                    format!(
+                        "{}...",
+                        &todo.content[..max_width.saturating_sub(prefix.len() + 3)]
+                    )
+                } else {
+                    todo.content.clone()
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(color)),
+                    Span::styled(content, Style::default().fg(color)),
+                ]))
+            })
+            .collect();
+
+        let list = List::new(items).block(block);
+        frame.render_widget(list, area);
     }
 
     fn scroll_up(&mut self) {
@@ -781,9 +839,10 @@ impl App {
                 self.approval_overlay.enqueue(request);
                 self.agent_state = AgentState::WaitingForApproval;
             }
-            AppEvent::Redraw => {
-                // Force redraw (handled automatically)
+            AppEvent::TodoUpdated(todos) => {
+                self.todos = todos;
             }
+            AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
                 self.push_message("system", format!("Error: {}", msg));
@@ -1000,6 +1059,16 @@ impl App {
             ThreadEvent::ModelSwitched { model, provider } => {
                 self.status = format!("Model: {}/{}", provider, model);
                 self.push_message("system", format!("Switched to {}/{}", provider, model));
+            }
+            ThreadEvent::TodoUpdated { todos } => {
+                let pending = todos
+                    .iter()
+                    .filter(|t| {
+                        t.status != TodoStatus::Completed && t.status != TodoStatus::Cancelled
+                    })
+                    .count();
+                self.status = format!("{} todos ({} remaining)", todos.len(), pending);
+                self.todos = todos;
             }
             _ => {
                 tracing::debug!("Unhandled ThreadEvent variant");

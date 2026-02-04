@@ -128,6 +128,9 @@ pub enum ThreadEvent {
         token_count_after: usize,
         messages_removed: usize,
     },
+
+    /// Todo list was updated
+    TodoUpdated { todos: Vec<crate::TodoItem> },
 }
 
 /// Item types that can be processed

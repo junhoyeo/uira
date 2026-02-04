@@ -12,6 +12,7 @@ pub enum EventCategory {
     Content,
     Goal,
     Background,
+    Todo,
     System,
 }
 
@@ -215,6 +216,14 @@ pub enum Event {
     },
 
     // ============================================================================
+    // Todo Events
+    // ============================================================================
+    TodoUpdated {
+        session_id: String,
+        todos: Vec<uira_protocol::TodoItem>,
+    },
+
+    // ============================================================================
     // System Events
     // ============================================================================
     ModelSwitched {
@@ -277,6 +286,8 @@ impl Event {
                 EventCategory::System
             }
 
+            Self::TodoUpdated { .. } => EventCategory::Todo,
+
             Self::ModelSwitched { .. } | Self::Error { .. } | Self::MessagesTransform { .. } => {
                 EventCategory::System
             }
@@ -312,7 +323,8 @@ impl Event {
             | Self::CompactionCompleted { session_id, .. }
             | Self::ModelSwitched { session_id, .. }
             | Self::Error { session_id, .. }
-            | Self::MessagesTransform { session_id } => Some(session_id),
+            | Self::MessagesTransform { session_id }
+            | Self::TodoUpdated { session_id, .. } => Some(session_id),
 
             Self::BackgroundTaskSpawned { .. }
             | Self::BackgroundTaskProgress { .. }
@@ -353,6 +365,7 @@ impl Event {
             Self::ModelSwitched { .. } => "model_switched",
             Self::Error { .. } => "error",
             Self::MessagesTransform { .. } => "messages_transform",
+            Self::TodoUpdated { .. } => "todo_updated",
         }
     }
 }

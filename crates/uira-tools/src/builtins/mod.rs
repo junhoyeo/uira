@@ -8,6 +8,7 @@ mod edit;
 mod glob;
 mod grep;
 mod read;
+pub mod todo;
 mod write;
 
 pub use bash::BashTool;
@@ -15,12 +16,12 @@ pub use edit::EditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use read::ReadTool;
+pub use todo::{TodoReadTool, TodoStore, TodoWriteTool};
 pub use write::WriteTool;
 
 use crate::{BoxedTool, ToolRouter};
 use std::sync::Arc;
 
-/// Register all built-in tools with the router
 pub fn register_builtins(router: &mut ToolRouter) {
     router.register(BashTool::new());
     router.register(ReadTool::new());
@@ -30,14 +31,18 @@ pub fn register_builtins(router: &mut ToolRouter) {
     router.register(GrepTool::new());
 }
 
-/// Create a router with all built-in tools registered
+pub fn register_builtins_with_todos(router: &mut ToolRouter, store: TodoStore) {
+    register_builtins(router);
+    router.register(TodoWriteTool::new(store.clone()));
+    router.register(TodoReadTool::new(store));
+}
+
 pub fn create_builtin_router() -> ToolRouter {
     let mut router = ToolRouter::new();
     register_builtins(&mut router);
     router
 }
 
-/// Get all built-in tools as boxed tools
 pub fn builtin_tools() -> Vec<BoxedTool> {
     vec![
         Arc::new(BashTool::new()),
