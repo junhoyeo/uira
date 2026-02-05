@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
-use uira_protocol::{AgentState, Item, ThreadEvent, TodoItem, TodoStatus};
+use uira_protocol::{AgentState, Item, ThreadEvent, TodoItem, TodoPriority, TodoStatus};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -531,14 +531,23 @@ impl App {
             .todos
             .iter()
             .map(|todo| {
-                let (indicator, color) = match todo.status {
+                let (indicator, status_color) = match todo.status {
                     TodoStatus::Completed => ("✓", Color::Green),
                     TodoStatus::InProgress => ("•", Color::Yellow),
                     TodoStatus::Cancelled => ("✗", Color::DarkGray),
                     TodoStatus::Pending => (" ", Color::Gray),
                 };
 
-                let prefix = format!("[{}] ", indicator);
+                // Priority marker and color override
+                let (priority_marker, color) = match (todo.status, todo.priority) {
+                    (TodoStatus::Completed, _) => ("", status_color),
+                    (TodoStatus::Cancelled, _) => ("", status_color),
+                    (_, TodoPriority::High) => ("⚡ ", Color::Red),
+                    (_, TodoPriority::Medium) => ("• ", Color::Yellow),
+                    (_, TodoPriority::Low) => ("", status_color),
+                };
+
+                let prefix = format!("[{}] {}", indicator, priority_marker);
                 let content = if prefix.len() + todo.content.len() > max_width
                     && max_width > prefix.len() + 3
                 {
