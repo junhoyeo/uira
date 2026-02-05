@@ -30,14 +30,12 @@ pub use hooks::{
         WORKING_MEMORY_HEADER,
     },
     persistent_mode::{
-        check_persistent_modes, reset_todo_continuation_attempts, PersistentMode,
-        PersistentModeHook, PersistentModeMetadata, PersistentModeResult,
+        check_persistent_modes, PersistentMode, PersistentModeHook, PersistentModeMetadata,
+        PersistentModeResult,
     },
     ralph::{CompletionSignal, CompletionSignals, RalphHook, RalphOptions, RalphState, SignalType},
     think_mode::{ThinkModeHook, ThinkModeState, ThinkingConfig, THINKING_CONFIGS},
-    todo_continuation::{
-        IncompleteTodosResult, StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
-    },
+    todo_continuation::{IncompleteTodosResult, StopContext, TodoContinuationHook},
     ultrapilot::{
         FileOwnership, IntegrationResult, UltrapilotConfig, UltrapilotHook, UltrapilotState,
         WorkerState, WorkerStatus,

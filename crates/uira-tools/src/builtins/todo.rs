@@ -35,6 +35,29 @@ impl TodoStore {
         map.get(session_id).cloned().unwrap_or_default()
     }
 
+    pub async fn has_incomplete(&self, session_id: &str) -> bool {
+        let todos = self.get(session_id).await;
+        todos
+            .iter()
+            .any(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+    }
+
+    pub async fn incomplete_count(&self, session_id: &str) -> usize {
+        let todos = self.get(session_id).await;
+        todos
+            .iter()
+            .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+            .count()
+    }
+
+    pub async fn incomplete_items(&self, session_id: &str) -> Vec<TodoItem> {
+        let todos = self.get(session_id).await;
+        todos
+            .into_iter()
+            .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+            .collect()
+    }
+
     pub async fn update(&self, session_id: &str, todos: Vec<TodoItem>) {
         {
             let mut map = self.inner.write().await;
@@ -611,5 +634,106 @@ mod tests {
         let info = store.session_todo_info("nonexistent").await;
         assert!(!info.has_todos);
         assert_eq!(info.total, 0);
+    }
+
+    #[tokio::test]
+    async fn test_has_incomplete() {
+        let store = TodoStore::new();
+        assert!(!store.has_incomplete("ses_test").await);
+
+        let items = vec![
+            TodoItem {
+                id: "1".to_string(),
+                content: "Done".to_string(),
+                status: TodoStatus::Completed,
+                priority: TodoPriority::Medium,
+            },
+            TodoItem {
+                id: "2".to_string(),
+                content: "Pending".to_string(),
+                status: TodoStatus::Pending,
+                priority: TodoPriority::High,
+            },
+        ];
+        store.update("ses_test", items).await;
+        assert!(store.has_incomplete("ses_test").await);
+
+        let all_done = vec![TodoItem {
+            id: "1".to_string(),
+            content: "Done".to_string(),
+            status: TodoStatus::Completed,
+            priority: TodoPriority::Medium,
+        }];
+        store.update("ses_done", all_done).await;
+        assert!(!store.has_incomplete("ses_done").await);
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_count() {
+        let store = TodoStore::new();
+        assert_eq!(store.incomplete_count("ses_test").await, 0);
+
+        let items = vec![
+            TodoItem {
+                id: "1".to_string(),
+                content: "Done".to_string(),
+                status: TodoStatus::Completed,
+                priority: TodoPriority::Medium,
+            },
+            TodoItem {
+                id: "2".to_string(),
+                content: "Pending".to_string(),
+                status: TodoStatus::Pending,
+                priority: TodoPriority::High,
+            },
+            TodoItem {
+                id: "3".to_string(),
+                content: "Working".to_string(),
+                status: TodoStatus::InProgress,
+                priority: TodoPriority::High,
+            },
+            TodoItem {
+                id: "4".to_string(),
+                content: "Cancelled".to_string(),
+                status: TodoStatus::Cancelled,
+                priority: TodoPriority::Low,
+            },
+        ];
+        store.update("ses_test", items).await;
+        assert_eq!(store.incomplete_count("ses_test").await, 2);
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_items() {
+        let store = TodoStore::new();
+        assert_eq!(store.incomplete_items("ses_test").await.len(), 0);
+
+        let items = vec![
+            TodoItem {
+                id: "1".to_string(),
+                content: "Done".to_string(),
+                status: TodoStatus::Completed,
+                priority: TodoPriority::Medium,
+            },
+            TodoItem {
+                id: "2".to_string(),
+                content: "Pending".to_string(),
+                status: TodoStatus::Pending,
+                priority: TodoPriority::High,
+            },
+            TodoItem {
+                id: "3".to_string(),
+                content: "Working".to_string(),
+                status: TodoStatus::InProgress,
+                priority: TodoPriority::High,
+            },
+        ];
+        store.update("ses_test", items).await;
+
+        let incomplete = store.incomplete_items("ses_test").await;
+        assert_eq!(incomplete.len(), 2);
+        assert!(incomplete.iter().any(|t| t.content == "Pending"));
+        assert!(incomplete.iter().any(|t| t.content == "Working"));
+        assert!(!incomplete.iter().any(|t| t.content == "Done"));
     }
 }

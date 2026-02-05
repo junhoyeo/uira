@@ -66,7 +66,7 @@ use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState};
-use crate::hooks::todo_continuation::{IncompleteTodosResult, TodoContinuationHook};
+use crate::hooks::todo_continuation::TodoContinuationHook;
 use crate::hooks::ultrawork::UltraworkHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
 
@@ -691,15 +691,15 @@ impl RalphHook {
     pub fn detect_completion_signals(
         text: &str,
         promise: &str,
-        todo_result: Option<&IncompleteTodosResult>,
+        todo_counts: Option<(usize, usize)>,
     ) -> CompletionSignals {
-        Self::detect_completion_signals_with_goals(text, promise, todo_result, None)
+        Self::detect_completion_signals_with_goals(text, promise, todo_counts, None)
     }
 
     pub fn detect_completion_signals_with_goals(
         text: &str,
         promise: &str,
-        todo_result: Option<&IncompleteTodosResult>,
+        todo_counts: Option<(usize, usize)>,
         goals_result: Option<&uira_goals::VerificationResult>,
     ) -> CompletionSignals {
         let mut signals = CompletionSignals::default();
@@ -749,14 +749,10 @@ impl RalphHook {
             evidence: None,
         });
 
-        let (todo_detected, todo_evidence) = if let Some(result) = todo_result {
+        let (todo_detected, todo_evidence) = if let Some((incomplete, total)) = todo_counts {
             (
-                result.count == 0 && result.total > 0,
-                Some(format!(
-                    "{}/{} complete",
-                    result.total - result.count,
-                    result.total
-                )),
+                incomplete == 0 && total > 0,
+                Some(format!("{}/{} complete", total - incomplete, total)),
             )
         } else {
             (false, None)
@@ -1053,10 +1049,16 @@ impl Hook for RalphHook {
 
                 let goals_result = Self::check_goals_from_config(&context.directory).await;
 
+                let todo_counts = if todo_result.total > 0 {
+                    Some((todo_result.count, todo_result.total))
+                } else {
+                    None
+                };
+
                 let signals = Self::detect_completion_signals_with_goals(
                     &last_response,
                     &state.completion_promise,
-                    Some(&todo_result),
+                    todo_counts,
                     goals_result.as_ref(),
                 );
 

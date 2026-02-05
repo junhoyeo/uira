@@ -247,6 +247,15 @@ pub struct TodoItem {
     pub priority: TodoPriority,
 }
 
+/// Prompt injected when todo continuation is triggered
+pub const TODO_CONTINUATION_PROMPT: &str = r#"[SYSTEM REMINDER - TODO CONTINUATION]
+
+Incomplete tasks remain in your todo list. Continue working on the next pending task.
+
+- Proceed without asking for permission
+- Mark each task complete when finished
+- Do not stop until all tasks are done"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;

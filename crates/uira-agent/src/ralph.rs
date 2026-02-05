@@ -10,8 +10,8 @@ use std::path::Path;
 use uira_goals::VerificationResult;
 use uira_hooks::hooks::circuit_breaker::CircuitBreakerConfig;
 use uira_hooks::hooks::ralph::{RalphHook, RalphOptions, RalphState};
-use uira_hooks::hooks::todo_continuation::TodoContinuationHook;
-use uira_protocol::ThreadEvent;
+use uira_protocol::{ThreadEvent, TodoStatus};
+use uira_tools::TodoStore;
 
 /// Ralph mode configuration
 pub struct RalphConfig {
@@ -42,6 +42,7 @@ pub struct RalphController {
     config: RalphConfig,
     directory: String,
     event_tx: Option<EventSender>,
+    todo_store: TodoStore,
 }
 
 /// Decision from ralph completion check
@@ -61,6 +62,7 @@ impl RalphController {
         session_id: Option<&str>,
         directory: &str,
         config: RalphConfig,
+        todo_store: TodoStore,
     ) -> Option<Self> {
         let options = RalphOptions {
             max_iterations: config.max_iterations,
@@ -84,11 +86,12 @@ impl RalphController {
             config,
             directory: directory.to_string(),
             event_tx: None,
+            todo_store,
         })
     }
 
     /// Load existing ralph state
-    pub fn load(directory: &str) -> Option<Self> {
+    pub fn load(directory: &str, todo_store: TodoStore) -> Option<Self> {
         let state = RalphHook::read_state(Some(directory))?;
         if !state.active {
             return None;
@@ -105,6 +108,7 @@ impl RalphController {
             state,
             directory: directory.to_string(),
             event_tx: None,
+            todo_store,
         })
     }
 
@@ -144,13 +148,24 @@ impl RalphController {
         }
 
         // Check todos
-        let todo_result = TodoContinuationHook::check_incomplete_todos(None, &self.directory, None);
+        let session_id = self.state.session_id.as_deref().unwrap_or("");
+        let todos = self.todo_store.get(session_id).await;
+        let incomplete_count = todos
+            .iter()
+            .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
+            .count();
+        let total = todos.len();
+        let todo_counts = if total > 0 {
+            Some((incomplete_count, total))
+        } else {
+            None
+        };
 
         // Detect completion signals
         let signals = RalphHook::detect_completion_signals_with_goals(
             response_text,
             &self.state.completion_promise,
-            Some(&todo_result),
+            todo_counts,
             goals_result,
         );
 

@@ -20,7 +20,6 @@ use crate::{
     events::{EventSender, EventStream},
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
-    todo_continuation::TodoContinuationEnforcer,
     AgentCommand, AgentConfig, AgentControl, AgentLoopError, CommandReceiver, CommandSender,
     Session,
 };
@@ -41,7 +40,6 @@ pub struct Agent {
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
     keyword_detector: KeywordDetectorHook,
-    todo_enforcer: TodoContinuationEnforcer,
     last_tool_output: Option<String>,
 }
 
@@ -55,9 +53,6 @@ impl Agent {
         client: Arc<dyn ModelClient>,
         executor: Option<Arc<dyn uira_tools::AgentExecutor>>,
     ) -> Self {
-        let todo_enforcer = TodoContinuationEnforcer::new()
-            .enabled(config.todo_continuation)
-            .with_max_attempts(config.max_continuation_attempts);
         Self {
             session: Session::new_with_executor(config, client, executor),
             control: AgentControl::default(),
@@ -71,7 +66,6 @@ impl Agent {
             approval_tx: None,
             command_rx: None,
             keyword_detector: KeywordDetectorHook::new(),
-            todo_enforcer,
             last_tool_output: None,
         }
     }
@@ -192,10 +186,8 @@ impl Agent {
                 break;
             }
 
-            // Reset continuation enforcer on genuine user input
-            self.todo_enforcer.reset();
-
             let mut current_prompt = prompt;
+            let mut continuation_attempts: usize = 0;
             loop {
                 let (was_error, was_cancel) = match self.run(&current_prompt).await {
                     Ok(result) => {
@@ -223,29 +215,45 @@ impl Agent {
                 };
 
                 // Check todo continuation: if incomplete todos remain, auto-inject prompt
-                let todos = self
-                    .session
-                    .todo_store
-                    .get(&self.session.id.to_string())
-                    .await;
-                if let Some(continuation) = self
-                    .todo_enforcer
-                    .check_and_generate_prompt(&todos, was_error, was_cancel)
-                {
+                let should_continue = self.session.config.todo_continuation
+                    && !was_error
+                    && !was_cancel
+                    && continuation_attempts < self.session.config.max_continuation_attempts
+                    && self
+                        .session
+                        .todo_store
+                        .has_incomplete(&self.session.id.to_string())
+                        .await;
+
+                if should_continue {
+                    continuation_attempts += 1;
+                    let incomplete_count = self
+                        .session
+                        .todo_store
+                        .incomplete_count(&self.session.id.to_string())
+                        .await;
+                    let total = self
+                        .session
+                        .todo_store
+                        .get(&self.session.id.to_string())
+                        .await
+                        .len();
+
                     self.emit_event(ThreadEvent::ContentDelta {
                         delta: format!(
                             "\n[Todo continuation: {} incomplete tasks, auto-resuming...]\n",
-                            todos
-                                .iter()
-                                .filter(|t| {
-                                    t.status != uira_protocol::TodoStatus::Completed
-                                        && t.status != uira_protocol::TodoStatus::Cancelled
-                                })
-                                .count()
+                            incomplete_count
                         ),
                     })
                     .await;
-                    current_prompt = continuation;
+
+                    current_prompt = format!(
+                        "{}\n\n[Status: {}/{} completed, {} remaining]",
+                        uira_protocol::TODO_CONTINUATION_PROMPT,
+                        total - incomplete_count,
+                        total,
+                        incomplete_count
+                    );
                     continue;
                 }
 

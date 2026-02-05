@@ -89,8 +89,8 @@ pub use orchestrator_constants::{
     SINGLE_TASK_DIRECTIVE, VERIFICATION_REMINDER, WARNED_EXTENSIONS, WRITE_EDIT_TOOLS,
 };
 pub use persistent_mode::{
-    check_persistent_modes, reset_todo_continuation_attempts, PersistentMode, PersistentModeHook,
-    PersistentModeMetadata, PersistentModeResult,
+    check_persistent_modes, PersistentMode, PersistentModeHook, PersistentModeMetadata,
+    PersistentModeResult,
 };
 pub use plugin_patterns::{
     format_file, get_auto_format_message, get_formatter, get_linter,
@@ -127,9 +127,7 @@ pub use thinking_block_validator::{
     ValidationStats, CONTENT_PART_TYPES, DEFAULT_THINKING_CONTENT, HOOK_NAME as THINKING_HOOK_NAME,
     PREVENTED_ERROR, SYNTHETIC_THINKING_ID_PREFIX, THINKING_MODEL_PATTERNS, THINKING_PART_TYPES,
 };
-pub use todo_continuation::{
-    IncompleteTodosResult, StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
-};
+pub use todo_continuation::{IncompleteTodosResult, StopContext, TodoContinuationHook};
 pub use uira_orchestrator::{UiraOrchestratorHook, HOOK_NAME as UIRA_ORCHESTRATOR_HOOK_NAME};
 pub use ultrapilot::{
     FileOwnership, IntegrationResult, UltrapilotConfig, UltrapilotHook, UltrapilotState,

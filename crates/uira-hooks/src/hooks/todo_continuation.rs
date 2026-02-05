@@ -188,34 +188,6 @@ impl TodoContinuationHook {
         Vec::new()
     }
 
-    /// Check for incomplete todos from in-memory items (e.g., from TodoStore).
-    pub fn check_incomplete_from_items(
-        items: &[TodoItem],
-        stop_context: Option<&StopContext>,
-    ) -> IncompleteTodosResult {
-        if let Some(ctx) = stop_context {
-            if ctx.is_user_abort() {
-                return IncompleteTodosResult {
-                    count: 0,
-                    todos: Vec::new(),
-                    total: 0,
-                };
-            }
-        }
-
-        let incomplete: Vec<TodoItem> = items
-            .iter()
-            .filter(|t| matches!(t.status, TodoStatus::Pending | TodoStatus::InProgress))
-            .cloned()
-            .collect();
-
-        IncompleteTodosResult {
-            count: incomplete.len(),
-            todos: incomplete,
-            total: items.len(),
-        }
-    }
-
     /// Check for incomplete todos across all filesystem locations.
     pub fn check_incomplete_todos(
         session_id: Option<&str>,
@@ -264,34 +236,6 @@ impl TodoContinuationHook {
             total: all_todos.len(),
         }
     }
-
-    pub fn get_next_pending_todo(result: &IncompleteTodosResult) -> Option<&TodoItem> {
-        if let Some(todo) = result
-            .todos
-            .iter()
-            .find(|t| t.status == TodoStatus::InProgress)
-        {
-            return Some(todo);
-        }
-
-        result
-            .todos
-            .iter()
-            .find(|t| t.status == TodoStatus::Pending)
-    }
-
-    pub fn format_todo_status(result: &IncompleteTodosResult) -> String {
-        if result.count == 0 {
-            return format!("All tasks complete ({} total)", result.total);
-        }
-
-        format!(
-            "{}/{} completed, {} remaining",
-            result.total - result.count,
-            result.total,
-            result.count
-        )
-    }
 }
 
 impl Default for TodoContinuationHook {
@@ -299,14 +243,6 @@ impl Default for TodoContinuationHook {
         Self::new()
     }
 }
-
-pub const TODO_CONTINUATION_PROMPT: &str = r#"[SYSTEM REMINDER - TODO CONTINUATION]
-
-Incomplete tasks remain in your todo list. Continue working on the next pending task.
-
-- Proceed without asking for permission
-- Mark each task complete when finished
-- Do not stop until all tasks are done"#;
 
 #[cfg(test)]
 mod tests {
@@ -370,74 +306,5 @@ mod tests {
 
         let ctx = StopContext::default();
         assert!(!ctx.is_user_abort());
-    }
-
-    #[test]
-    fn test_format_todo_status() {
-        let result = IncompleteTodosResult {
-            count: 3,
-            todos: Vec::new(),
-            total: 10,
-        };
-        assert_eq!(
-            TodoContinuationHook::format_todo_status(&result),
-            "7/10 completed, 3 remaining"
-        );
-
-        let result = IncompleteTodosResult {
-            count: 0,
-            todos: Vec::new(),
-            total: 5,
-        };
-        assert_eq!(
-            TodoContinuationHook::format_todo_status(&result),
-            "All tasks complete (5 total)"
-        );
-    }
-
-    #[test]
-    fn test_get_next_pending_todo() {
-        let todos = vec![
-            make_item("1", "First pending", TodoStatus::Pending),
-            make_item("2", "In progress", TodoStatus::InProgress),
-            make_item("3", "Second pending", TodoStatus::Pending),
-        ];
-
-        let result = IncompleteTodosResult {
-            count: 3,
-            todos,
-            total: 3,
-        };
-
-        let next = TodoContinuationHook::get_next_pending_todo(&result);
-        assert!(next.is_some());
-        assert_eq!(next.unwrap().content, "In progress");
-    }
-
-    #[test]
-    fn test_check_incomplete_from_items() {
-        let items = vec![
-            make_item("1", "Done", TodoStatus::Completed),
-            make_item("2", "Pending", TodoStatus::Pending),
-            make_item("3", "Working", TodoStatus::InProgress),
-            make_item("4", "Cancelled", TodoStatus::Cancelled),
-        ];
-
-        let result = TodoContinuationHook::check_incomplete_from_items(&items, None);
-        assert_eq!(result.count, 2);
-        assert_eq!(result.total, 4);
-        assert_eq!(result.todos.len(), 2);
-    }
-
-    #[test]
-    fn test_check_incomplete_from_items_respects_user_abort() {
-        let items = vec![make_item("1", "Pending", TodoStatus::Pending)];
-
-        let ctx = StopContext {
-            stop_reason: None,
-            user_requested: Some(true),
-        };
-        let result = TodoContinuationHook::check_incomplete_from_items(&items, Some(&ctx));
-        assert_eq!(result.count, 0);
     }
 }
