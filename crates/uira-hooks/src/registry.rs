@@ -140,6 +140,9 @@ pub fn default_hooks() -> HookRegistry {
     registry.register(Arc::new(DirectoryReadmeInjectorHook::new(
         std::env::current_dir().unwrap_or_default(),
     )));
+    registry.register(Arc::new(DirectoryAgentsInjectorHook::new(
+        std::env::current_dir().unwrap_or_default(),
+    )));
     registry.register(Arc::new(EmptyMessageSanitizerHook::new()));
     registry.register(Arc::new(KeywordDetectorHook::new()));
     registry.register(Arc::new(LearnerHook::new()));

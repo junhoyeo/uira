@@ -5,6 +5,7 @@ pub mod background_notification;
 pub mod circuit_breaker;
 pub mod comment_checker;
 pub mod delegation_enforcer;
+pub mod directory_agents_injector;
 pub mod directory_readme_injector;
 pub mod empty_message_sanitizer;
 pub mod keyword_detector;
@@ -50,6 +51,11 @@ pub use background_notification::{
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
 pub use comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME};
 pub use delegation_enforcer::{DelegationEnforcerHook, HOOK_NAME as DELEGATION_ENFORCER_HOOK_NAME};
+pub use directory_agents_injector::{
+    clear_agents_injected_paths, get_agents_for_path, load_agents_injected_paths,
+    save_agents_injected_paths, AgentsInjectedPathsData, DirectoryAgentsInjectorHook,
+    AGENTS_FILENAME, TRACKED_TOOLS as AGENTS_TRACKED_TOOLS,
+};
 pub use directory_readme_injector::{
     clear_injected_paths, get_readmes_for_path, load_injected_paths, save_injected_paths,
     DirectoryReadmeInjectorHook, InjectedPathsData, README_FILENAME, TRACKED_TOOLS,
