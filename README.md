@@ -95,6 +95,7 @@ Credentials are securely stored in `~/.uira/credentials/`.
 | `/help`, `/h`, `/?` | Show available commands |
 | `/models` | Open model selector (keyboard-driven) |
 | `/model <name>` | Switch to a specific model |
+| `/share [--public] [--description <text>]` | Share current session as a GitHub Gist |
 | `/clear` | Clear chat history |
 | `/status`, `/auth` | Show connection status |
 | `/exit`, `/quit`, `/q` | Exit the application |
