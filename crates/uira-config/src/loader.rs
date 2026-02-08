@@ -189,14 +189,15 @@ fn expand_goals_settings(mut goals: crate::schema::GoalsConfig) -> crate::schema
 }
 
 fn expand_mcp_settings(mut mcp: crate::schema::McpSettings) -> crate::schema::McpSettings {
-    for server in mcp.servers.values_mut() {
-        server.command = expand_env_string(&server.command);
-        server.args = server
+    for server in mcp.servers.iter_mut() {
+        server.config.command = expand_env_string(&server.config.command);
+        server.config.args = server
+            .config
             .args
             .iter()
             .map(|arg| expand_env_string(arg))
             .collect();
-        for value in server.env.values_mut() {
+        for value in server.config.env.values_mut() {
             *value = expand_env_string(value);
         }
     }
