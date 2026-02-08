@@ -102,8 +102,6 @@ pub struct Component {
     pub can_parallelize: bool,
     /// Components this depends on (must complete first)
     pub dependencies: Vec<String>,
-    /// Estimated effort/complexity (0-1)
-    pub effort: f64,
     /// Technologies used by this component
     pub technologies: Vec<String>,
 }
