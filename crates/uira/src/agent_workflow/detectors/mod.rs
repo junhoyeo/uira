@@ -20,7 +20,7 @@ pub struct Issue {
     pub line: usize,
     pub col: usize,
     pub byte_offset: usize,
-    pub message: String,          // e.g., "mispelled"
+    pub message: String,          // e.g., "misspelled"
     pub suggestions: Vec<String>, // e.g., ["misspelled"]
     pub context: Option<String>,  // surrounding line text
 }
