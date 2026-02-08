@@ -1,6 +1,7 @@
 //! CLI commands
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 /// Uira - Native AI Coding Agent
 #[derive(Parser, Debug)]
@@ -8,7 +9,7 @@ use clap::{Parser, Subcommand};
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Prompt to execute (interactive mode if omitted)
-    #[arg(trailing_var_arg = true)]
+    #[arg(allow_hyphen_values = true)]
     pub prompt: Vec<String>,
 
     /// Model to use (e.g., claude-sonnet-4-20250514, gpt-4o)
@@ -102,6 +103,13 @@ pub enum Commands {
     Tasks {
         #[command(subcommand)]
         command: TasksCommands,
+    },
+
+    /// Generate shell completion scripts
+    Completion {
+        /// Shell to generate completion for
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
 
@@ -197,6 +205,28 @@ impl Cli {
             None
         } else {
             Some(self.prompt.join(" "))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+    use clap_complete::generate;
+
+    #[test]
+    fn generates_completion_for_all_supported_shells() {
+        for shell in [
+            clap_complete::Shell::Bash,
+            clap_complete::Shell::Zsh,
+            clap_complete::Shell::Fish,
+            clap_complete::Shell::PowerShell,
+        ] {
+            let mut cmd = Cli::command();
+            let mut output = Vec::new();
+            generate(shell, &mut cmd, "uira-agent", &mut output);
+            assert!(!output.is_empty());
         }
     }
 }

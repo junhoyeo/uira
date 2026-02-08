@@ -1,6 +1,7 @@
 //! Uira - Native AI Coding Agent
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use std::sync::Arc;
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
@@ -45,6 +46,7 @@ async fn main() {
         Some(Commands::Config { command }) => run_config(command, &config).await,
         Some(Commands::Goals { command }) => run_goals(command).await,
         Some(Commands::Tasks { command }) => run_tasks(command).await,
+        Some(Commands::Completion { shell }) => run_completion(*shell),
         None => {
             if let Some(prompt) = cli.get_prompt() {
                 run_exec(&cli, &config, &prompt, false).await
@@ -1083,6 +1085,19 @@ fn print_result(result: &ExecutionResult) {
         }
         println!("{}", "─".repeat(40).red());
     }
+}
+
+/// Generate shell completion scripts for `uira-agent`.
+///
+/// Examples:
+/// - `uira-agent completion bash > ~/.bash_completion.d/uira`
+/// - `uira-agent completion zsh > ~/.zsh/completions/_uira`
+/// - `uira-agent completion fish > ~/.config/fish/completions/uira.fish`
+/// - `uira-agent completion powershell > uira.ps1`
+fn run_completion(shell: Shell) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = Cli::command();
+    generate(shell, &mut cmd, "uira-agent", &mut std::io::stdout());
+    Ok(())
 }
 
 /// Extract text content from a message content
