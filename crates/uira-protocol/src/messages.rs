@@ -43,6 +43,15 @@ impl Message {
         }
     }
 
+    pub fn user_prompt(prompt: impl AsRef<str>) -> Self {
+        Self {
+            role: Role::User,
+            content: MessageContent::from_prompt(prompt.as_ref()),
+            name: None,
+            tool_call_id: None,
+        }
+    }
+
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: Role::Assistant,
@@ -105,6 +114,170 @@ impl MessageContent {
             Self::Text(s) => Some(s),
             _ => None,
         }
+    }
+
+    pub fn from_prompt(prompt: &str) -> Self {
+        let references = parse_prompt_image_references(prompt);
+
+        if references.is_empty() {
+            return Self::Text(prompt.to_string());
+        }
+
+        let mut blocks = Vec::new();
+        let mut cursor = 0;
+
+        for reference in references {
+            if reference.start > cursor {
+                let text = &prompt[cursor..reference.start];
+                if !text.is_empty() {
+                    blocks.push(ContentBlock::Text {
+                        text: text.to_string(),
+                    });
+                }
+            }
+
+            blocks.push(ContentBlock::Image {
+                source: ImageSource::FilePath {
+                    path: reference.path,
+                },
+            });
+            cursor = reference.end;
+        }
+
+        if cursor < prompt.len() {
+            let text = &prompt[cursor..];
+            if !text.is_empty() {
+                blocks.push(ContentBlock::Text {
+                    text: text.to_string(),
+                });
+            }
+        }
+
+        if blocks.is_empty() {
+            Self::Text(prompt.to_string())
+        } else {
+            Self::Blocks(blocks)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PromptImageReference {
+    start: usize,
+    end: usize,
+    path: String,
+}
+
+fn parse_prompt_image_references(prompt: &str) -> Vec<PromptImageReference> {
+    let mut refs = Vec::new();
+    let mut cursor = 0;
+
+    while let Some(reference) = find_next_prompt_image_reference(prompt, cursor) {
+        cursor = reference.end;
+        refs.push(reference);
+    }
+
+    refs
+}
+
+fn find_next_prompt_image_reference(prompt: &str, from: usize) -> Option<PromptImageReference> {
+    let markdown = find_markdown_image_reference(prompt, from);
+    let bracket = find_bracket_image_reference(prompt, from);
+
+    match (markdown, bracket) {
+        (Some(m), Some(b)) => {
+            if m.start <= b.start {
+                Some(m)
+            } else {
+                Some(b)
+            }
+        }
+        (Some(m), None) => Some(m),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn find_markdown_image_reference(prompt: &str, from: usize) -> Option<PromptImageReference> {
+    let mut cursor = from;
+
+    while let Some(relative_start) = prompt[cursor..].find("![") {
+        let start = cursor + relative_start;
+        let after_marker = start + 2;
+
+        let Some(relative_mid) = prompt[after_marker..].find("](") else {
+            cursor = after_marker;
+            continue;
+        };
+
+        let path_start = after_marker + relative_mid + 2;
+        let Some(relative_end) = prompt[path_start..].find(')') else {
+            cursor = path_start;
+            continue;
+        };
+
+        let path_end = path_start + relative_end;
+        let end = path_end + 1;
+        let raw_path = &prompt[path_start..path_end];
+
+        if let Some(path) = normalize_image_path(raw_path) {
+            return Some(PromptImageReference { start, end, path });
+        }
+
+        cursor = end;
+    }
+
+    None
+}
+
+fn find_bracket_image_reference(prompt: &str, from: usize) -> Option<PromptImageReference> {
+    let marker = "[image:";
+    let mut cursor = from;
+
+    while let Some(relative_start) = prompt[cursor..].find(marker) {
+        let start = cursor + relative_start;
+        let path_start = start + marker.len();
+
+        let Some(relative_end) = prompt[path_start..].find(']') else {
+            cursor = path_start;
+            continue;
+        };
+
+        let path_end = path_start + relative_end;
+        let end = path_end + 1;
+        let raw_path = &prompt[path_start..path_end];
+
+        if let Some(path) = normalize_image_path(raw_path) {
+            return Some(PromptImageReference { start, end, path });
+        }
+
+        cursor = end;
+    }
+
+    None
+}
+
+fn normalize_image_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|v| v.strip_suffix('\''))
+        })
+        .unwrap_or(trimmed)
+        .trim();
+
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
     }
 }
 
@@ -182,6 +355,7 @@ impl ContentBlock {
 pub enum ImageSource {
     Base64 { media_type: String, data: String },
     Url { url: String },
+    FilePath { path: String },
 }
 
 /// A tool call from the model
@@ -366,5 +540,49 @@ mod tests {
         let msg = Message::user("Hello world"); // 11 chars
         let tokens = msg.estimate_tokens();
         assert!(tokens >= 2 && tokens <= 4); // ~11/4 = 2-3
+    }
+
+    #[test]
+    fn test_user_prompt_without_images() {
+        let msg = Message::user_prompt("Describe this bug");
+        assert!(matches!(msg.content, MessageContent::Text(_)));
+    }
+
+    #[test]
+    fn test_user_prompt_with_markdown_image() {
+        let msg = Message::user_prompt("Please review ![mockup](./mockup.png) now");
+
+        match msg.content {
+            MessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 3);
+                assert!(matches!(blocks[0], ContentBlock::Text { .. }));
+                assert!(matches!(
+                    blocks[1],
+                    ContentBlock::Image {
+                        source: ImageSource::FilePath { .. }
+                    }
+                ));
+                assert!(matches!(blocks[2], ContentBlock::Text { .. }));
+            }
+            _ => panic!("expected blocks"),
+        }
+    }
+
+    #[test]
+    fn test_user_prompt_with_bracket_image() {
+        let msg = Message::user_prompt("[image: ./screenshots/error.png]");
+
+        match msg.content {
+            MessageContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 1);
+                match &blocks[0] {
+                    ContentBlock::Image {
+                        source: ImageSource::FilePath { path },
+                    } => assert_eq!(path, "./screenshots/error.png"),
+                    _ => panic!("expected file path image"),
+                }
+            }
+            _ => panic!("expected blocks"),
+        }
     }
 }

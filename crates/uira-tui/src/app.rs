@@ -1,5 +1,6 @@
 //! Main TUI application
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::{
@@ -11,18 +12,19 @@ use ratatui::{
     Terminal,
 };
 use std::collections::HashMap;
-use std::io::Stdout;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{Stdout, Write};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{env, io, process::Command, thread, time::Duration};
-use tempfile::Builder;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender};
 use uira_protocol::Provider;
-use uira_protocol::{AgentState, Item, ThreadEvent, TodoItem, TodoPriority, TodoStatus};
+use uira_protocol::{
+    AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
+    TodoItem, TodoPriority, TodoStatus,
+};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -34,9 +36,16 @@ use crate::{AppEvent, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
-const MAX_FILE_PICKER_RESULTS: usize = 8;
-const MAX_WORKSPACE_FILES: usize = 12_000;
-const FILE_INDEX_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+/// Maximum image size for prompt attachments (10MB)
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+struct PendingImage {
+    label: String,
+    media_type: String,
+    data: String,
+    size_bytes: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewTarget {
@@ -410,15 +419,6 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     lines
 }
 
-#[derive(Debug, Clone)]
-struct FilePickerState {
-    query: String,
-    start_char: usize,
-    end_char: usize,
-    matches: Vec<String>,
-    selected: usize,
-}
-
 fn format_branch_list(branches: &[BranchInfo]) -> String {
     if branches.is_empty() {
         return "No branches available.".to_string();
@@ -609,14 +609,10 @@ pub struct App {
     thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
     model_selector: ModelSelector,
-    agent_input_tx: Option<mpsc::Sender<String>>,
+    agent_input_tx: Option<mpsc::Sender<Message>>,
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     session_id: Option<String>,
-    workspace_root: PathBuf,
-    workspace_files: Vec<String>,
-    last_file_index_refresh: Option<SystemTime>,
-    file_picker: Option<FilePickerState>,
     current_branch: String,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
@@ -624,12 +620,12 @@ pub struct App {
     theme: Theme,
     theme_overrides: ThemeOverrides,
     tool_call_names: HashMap<String, String>,
+    pending_images: Vec<PendingImage>,
 }
 
 impl App {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
-        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let theme = Theme::default();
         let mut approval_overlay = ApprovalOverlay::new();
         approval_overlay.set_theme(theme.clone());
@@ -654,10 +650,6 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             session_id: None,
-            workspace_root,
-            workspace_files: Vec::new(),
-            last_file_index_refresh: None,
-            file_picker: None,
             current_branch: "main".to_string(),
             todos: Vec::new(),
             show_todo_sidebar: true,
@@ -665,6 +657,7 @@ impl App {
             theme,
             theme_overrides: ThemeOverrides::default(),
             tool_call_names: HashMap::new(),
+            pending_images: Vec::new(),
         }
     }
 
@@ -773,7 +766,7 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
+        let main_area = if !self.todos.is_empty() {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -945,10 +938,19 @@ impl App {
     }
 
     fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
-        let title = if self.approval_overlay.is_active() {
-            " Input (approval overlay active) "
+        let pending_label = if self.pending_images.is_empty() {
+            String::new()
         } else {
-            " Input (Enter to send, Ctrl+C to quit) "
+            format!(" | {} image(s) attached", self.pending_images.len())
+        };
+
+        let title = if self.approval_overlay.is_active() {
+            format!(" Input (approval overlay active{}) ", pending_label)
+        } else {
+            format!(
+                " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                pending_label
+            )
         };
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
@@ -982,9 +984,7 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
-    fn render_todo_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        self.ensure_todo_selection();
-
+    fn render_todo_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
         let completed = self
             .todos
             .iter()
@@ -1040,11 +1040,8 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol("> ");
-        frame.render_stateful_widget(list, area, &mut self.todo_list_state);
+        let list = List::new(items).block(block);
+        frame.render_widget(list, area);
     }
 
     fn scroll_up(&mut self) {
@@ -1076,313 +1073,166 @@ impl App {
         }
     }
 
-     fn total_items(&self) -> usize {
-         let mut count = self.messages.len();
-         if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
-             count += 1;
-         }
-         if self
-             .streaming_buffer
-             .as_ref()
-             .is_some_and(|b| !b.is_empty())
-         {
-             count += 1;
-         }
-         count
-     }
- 
-     fn ensure_todo_selection(&mut self) {
-         if self.todos.is_empty() {
-             self.todo_list_state.select(None);
-             return;
-         }
- 
-         if let Some(selected) = self.todo_list_state.selected() {
-             if selected < self.todos.len() {
-                 let status = self.todos[selected].status;
-                 if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
-                     return;
-                 }
-             }
-         }
- 
-         let selected = self
-             .todos
-             .iter()
-             .position(|todo| {
-                 todo.status != TodoStatus::Completed && todo.status != TodoStatus::Cancelled
-             })
-             .unwrap_or(0);
-         self.todo_list_state.select(Some(selected));
-     }
- 
-     fn toggle_todo_sidebar(&mut self) {
-         self.show_todo_sidebar = !self.show_todo_sidebar;
-         if self.show_todo_sidebar {
-             self.ensure_todo_selection();
-             self.status = "TODO sidebar shown".to_string();
-         } else {
-             self.status = "TODO sidebar hidden".to_string();
-         }
-     }
- 
-     fn next_open_todo_index(&self, after: usize) -> Option<usize> {
-         if self.todos.is_empty() {
-             return None;
-         }
- 
-         for offset in 1..=self.todos.len() {
-             let index = (after + offset) % self.todos.len();
-             let status = self.todos[index].status;
-             if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
-                 return Some(index);
-             }
-         }
- 
-         None
-     }
- 
-     fn mark_selected_todo_done(&mut self) {
-         if !self.show_todo_sidebar {
-             self.status = "TODO sidebar is hidden".to_string();
-             return;
-         }
- 
-         self.ensure_todo_selection();
- 
-         let Some(selected) = self.todo_list_state.selected() else {
-             self.status = "No TODO selected".to_string();
-             return;
-         };
- 
-         if selected >= self.todos.len() {
-             self.todo_list_state.select(None);
-             self.status = "No TODO selected".to_string();
-             return;
-         }
- 
-         let status = self.todos[selected].status;
-         if status == TodoStatus::Completed || status == TodoStatus::Cancelled {
-             self.status = "Selected TODO is already closed".to_string();
-             return;
-         }
- 
-         let content = self.todos[selected].content.clone();
-         self.todos[selected].status = TodoStatus::Completed;
-         self.status = format!("Marked TODO done: {}", content);
- 
-         if let Some(next) = self.next_open_todo_index(selected) {
-             self.todo_list_state.select(Some(next));
-         } else {
-             self.todo_list_state.select(Some(selected));
-         }
-     }
- 
-     fn selected_message_index(&self) -> Option<usize> {
-         self.list_state
-             .selected()
-             .filter(|&index| index < self.messages.len())
-     }
- 
-     fn toggle_selected_tool_output(&mut self) -> bool {
-         let Some(index) = self.selected_message_index() else {
-             return false;
-         };
- 
-         let Some(tool_output) = self
-             .messages
-             .get_mut(index)
-             .and_then(|msg| msg.tool_output.as_mut())
-         else {
-             return false;
-         };
- 
-         tool_output.collapsed = !tool_output.collapsed;
-         let action = if tool_output.collapsed {
-             "Collapsed"
-         } else {
-             "Expanded"
-         };
-         self.status = format!("{} {} output", action, tool_output.tool_name);
-         true
-     }
- 
-     fn set_all_tool_outputs_collapsed(&mut self, collapsed: bool) -> usize {
-         let mut updated = 0;
-         for message in &mut self.messages {
-             if let Some(tool_output) = message.tool_output.as_mut() {
-                 if tool_output.collapsed != collapsed {
-                     tool_output.collapsed = collapsed;
-                     updated += 1;
-                 }
-             }
-         }
-         updated
-     }
- 
-     fn collapse_all_tool_outputs(&mut self) {
-         let updated = self.set_all_tool_outputs_collapsed(true);
-         if updated == 0 {
-             self.status = "No expanded tool output to collapse".to_string();
-         } else {
-             self.status = format!("Collapsed {} tool output item(s)", updated);
-         }
-     }
- 
-     fn expand_all_tool_outputs(&mut self) {
-         let updated = self.set_all_tool_outputs_collapsed(false);
-         if updated == 0 {
-             self.status = "No collapsed tool output to expand".to_string();
-         } else {
-             self.status = format!("Expanded {} tool output item(s)", updated);
-         }
-     }
-
-    fn refresh_file_index(&mut self) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&self.workspace_root)
-            .arg("ls-files")
-            .output();
-
-        let mut files = match output {
-            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(ToString::to_string)
-                .collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
-
-        if files.len() > MAX_WORKSPACE_FILES {
-            files.truncate(MAX_WORKSPACE_FILES);
+    fn total_items(&self) -> usize {
+        let mut count = self.messages.len();
+        if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+            count += 1;
         }
-
-        self.workspace_files = files;
-        self.last_file_index_refresh = Some(SystemTime::now());
+        if self
+            .streaming_buffer
+            .as_ref()
+            .is_some_and(|b| !b.is_empty())
+        {
+            count += 1;
+        }
+        count
     }
 
-    fn update_file_picker_state(&mut self) {
-        let needs_refresh = self
-            .last_file_index_refresh
-            .and_then(|last| SystemTime::now().duration_since(last).ok())
-            .map(|elapsed| elapsed >= FILE_INDEX_REFRESH_INTERVAL)
-            .unwrap_or(true);
-
-        if needs_refresh {
-            self.refresh_file_index();
-        }
-
-        let char_count = self.input.chars().count();
-        if self.cursor_pos == 0 || self.cursor_pos > char_count {
-            self.file_picker = None;
+    fn ensure_todo_selection(&mut self) {
+        if self.todos.is_empty() {
+            self.todo_list_state.select(None);
             return;
         }
 
-        let prefix: String = self.input.chars().take(self.cursor_pos).collect();
-        let token_start = prefix
-            .rfind(|c: char| c.is_whitespace())
-            .map_or(0, |i| i + 1);
-        let token = prefix[token_start..].to_string();
-
-        if !token.starts_with('@') || token.len() <= 1 {
-            self.file_picker = None;
-            return;
+        if let Some(selected) = self.todo_list_state.selected() {
+            if selected < self.todos.len() {
+                let status = self.todos[selected].status;
+                if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                    return;
+                }
+            }
         }
 
-        let query = token[1..].to_lowercase();
-        let mut matches: Vec<String> = self
-            .workspace_files
+        let selected = self
+            .todos
             .iter()
-            .filter(|path| path.to_lowercase().contains(&query))
-            .take(MAX_FILE_PICKER_RESULTS)
-            .cloned()
-            .collect();
-
-        if matches.is_empty() {
-            self.file_picker = None;
-            return;
-        }
-
-        matches.sort();
-        self.file_picker = Some(FilePickerState {
-            query,
-            start_char: token_start,
-            end_char: self.cursor_pos,
-            matches,
-            selected: 0,
-        });
-    }
-
-    fn move_file_picker_selection(&mut self, delta: isize) {
-        let Some(state) = self.file_picker.as_mut() else {
-            return;
-        };
-        if state.matches.is_empty() {
-            return;
-        }
-
-        let len = state.matches.len() as isize;
-        let next = (state.selected as isize + delta).rem_euclid(len);
-        state.selected = next as usize;
-    }
-
-    fn apply_file_picker_selection(&mut self) {
-        let Some(state) = self.file_picker.take() else {
-            return;
-        };
-        if state.matches.is_empty() {
-            return;
-        }
-
-        let selected = state.matches[state.selected].clone();
-        let before: String = self.input.chars().take(state.start_char).collect();
-        let after: String = self.input.chars().skip(state.end_char).collect();
-        self.input = format!("{}@{} {}", before, selected, after.trim_start());
-        self.cursor_pos = self.input.chars().count();
-    }
-
-    fn render_file_picker(&self, frame: &mut ratatui::Frame, chat_area: Rect, _input_area: Rect) {
-        let Some(state) = self.file_picker.as_ref() else {
-            return;
-        };
-
-        let width = chat_area.width.min(80);
-        let height = (state.matches.len() as u16 + 3).min(chat_area.height.saturating_sub(2));
-        if height < 3 {
-            return;
-        }
-
-        let popup = Rect {
-            x: chat_area.x + 1,
-            y: chat_area.y + chat_area.height.saturating_sub(height + 1),
-            width,
-            height,
-        };
-
-        frame.render_widget(Clear, popup);
-        let block = Block::default()
-            .title(format!(" File suggestions: {} ", state.query))
-            .borders(Borders::ALL)
-            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
-
-        let items: Vec<ListItem> = state
-            .matches
-            .iter()
-            .enumerate()
-            .map(|(idx, item)| {
-                let style = if idx == state.selected {
-                    Style::default().fg(self.theme.accent)
-                } else {
-                    Style::default().fg(self.theme.fg)
-                };
-                ListItem::new(Span::styled(item.clone(), style))
+            .position(|todo| {
+                todo.status != TodoStatus::Completed && todo.status != TodoStatus::Cancelled
             })
-            .collect();
+            .unwrap_or(0);
+        self.todo_list_state.select(Some(selected));
+    }
 
-        let list = List::new(items).block(block);
-        frame.render_widget(list, popup);
+    fn toggle_todo_sidebar(&mut self) {
+        self.show_todo_sidebar = !self.show_todo_sidebar;
+        if self.show_todo_sidebar {
+            self.ensure_todo_selection();
+            self.status = "TODO sidebar shown".to_string();
+        } else {
+            self.status = "TODO sidebar hidden".to_string();
+        }
+    }
+
+    fn next_open_todo_index(&self, after: usize) -> Option<usize> {
+        if self.todos.is_empty() {
+            return None;
+        }
+
+        for offset in 1..=self.todos.len() {
+            let index = (after + offset) % self.todos.len();
+            let status = self.todos[index].status;
+            if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                return Some(index);
+            }
+        }
+
+        None
+    }
+
+    fn mark_selected_todo_done(&mut self) {
+        if !self.show_todo_sidebar {
+            self.status = "TODO sidebar is hidden".to_string();
+            return;
+        }
+
+        self.ensure_todo_selection();
+
+        let Some(selected) = self.todo_list_state.selected() else {
+            self.status = "No TODO selected".to_string();
+            return;
+        };
+
+        if selected >= self.todos.len() {
+            self.todo_list_state.select(None);
+            self.status = "No TODO selected".to_string();
+            return;
+        }
+
+        let status = self.todos[selected].status;
+        if status == TodoStatus::Completed || status == TodoStatus::Cancelled {
+            self.status = "Selected TODO is already closed".to_string();
+            return;
+        }
+
+        let content = self.todos[selected].content.clone();
+        self.todos[selected].status = TodoStatus::Completed;
+        self.status = format!("Marked TODO done: {}", content);
+
+        if let Some(next) = self.next_open_todo_index(selected) {
+            self.todo_list_state.select(Some(next));
+        } else {
+            self.todo_list_state.select(Some(selected));
+        }
+    }
+
+    fn selected_message_index(&self) -> Option<usize> {
+        self.list_state
+            .selected()
+            .filter(|&index| index < self.messages.len())
+    }
+
+    fn toggle_selected_tool_output(&mut self) -> bool {
+        let Some(index) = self.selected_message_index() else {
+            return false;
+        };
+
+        let Some(tool_output) = self
+            .messages
+            .get_mut(index)
+            .and_then(|msg| msg.tool_output.as_mut())
+        else {
+            return false;
+        };
+
+        tool_output.collapsed = !tool_output.collapsed;
+        let action = if tool_output.collapsed {
+            "Collapsed"
+        } else {
+            "Expanded"
+        };
+        self.status = format!("{} {} output", action, tool_output.tool_name);
+        true
+    }
+
+    fn set_all_tool_outputs_collapsed(&mut self, collapsed: bool) -> usize {
+        let mut updated = 0;
+        for message in &mut self.messages {
+            if let Some(tool_output) = message.tool_output.as_mut() {
+                if tool_output.collapsed != collapsed {
+                    tool_output.collapsed = collapsed;
+                    updated += 1;
+                }
+            }
+        }
+        updated
+    }
+
+    fn collapse_all_tool_outputs(&mut self) {
+        let updated = self.set_all_tool_outputs_collapsed(true);
+        if updated == 0 {
+            self.status = "No expanded tool output to collapse".to_string();
+        } else {
+            self.status = format!("Collapsed {} tool output item(s)", updated);
+        }
+    }
+
+    fn expand_all_tool_outputs(&mut self) {
+        let updated = self.set_all_tool_outputs_collapsed(false);
+        if updated == 0 {
+            self.status = "No collapsed tool output to expand".to_string();
+        } else {
+            self.status = format!("Expanded {} tool output item(s)", updated);
+        }
     }
 
     fn push_message(&mut self, role: &str, content: String) {
@@ -1452,11 +1302,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return KeyAction::None;
+                    return;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return KeyAction::None;
+                    return;
                 }
                 _ => {}
             }
@@ -1464,27 +1314,6 @@ impl App {
 
         // Input handling (cursor_pos is char index, not byte index for UTF-8 safety)
         if self.input_focused {
-            if self.file_picker.is_some() {
-                match key.code {
-                    KeyCode::Up => {
-                        self.move_file_picker_selection(-1);
-                        return;
-                    }
-                    KeyCode::Down => {
-                        self.move_file_picker_selection(1);
-                        return;
-                    }
-                    KeyCode::Enter | KeyCode::Tab => {
-                        self.apply_file_picker_selection();
-                        return;
-                    }
-                    KeyCode::Esc => {
-                        self.file_picker = None;
-                        return;
-                    }
-                    _ => {}
-                }
-            }
             let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
@@ -1537,11 +1366,14 @@ impl App {
                     self.cursor_pos = char_count;
                 }
                 KeyCode::Enter => {
-                    if self.input.is_empty() && self.toggle_selected_tool_output() {
+                    if self.input.is_empty()
+                        && self.pending_images.is_empty()
+                        && self.toggle_selected_tool_output()
+                    {
                         return;
                     }
 
-                    if !self.input.is_empty() {
+                    if !self.input.trim().is_empty() || !self.pending_images.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
                         self.submit_input(input);
@@ -1570,23 +1402,294 @@ impl App {
             return;
         }
 
-        self.push_message("user", input.clone());
+        let pending_images = std::mem::take(&mut self.pending_images);
+        let has_images = !pending_images.is_empty();
 
-        self.send_agent_input(input);
-    }
+        let display_message = Self::format_user_display(&input, &pending_images);
+        self.push_message("user", display_message);
 
-    fn send_agent_input(&mut self, input: String) {
+        let message = if has_images {
+            let mut blocks = match MessageContent::from_prompt(&input) {
+                MessageContent::Text(text) => {
+                    if text.trim().is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![ContentBlock::text(text)]
+                    }
+                }
+                MessageContent::Blocks(blocks) => blocks,
+                MessageContent::ToolCalls(_) => Vec::new(),
+            };
+
+            for image in &pending_images {
+                blocks.push(ContentBlock::Image {
+                    source: ImageSource::Base64 {
+                        media_type: image.media_type.clone(),
+                        data: image.data.clone(),
+                    },
+                });
+            }
+            Message::with_blocks(Role::User, blocks)
+        } else {
+            Message::user(input.clone())
+        };
+
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
-                if tx.send(input).await.is_err() {
+                if tx.send(message).await.is_err() {
                     tracing::warn!("Agent input channel closed");
                 }
             });
-            self.status = "Processing...".to_string();
+            self.status = if has_images {
+                "Processing with image attachment(s)...".to_string()
+            } else {
+                "Processing...".to_string()
+            };
             self.agent_state = AgentState::Thinking;
         } else {
             self.status = "No agent connected".to_string();
+        }
+    }
+
+    fn format_user_display(input: &str, pending_images: &[PendingImage]) -> String {
+        let parsed_input = MessageContent::from_prompt(input);
+        let parsed_input = Self::format_content_for_display(&parsed_input);
+
+        if pending_images.is_empty() {
+            return parsed_input;
+        }
+
+        let mut lines = Vec::new();
+        if !parsed_input.trim().is_empty() {
+            lines.push(parsed_input);
+        }
+
+        for image in pending_images {
+            lines.push(format!(
+                "[image] {} ({})",
+                image.label,
+                Self::format_size(image.size_bytes)
+            ));
+        }
+
+        lines.join("\n")
+    }
+
+    fn format_content_for_display(content: &MessageContent) -> String {
+        match content {
+            MessageContent::Text(text) => text.clone(),
+            MessageContent::Blocks(blocks) => {
+                let mut lines = Vec::new();
+
+                for block in blocks {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            if !text.is_empty() {
+                                lines.push(text.clone());
+                            }
+                        }
+                        ContentBlock::Image { source } => lines.push(match source {
+                            ImageSource::FilePath { path } => format!("[image] {}", path),
+                            ImageSource::Url { url } => format!("[image] {}", url),
+                            ImageSource::Base64 { media_type, .. } => {
+                                format!("[image] embedded ({})", media_type)
+                            }
+                        }),
+                        ContentBlock::ToolResult { content, .. } => {
+                            if !content.is_empty() {
+                                lines.push(content.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                lines.join("\n")
+            }
+            MessageContent::ToolCalls(calls) => calls
+                .iter()
+                .map(|call| format!("tool: {} ({})", call.name, call.id))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    fn strip_optional_quotes(input: &str) -> &str {
+        if input.len() >= 2 {
+            let bytes = input.as_bytes();
+            if (bytes[0] == b'"' && bytes[input.len() - 1] == b'"')
+                || (bytes[0] == b'\'' && bytes[input.len() - 1] == b'\'')
+            {
+                return &input[1..input.len() - 1];
+            }
+        }
+        input
+    }
+
+    fn format_size(size_bytes: usize) -> String {
+        if size_bytes >= 1024 * 1024 {
+            format!("{:.1}MB", size_bytes as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{:.1}KB", size_bytes as f64 / 1024.0)
+        }
+    }
+
+    fn resolve_image_path(raw_path: &str) -> Result<PathBuf, String> {
+        let path = raw_path.trim();
+        if path.is_empty() {
+            return Err("empty path".to_string());
+        }
+
+        let expanded = if path == "~" {
+            std::env::var("HOME")
+                .map(PathBuf::from)
+                .map_err(|_| "HOME environment variable is not set".to_string())?
+        } else if let Some(relative) = path.strip_prefix("~/") {
+            PathBuf::from(
+                std::env::var("HOME")
+                    .map_err(|_| "HOME environment variable is not set".to_string())?,
+            )
+            .join(relative)
+        } else {
+            PathBuf::from(path)
+        };
+
+        let absolute = if expanded.is_absolute() {
+            expanded
+        } else {
+            std::env::current_dir()
+                .map_err(|e| format!("failed to read current directory: {}", e))?
+                .join(expanded)
+        };
+
+        if !absolute.exists() {
+            return Err(format!("file does not exist: {}", absolute.display()));
+        }
+
+        if !absolute.is_file() {
+            return Err(format!("not a file: {}", absolute.display()));
+        }
+
+        Ok(absolute)
+    }
+
+    fn media_type_for_path(path: &Path) -> Option<&'static str> {
+        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+        match ext.as_str() {
+            "png" => Some("image/png"),
+            "jpg" | "jpeg" => Some("image/jpeg"),
+            "gif" => Some("image/gif"),
+            "webp" => Some("image/webp"),
+            "bmp" => Some("image/bmp"),
+            _ => None,
+        }
+    }
+
+    fn load_pending_image(path: &Path) -> Result<PendingImage, String> {
+        let media_type = Self::media_type_for_path(path).ok_or_else(|| {
+            format!(
+                "unsupported image format for '{}'; supported: png, jpg, jpeg, gif, webp, bmp",
+                path.display()
+            )
+        })?;
+
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("failed to read image '{}': {}", path.display(), e))?;
+
+        if bytes.is_empty() {
+            return Err(format!("image is empty: {}", path.display()));
+        }
+
+        if bytes.len() > MAX_IMAGE_BYTES {
+            return Err(format!(
+                "image is too large ({} > {}): {}",
+                Self::format_size(bytes.len()),
+                Self::format_size(MAX_IMAGE_BYTES),
+                path.display()
+            ));
+        }
+
+        let label = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| path.display().to_string());
+
+        Ok(PendingImage {
+            label,
+            media_type: media_type.to_string(),
+            data: BASE64_STANDARD.encode(bytes.as_slice()),
+            size_bytes: bytes.len(),
+        })
+    }
+
+    fn attach_image_from_path(&self, raw_path: &str) -> Result<PendingImage, String> {
+        let path = Self::resolve_image_path(raw_path)?;
+        Self::load_pending_image(&path)
+    }
+
+    fn capture_and_attach_screenshot(&self) -> Result<PendingImage, String> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("system clock error: {}", e))?
+            .as_millis();
+        let path = std::env::temp_dir().join(format!("uira-screenshot-{}.png", timestamp));
+
+        Self::capture_screenshot_to(&path)?;
+
+        let image_result = Self::load_pending_image(&path);
+        if let Err(error) = std::fs::remove_file(&path) {
+            tracing::debug!(
+                "Failed to remove temporary screenshot '{}': {}",
+                path.display(),
+                error
+            );
+        }
+        image_result
+    }
+
+    fn capture_screenshot_to(path: &Path) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        {
+            let status = Command::new("screencapture")
+                .arg("-x")
+                .arg(path)
+                .status()
+                .map_err(|e| format!("failed to run screencapture: {}", e))?;
+
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("screencapture exited with status {}", status))
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(status) = Command::new("grim").arg(path).status() {
+                if status.success() {
+                    return Ok(());
+                }
+            }
+
+            let status = Command::new("gnome-screenshot")
+                .arg("-f")
+                .arg(path)
+                .status()
+                .map_err(|e| format!("failed to run screenshot command: {}", e))?;
+
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("screenshot command exited with status {}", status))
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            let _ = path;
+            Err("/screenshot is not supported on this platform".to_string())
         }
     }
 
@@ -1620,7 +1723,18 @@ impl App {
         );
 
         let review_prompt = build_review_prompt(&target, &content);
-        self.send_agent_input(review_prompt);
+        if let Some(ref tx) = self.agent_input_tx {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if tx.send(Message::user(review_prompt)).await.is_err() {
+                    tracing::warn!("Agent input channel closed");
+                }
+            });
+            self.status = "Processing review...".to_string();
+            self.agent_state = AgentState::Thinking;
+        } else {
+            self.status = "No agent connected".to_string();
+        }
     }
 
     fn handle_slash_command(&mut self, input: &str) {
@@ -1634,7 +1748,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments"
                         .to_string(),
                     tool_output: None,
                 });
@@ -1652,7 +1766,71 @@ impl App {
             }
             "/clear" => {
                 self.messages.clear();
+                self.pending_images.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/image" => {
+                let path_arg = input[command.len()..].trim();
+                if path_arg.is_empty() {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: "Usage: /image <path>".to_string(),
+                        tool_output: None,
+                    });
+                    return;
+                }
+
+                let parsed_path = Self::strip_optional_quotes(path_arg);
+                match self.attach_image_from_path(parsed_path) {
+                    Ok(image) => {
+                        let image_label = image.label.clone();
+                        let image_size = Self::format_size(image.size_bytes);
+                        self.pending_images.push(image);
+                        self.status = format!("Attached {} image(s)", self.pending_images.len());
+                        self.messages.push(ChatMessage {
+                            role: "system".to_string(),
+                            content: format!(
+                                "Attached image: {} ({})\nIt will be sent with your next prompt.",
+                                image_label, image_size
+                            ),
+                            tool_output: None,
+                        });
+                    }
+                    Err(error) => {
+                        self.messages.push(ChatMessage {
+                            role: "error".to_string(),
+                            content: format!("Failed to attach image: {}", error),
+                            tool_output: None,
+                        });
+                    }
+                }
+            }
+            "/screenshot" => match self.capture_and_attach_screenshot() {
+                Ok(image) => {
+                    let image_label = image.label.clone();
+                    let image_size = Self::format_size(image.size_bytes);
+                    self.pending_images.push(image);
+                    self.status = format!("Attached {} image(s)", self.pending_images.len());
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Captured screenshot: {} ({})\nIt will be sent with your next prompt.",
+                            image_label, image_size
+                        ),
+                        tool_output: None,
+                    });
+                }
+                Err(error) => {
+                    self.messages.push(ChatMessage {
+                        role: "error".to_string(),
+                        content: format!("Failed to capture screenshot: {}", error),
+                        tool_output: None,
+                    });
+                }
+            },
+            "/review" => {
+                let args: Vec<&str> = parts.iter().skip(1).copied().collect();
+                self.run_review_command(&args, input);
             }
             "/fork" => {
                 let (branch_name, message_count) = match parts.get(1).copied() {
@@ -1671,6 +1849,7 @@ impl App {
                     self.messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: "Usage: /switch <branch>".to_string(),
+                        tool_output: None,
                     });
                 }
             }
@@ -1734,9 +1913,6 @@ impl App {
                     );
                 }
             }
-            "/review" => {
-                self.run_review_command(&parts[1..], input);
-            }
             "/theme" => {
                 if let Some(theme_name) = parts.get(1) {
                     match self.set_theme_by_name(theme_name) {
@@ -1794,7 +1970,6 @@ impl App {
             }
             AppEvent::TodoUpdated(todos) => {
                 self.todos = todos;
-                self.ensure_todo_selection();
             }
             AppEvent::Info(message) => {
                 self.status = message.clone();
@@ -2038,7 +2213,6 @@ impl App {
                     .count();
                 self.status = format!("{} todos ({} remaining)", todos.len(), pending);
                 self.todos = todos;
-                self.ensure_todo_selection();
             }
             _ => {
                 tracing::debug!("Unhandled ThreadEvent variant");
@@ -2249,6 +2423,7 @@ impl App {
             self.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot switch branches.".to_string(),
+                tool_output: None,
             });
         }
     }
@@ -2301,6 +2476,7 @@ impl App {
             self.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot list branches.".to_string(),
+                tool_output: None,
             });
         }
     }
@@ -2345,6 +2521,7 @@ impl App {
             self.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot show branch tree.".to_string(),
+                tool_output: None,
             });
         }
     }

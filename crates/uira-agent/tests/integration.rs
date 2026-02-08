@@ -6,7 +6,7 @@ use futures::StreamExt;
 use mock_client::MockModelClient;
 use std::sync::Arc;
 use uira_agent::{Agent, AgentConfig, AgentLoopError};
-use uira_protocol::{AgentState, ContentBlock, ThreadEvent};
+use uira_protocol::{AgentState, ContentBlock, Message, ThreadEvent};
 
 fn make_config() -> AgentConfig {
     AgentConfig::default().full_auto()
@@ -354,7 +354,7 @@ async fn test_interactive_mode() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     // Send first message
-    input_tx.send("Hello".to_string()).await.unwrap();
+    input_tx.send(Message::user("Hello")).await.unwrap();
 
     // Wait for processing
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -394,7 +394,7 @@ async fn test_interactive_quit_command() {
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
     // Send quit command
-    input_tx.send("/quit".to_string()).await.unwrap();
+    input_tx.send(Message::user("/quit")).await.unwrap();
 
     // Should exit quickly
     let result = tokio::time::timeout(tokio::time::Duration::from_millis(200), handle)

@@ -7,12 +7,13 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uira_protocol::{
-    ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
-    StopReason, StreamChunk, TokenUsage, ToolSpec,
+    ContentBlock, ContentDelta, ImageSource, Message, MessageContent, MessageDelta, ModelResponse,
+    Role, StopReason, StreamChunk, TokenUsage, ToolSpec,
 };
 
 use crate::{
-    traits::ModelResult, traits::ResponseStream, ModelClient, ProviderConfig, ProviderError,
+    image::normalize_image_source, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const DEFAULT_MAX_TOKENS: usize = 8192;
@@ -107,31 +108,64 @@ impl GeminiClient {
     fn convert_content(content: &MessageContent) -> Vec<GeminiPart> {
         match content {
             MessageContent::Text(text) => vec![GeminiPart::Text { text: text.clone() }],
-            MessageContent::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    ContentBlock::Text { text } => Some(GeminiPart::Text { text: text.clone() }),
-                    ContentBlock::ToolUse { id: _, name, input } => {
-                        Some(GeminiPart::FunctionCall {
-                            function_call: GeminiFunctionCall {
-                                name: name.clone(),
-                                args: input.clone(),
-                            },
-                        })
-                    }
-                    ContentBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        ..
-                    } => Some(GeminiPart::FunctionResponse {
-                        function_response: GeminiFunctionResponse {
-                            name: tool_use_id.clone(),
-                            response: serde_json::json!({ "result": content }),
+            MessageContent::Blocks(blocks) => {
+                let mut parts = Vec::new();
+                for block in blocks {
+                    match block {
+                        ContentBlock::Text { text } => {
+                            parts.push(GeminiPart::Text { text: text.clone() })
+                        }
+                        ContentBlock::ToolUse { id: _, name, input } => {
+                            parts.push(GeminiPart::FunctionCall {
+                                function_call: GeminiFunctionCall {
+                                    name: name.clone(),
+                                    args: input.clone(),
+                                },
+                            });
+                        }
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            ..
+                        } => {
+                            parts.push(GeminiPart::FunctionResponse {
+                                function_response: GeminiFunctionResponse {
+                                    name: tool_use_id.clone(),
+                                    response: serde_json::json!({ "result": content }),
+                                },
+                            });
+                        }
+                        ContentBlock::Image { source } => match normalize_image_source(source) {
+                            Ok(ImageSource::Base64 { media_type, data }) => {
+                                parts.push(GeminiPart::InlineData {
+                                    inline_data: GeminiInlineData {
+                                        mime_type: media_type,
+                                        data,
+                                    },
+                                });
+                            }
+                            Ok(ImageSource::Url { url }) => {
+                                parts.push(GeminiPart::Text {
+                                    text: format!("Image URL: {}", url),
+                                });
+                            }
+                            Ok(ImageSource::FilePath { .. }) => {
+                                tracing::warn!(
+                                    "Skipping unresolved file path image for Gemini request"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    "Skipping image attachment for Gemini request: {}",
+                                    error
+                                );
+                            }
                         },
-                    }),
-                    _ => None,
-                })
-                .collect(),
+                        _ => {}
+                    }
+                }
+                parts
+            }
             MessageContent::ToolCalls(calls) => calls
                 .iter()
                 .map(|c| GeminiPart::FunctionCall {
@@ -391,6 +425,10 @@ enum GeminiPart {
     Text {
         text: String,
     },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: GeminiInlineData,
+    },
     FunctionCall {
         #[serde(rename = "functionCall")]
         function_call: GeminiFunctionCall,
@@ -411,6 +449,13 @@ struct GeminiFunctionCall {
 struct GeminiFunctionResponse {
     name: String,
     response: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiInlineData {
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -11,7 +11,7 @@ use uira_events::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_protocol::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
-    Role, SessionId, ThreadEvent, ToolCall,
+    MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
 use uira_telemetry::{SessionSpan, TurnSpan};
@@ -45,7 +45,7 @@ pub struct Agent {
     pending_tool_calls: Option<Vec<ToolCall>>,
     rollout: Option<RolloutRecorder>,
     streaming_enabled: bool,
-    input_rx: Option<mpsc::Receiver<String>>,
+    input_rx: Option<mpsc::Receiver<Message>>,
     approval_tx: Option<ApprovalSender>,
     command_rx: Option<CommandReceiver>,
     keyword_detector: KeywordDetectorHook,
@@ -130,7 +130,7 @@ impl Agent {
 
     pub fn with_interactive(
         mut self,
-    ) -> (Self, mpsc::Sender<String>, ApprovalReceiver, CommandSender) {
+    ) -> (Self, mpsc::Sender<Message>, ApprovalReceiver, CommandSender) {
         let (input_tx, input_rx) = mpsc::channel(10);
         self.input_rx = Some(input_rx);
 
@@ -157,8 +157,13 @@ impl Agent {
         })
         .await;
 
+        enum InteractiveInput {
+            Message(Message),
+            Prompt(String),
+        }
+
         loop {
-            let prompt = tokio::select! {
+            let input_message = tokio::select! {
                 Some(cmd) = async {
                     match &mut command_rx {
                         Some(rx) => rx.recv().await,
@@ -195,7 +200,7 @@ impl Agent {
                 }
                 input = input_rx.recv() => {
                     match input {
-                        Some(p) => p,
+                        Some(message) => message,
                         None => {
                             tracing::info!("Input channel closed, exiting interactive mode");
                             break;
@@ -204,17 +209,27 @@ impl Agent {
                 }
             };
 
-            if prompt.trim().eq_ignore_ascii_case("/quit")
-                || prompt.trim().eq_ignore_ascii_case("/exit")
-            {
-                tracing::info!("Quit command received");
-                break;
+            if let MessageContent::Text(text) = &input_message.content {
+                if text.trim().eq_ignore_ascii_case("/quit")
+                    || text.trim().eq_ignore_ascii_case("/exit")
+                {
+                    tracing::info!("Quit command received");
+                    break;
+                }
             }
 
-            let mut current_prompt = prompt;
+            let mut current_input = InteractiveInput::Message(input_message);
             let mut continuation_attempts: usize = 0;
             loop {
-                let (was_error, was_cancel) = match self.run(&current_prompt).await {
+                let run_result = match current_input {
+                    InteractiveInput::Message(message) => match &message.content {
+                        MessageContent::Text(text) => self.run(text).await,
+                        _ => self.run_message(message).await,
+                    },
+                    InteractiveInput::Prompt(prompt) => self.run(&prompt).await,
+                };
+
+                let (was_error, was_cancel) = match run_result {
                     Ok(result) => {
                         tracing::debug!(
                             "Turn completed: {} turns, success={}",
@@ -272,13 +287,13 @@ impl Agent {
                     })
                     .await;
 
-                    current_prompt = format!(
+                    current_input = InteractiveInput::Prompt(format!(
                         "{}\n\n[Status: {}/{} completed, {} remaining]",
                         uira_protocol::TODO_CONTINUATION_PROMPT,
                         total.saturating_sub(incomplete_count),
                         total,
                         incomplete_count
-                    );
+                    ));
                     continue;
                 }
 
@@ -613,6 +628,30 @@ impl Agent {
         }
     }
 
+    pub async fn run_message(
+        &mut self,
+        message: Message,
+    ) -> Result<ExecutionResult, AgentLoopError> {
+        self.state = AgentState::Thinking;
+
+        let session_span =
+            SessionSpan::new(&self.session.id.to_string(), self.session.client.model());
+        let _session_guard = session_span.enter();
+
+        self.emit_event(ThreadEvent::ThreadStarted {
+            thread_id: self.session.id.to_string(),
+        })
+        .await;
+
+        self.record_message(message.clone());
+        self.session
+            .context
+            .add_message(message)
+            .map_err(AgentLoopError::Context)?;
+
+        self.run_turn_loop().await
+    }
+
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
         self.state = AgentState::Thinking;
 
@@ -636,14 +675,17 @@ impl Agent {
                 prompt.to_string()
             };
 
-        let user_message = Message::user(&effective_prompt);
+        let user_message = Message::user_prompt(&effective_prompt);
         self.record_message(user_message.clone());
         self.session
             .context
             .add_message(user_message)
             .map_err(AgentLoopError::Context)?;
 
-        // Main agent loop
+        self.run_turn_loop().await
+    }
+
+    async fn run_turn_loop(&mut self) -> Result<ExecutionResult, AgentLoopError> {
         loop {
             // Check for cancellation
             if self.control.is_cancelled() {
@@ -912,7 +954,7 @@ impl Agent {
         .await;
 
         // Add user message
-        let user_message = Message::user(prompt);
+        let user_message = Message::user_prompt(prompt);
         self.record_message(user_message.clone());
         self.session
             .context

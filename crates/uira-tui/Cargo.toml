@@ -22,6 +22,7 @@ tui-textarea = "0.7"
 syntect = "5"
 tracing = "0.1"
 tempfile = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
 tokio = { workspace = true }

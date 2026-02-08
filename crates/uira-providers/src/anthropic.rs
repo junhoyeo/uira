@@ -16,7 +16,8 @@ use uira_protocol::{
 };
 
 use crate::{
-    traits::ModelResult, traits::ResponseStream, ModelClient, ProviderConfig, ProviderError,
+    image::normalize_image_source, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -304,7 +305,7 @@ impl AnthropicClient {
         tools: &[ToolSpec],
         stream: bool,
         is_oauth: bool,
-    ) -> AnthropicRequest {
+    ) -> Result<AnthropicRequest, ProviderError> {
         let (system, messages) = Self::extract_system(messages);
 
         let system_prompt = if is_oauth {
@@ -330,13 +331,13 @@ impl AnthropicClient {
             system.map(SystemPrompt::Text)
         };
 
-        AnthropicRequest {
+        Ok(AnthropicRequest {
             model: self.config.model.clone(),
             max_tokens: self.config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             messages: messages
                 .into_iter()
                 .map(|m| self.convert_message(m, is_oauth))
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
             system: system_prompt,
             tools: if tools.is_empty() {
                 None
@@ -345,7 +346,7 @@ impl AnthropicClient {
             },
             stream: Some(stream),
             temperature: self.config.temperature,
-        }
+        })
     }
 
     fn extract_system(messages: &[Message]) -> (Option<String>, Vec<&Message>) {
@@ -365,7 +366,11 @@ impl AnthropicClient {
         (system, rest)
     }
 
-    fn convert_message(&self, msg: &Message, is_oauth: bool) -> AnthropicMessage {
+    fn convert_message(
+        &self,
+        msg: &Message,
+        is_oauth: bool,
+    ) -> Result<AnthropicMessage, ProviderError> {
         let role = match msg.role {
             Role::User | Role::Tool => "user",
             Role::Assistant => "assistant",
@@ -382,36 +387,42 @@ impl AnthropicClient {
 
         let content = match &msg.content {
             MessageContent::Text(text) => vec![AnthropicContent::Text { text: text.clone() }],
-            MessageContent::Blocks(blocks) => blocks
-                .iter()
-                .map(|b| match b {
-                    ContentBlock::Text { text } => AnthropicContent::Text { text: text.clone() },
-                    ContentBlock::ToolUse { id, name, input } => AnthropicContent::ToolUse {
-                        id: id.clone(),
-                        name: maybe_prefix(name),
-                        input: input.clone(),
-                    },
-                    ContentBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        is_error,
-                    } => AnthropicContent::ToolResult {
-                        tool_use_id: tool_use_id.clone(),
-                        content: content.clone(),
-                        is_error: *is_error,
-                    },
-                    ContentBlock::Image { source } => AnthropicContent::Image {
-                        source: source.clone(),
-                    },
-                    ContentBlock::Thinking {
-                        thinking,
-                        signature,
-                    } => AnthropicContent::Thinking {
-                        thinking: thinking.clone(),
-                        signature: signature.clone(),
-                    },
-                })
-                .collect(),
+            MessageContent::Blocks(blocks) => {
+                let mut content = Vec::with_capacity(blocks.len());
+                for block in blocks {
+                    let converted = match block {
+                        ContentBlock::Text { text } => {
+                            AnthropicContent::Text { text: text.clone() }
+                        }
+                        ContentBlock::ToolUse { id, name, input } => AnthropicContent::ToolUse {
+                            id: id.clone(),
+                            name: maybe_prefix(name),
+                            input: input.clone(),
+                        },
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } => AnthropicContent::ToolResult {
+                            tool_use_id: tool_use_id.clone(),
+                            content: content.clone(),
+                            is_error: *is_error,
+                        },
+                        ContentBlock::Image { source } => AnthropicContent::Image {
+                            source: normalize_image_source(source)?,
+                        },
+                        ContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        } => AnthropicContent::Thinking {
+                            thinking: thinking.clone(),
+                            signature: signature.clone(),
+                        },
+                    };
+                    content.push(converted);
+                }
+                content
+            }
             MessageContent::ToolCalls(calls) => calls
                 .iter()
                 .map(|c| AnthropicContent::ToolUse {
@@ -422,10 +433,10 @@ impl AnthropicClient {
                 .collect(),
         };
 
-        AnthropicMessage {
+        Ok(AnthropicMessage {
             role: role.to_string(),
             content,
-        }
+        })
     }
 
     fn base_url(&self) -> &str {
@@ -487,7 +498,7 @@ impl ModelClient for AnthropicClient {
             tools.to_vec()
         };
 
-        let request = self.build_request(messages, &tools_for_request, false, is_oauth);
+        let request = self.build_request(messages, &tools_for_request, false, is_oauth)?;
         let url = if is_oauth {
             format!("{}/v1/messages?beta=true", self.base_url())
         } else {
@@ -547,7 +558,7 @@ impl ModelClient for AnthropicClient {
             tools.to_vec()
         };
 
-        let request = self.build_request(messages, &tools_for_request, true, is_oauth);
+        let request = self.build_request(messages, &tools_for_request, true, is_oauth)?;
         let url = if is_oauth {
             format!("{}/v1/messages?beta=true", self.base_url())
         } else {
