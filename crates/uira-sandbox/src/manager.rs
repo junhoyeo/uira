@@ -128,8 +128,8 @@ impl SandboxManager {
         let rules = landlock::generate_rules(&self.policy);
 
         // Clone data for the pre_exec closure
-        let rules_json =
-            serde_json::to_string(&rules).map_err(|e| SandboxError::PolicyError(e.to_string()))?;
+        let rules_json = serde_json::to_string(&rules)
+            .map_err(|e| SandboxError::PolicyViolation(e.to_string()))?;
 
         // SAFETY: pre_exec runs after fork but before exec, in the child process.
         // We're only calling async-signal-safe operations in the closure.

@@ -135,10 +135,7 @@ pub fn generate_rules(policy: &SandboxPolicy) -> Vec<LandlockRule> {
 #[cfg(target_os = "linux")]
 pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError> {
     use enumflags2::BitFlag;
-    use landlock::{
-        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
-    };
-    use std::os::unix::io::AsFd;
+    use landlock::{AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr};
 
     // Define the access rights we want to handle
     let access_fs_read = AccessFs::Execute
