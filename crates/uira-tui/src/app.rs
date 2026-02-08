@@ -7,10 +7,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::fs;
+use std::collections::HashMap;
 use std::io::Stdout;
 use std::io::Write;
 use std::path::PathBuf;
@@ -51,43 +51,6 @@ impl ReviewTarget {
             Self::Staged => "staged changes".to_string(),
             Self::File(path) => format!("changes in `{}`", path),
             Self::Revision(revision) => format!("commit `{}`", revision),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum KeyAction {
-    None,
-    OpenExternalEditor,
-}
-
-struct TerminalSuspendGuard<'a> {
-    terminal: &'a mut Terminal<CrosstermBackend<Stdout>>,
-    suspended: bool,
-}
-
-impl<'a> TerminalSuspendGuard<'a> {
-    fn new(terminal: &'a mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<Self> {
-        App::suspend_terminal(terminal)?;
-        Ok(Self {
-            terminal,
-            suspended: true,
-        })
-    }
-
-    fn resume(&mut self) -> io::Result<()> {
-        if self.suspended {
-            App::resume_terminal(self.terminal)?;
-            self.suspended = false;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for TerminalSuspendGuard<'_> {
-    fn drop(&mut self) {
-        if self.suspended {
-            let _ = App::resume_terminal(self.terminal);
         }
     }
 }
@@ -456,6 +419,39 @@ struct FilePickerState {
     selected: usize,
 }
 
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    let mut chars = input.chars();
+    let mut output: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        output.push_str("...");
+    }
+    output
+}
+
+fn summarize_tool_output(output: &str) -> String {
+    let total_lines = output.lines().count();
+    if total_lines == 0 {
+        return "no output".to_string();
+    }
+
+    let first_non_empty = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("(empty lines)");
+
+    let preview = truncate_chars(first_non_empty, 80);
+    if total_lines == 1 {
+        preview
+    } else {
+        format!(
+            "{} (+{} more lines)",
+            preview,
+            total_lines.saturating_sub(1)
+        )
+    }
+}
+
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
 fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
     let (provider, model) = model_str
@@ -600,6 +596,7 @@ pub struct App {
     todo_list_state: ListState,
     theme: Theme,
     theme_overrides: ThemeOverrides,
+    tool_call_names: HashMap<String, String>,
 }
 
 impl App {
@@ -611,7 +608,6 @@ impl App {
         approval_overlay.set_theme(theme.clone());
         let mut model_selector = ModelSelector::new();
         model_selector.set_theme(theme.clone());
-
         Self {
             should_quit: false,
             event_tx,
@@ -640,6 +636,7 @@ impl App {
             todo_list_state: ListState::default(),
             theme,
             theme_overrides: ThemeOverrides::default(),
+            tool_call_names: HashMap::new(),
         }
     }
 
@@ -679,9 +676,7 @@ impl App {
             // Handle events
             if event::poll(std::time::Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
-                    if let KeyAction::OpenExternalEditor = self.handle_key_event(key) {
-                        self.open_external_editor(terminal)?;
-                    }
+                    self.handle_key_event(key);
                 }
             }
 
@@ -716,9 +711,6 @@ impl App {
                     .to_string_lossy()
                     .to_string()
             });
-
-        self.workspace_root = PathBuf::from(&working_directory);
-        self.refresh_file_index();
 
         let mut event_system = uira_agent::create_event_system(working_directory);
         event_system.start();
@@ -777,13 +769,6 @@ impl App {
         self.render_status(frame, chunks[1]);
         self.render_input(frame, chunks[2]);
 
-        if self.file_picker.is_some()
-            && !self.approval_overlay.is_active()
-            && !self.model_selector.is_active()
-        {
-            self.render_file_picker(frame, chunks[0], chunks[2]);
-        }
-
         // Render approval overlay on top if active
         if self.approval_overlay.is_active() {
             self.approval_overlay.render(frame, area);
@@ -835,6 +820,20 @@ impl App {
                 } else {
                     prefix.to_string()
                 };
+
+                if let Some(tool_output) = &msg.tool_output {
+                    let body = if tool_output.collapsed {
+                        format!(
+                            "▶ {}: {} [Tab/Enter to expand]",
+                            tool_output.tool_name, tool_output.summary
+                        )
+                    } else {
+                        format!("▼ {}:\n{}", tool_output.tool_name, msg.content)
+                    };
+
+                    let lines = wrap_message(&role_prefix, &body, inner_width, style);
+                    return ListItem::new(Text::from(lines));
+                }
 
                 let lines = wrap_message(&role_prefix, &msg.content, inner_width, style);
                 ListItem::new(Text::from(lines))
@@ -916,7 +915,7 @@ impl App {
         let title = if self.approval_overlay.is_active() {
             " Input (approval overlay active) "
         } else {
-            " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit) "
+            " Input (Enter to send, Ctrl+C to quit) "
         };
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
@@ -1044,107 +1043,167 @@ impl App {
         }
     }
 
-    fn total_items(&self) -> usize {
-        let mut count = self.messages.len();
-        if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
-            count += 1;
-        }
-        if self
-            .streaming_buffer
-            .as_ref()
-            .is_some_and(|b| !b.is_empty())
-        {
-            count += 1;
-        }
-        count
-    }
-
-    fn ensure_todo_selection(&mut self) {
-        if self.todos.is_empty() {
-            self.todo_list_state.select(None);
-            return;
-        }
-
-        if let Some(selected) = self.todo_list_state.selected() {
-            if selected < self.todos.len() {
-                let status = self.todos[selected].status;
-                if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
-                    return;
-                }
-            }
-        }
-
-        let selected = self
-            .todos
-            .iter()
-            .position(|todo| {
-                todo.status != TodoStatus::Completed && todo.status != TodoStatus::Cancelled
-            })
-            .unwrap_or(0);
-        self.todo_list_state.select(Some(selected));
-    }
-
-    fn toggle_todo_sidebar(&mut self) {
-        self.show_todo_sidebar = !self.show_todo_sidebar;
-        if self.show_todo_sidebar {
-            self.ensure_todo_selection();
-            self.status = "TODO sidebar shown".to_string();
-        } else {
-            self.status = "TODO sidebar hidden".to_string();
-        }
-    }
-
-    fn next_open_todo_index(&self, after: usize) -> Option<usize> {
-        if self.todos.is_empty() {
-            return None;
-        }
-
-        for offset in 1..=self.todos.len() {
-            let index = (after + offset) % self.todos.len();
-            let status = self.todos[index].status;
-            if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
-                return Some(index);
-            }
-        }
-
-        None
-    }
-
-    fn mark_selected_todo_done(&mut self) {
-        if !self.show_todo_sidebar {
-            self.status = "TODO sidebar is hidden".to_string();
-            return;
-        }
-
-        self.ensure_todo_selection();
-
-        let Some(selected) = self.todo_list_state.selected() else {
-            self.status = "No TODO selected".to_string();
-            return;
-        };
-
-        if selected >= self.todos.len() {
-            self.todo_list_state.select(None);
-            self.status = "No TODO selected".to_string();
-            return;
-        }
-
-        let status = self.todos[selected].status;
-        if status == TodoStatus::Completed || status == TodoStatus::Cancelled {
-            self.status = "Selected TODO is already closed".to_string();
-            return;
-        }
-
-        let content = self.todos[selected].content.clone();
-        self.todos[selected].status = TodoStatus::Completed;
-        self.status = format!("Marked TODO done: {}", content);
-
-        if let Some(next) = self.next_open_todo_index(selected) {
-            self.todo_list_state.select(Some(next));
-        } else {
-            self.todo_list_state.select(Some(selected));
-        }
-    }
+     fn total_items(&self) -> usize {
+         let mut count = self.messages.len();
+         if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+             count += 1;
+         }
+         if self
+             .streaming_buffer
+             .as_ref()
+             .is_some_and(|b| !b.is_empty())
+         {
+             count += 1;
+         }
+         count
+     }
+ 
+     fn ensure_todo_selection(&mut self) {
+         if self.todos.is_empty() {
+             self.todo_list_state.select(None);
+             return;
+         }
+ 
+         if let Some(selected) = self.todo_list_state.selected() {
+             if selected < self.todos.len() {
+                 let status = self.todos[selected].status;
+                 if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                     return;
+                 }
+             }
+         }
+ 
+         let selected = self
+             .todos
+             .iter()
+             .position(|todo| {
+                 todo.status != TodoStatus::Completed && todo.status != TodoStatus::Cancelled
+             })
+             .unwrap_or(0);
+         self.todo_list_state.select(Some(selected));
+     }
+ 
+     fn toggle_todo_sidebar(&mut self) {
+         self.show_todo_sidebar = !self.show_todo_sidebar;
+         if self.show_todo_sidebar {
+             self.ensure_todo_selection();
+             self.status = "TODO sidebar shown".to_string();
+         } else {
+             self.status = "TODO sidebar hidden".to_string();
+         }
+     }
+ 
+     fn next_open_todo_index(&self, after: usize) -> Option<usize> {
+         if self.todos.is_empty() {
+             return None;
+         }
+ 
+         for offset in 1..=self.todos.len() {
+             let index = (after + offset) % self.todos.len();
+             let status = self.todos[index].status;
+             if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                 return Some(index);
+             }
+         }
+ 
+         None
+     }
+ 
+     fn mark_selected_todo_done(&mut self) {
+         if !self.show_todo_sidebar {
+             self.status = "TODO sidebar is hidden".to_string();
+             return;
+         }
+ 
+         self.ensure_todo_selection();
+ 
+         let Some(selected) = self.todo_list_state.selected() else {
+             self.status = "No TODO selected".to_string();
+             return;
+         };
+ 
+         if selected >= self.todos.len() {
+             self.todo_list_state.select(None);
+             self.status = "No TODO selected".to_string();
+             return;
+         }
+ 
+         let status = self.todos[selected].status;
+         if status == TodoStatus::Completed || status == TodoStatus::Cancelled {
+             self.status = "Selected TODO is already closed".to_string();
+             return;
+         }
+ 
+         let content = self.todos[selected].content.clone();
+         self.todos[selected].status = TodoStatus::Completed;
+         self.status = format!("Marked TODO done: {}", content);
+ 
+         if let Some(next) = self.next_open_todo_index(selected) {
+             self.todo_list_state.select(Some(next));
+         } else {
+             self.todo_list_state.select(Some(selected));
+         }
+     }
+ 
+     fn selected_message_index(&self) -> Option<usize> {
+         self.list_state
+             .selected()
+             .filter(|&index| index < self.messages.len())
+     }
+ 
+     fn toggle_selected_tool_output(&mut self) -> bool {
+         let Some(index) = self.selected_message_index() else {
+             return false;
+         };
+ 
+         let Some(tool_output) = self
+             .messages
+             .get_mut(index)
+             .and_then(|msg| msg.tool_output.as_mut())
+         else {
+             return false;
+         };
+ 
+         tool_output.collapsed = !tool_output.collapsed;
+         let action = if tool_output.collapsed {
+             "Collapsed"
+         } else {
+             "Expanded"
+         };
+         self.status = format!("{} {} output", action, tool_output.tool_name);
+         true
+     }
+ 
+     fn set_all_tool_outputs_collapsed(&mut self, collapsed: bool) -> usize {
+         let mut updated = 0;
+         for message in &mut self.messages {
+             if let Some(tool_output) = message.tool_output.as_mut() {
+                 if tool_output.collapsed != collapsed {
+                     tool_output.collapsed = collapsed;
+                     updated += 1;
+                 }
+             }
+         }
+         updated
+     }
+ 
+     fn collapse_all_tool_outputs(&mut self) {
+         let updated = self.set_all_tool_outputs_collapsed(true);
+         if updated == 0 {
+             self.status = "No expanded tool output to collapse".to_string();
+         } else {
+             self.status = format!("Collapsed {} tool output item(s)", updated);
+         }
+     }
+ 
+     fn expand_all_tool_outputs(&mut self) {
+         let updated = self.set_all_tool_outputs_collapsed(false);
+         if updated == 0 {
+             self.status = "No collapsed tool output to expand".to_string();
+         } else {
+             self.status = format!("Expanded {} tool output item(s)", updated);
+         }
+     }
 
     fn refresh_file_index(&mut self) {
         let output = Command::new("git")
@@ -1294,46 +1353,34 @@ impl App {
     }
 
     fn push_message(&mut self, role: &str, content: String) {
-        self.messages.push(ChatMessage {
-            role: role.to_string(),
-            content,
-        });
+        self.messages.push(ChatMessage::new(role, content));
         self.scroll_to_bottom();
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            match key.code {
-                KeyCode::Char('c') | KeyCode::Char('q') => {
-                    self.should_quit = true;
-                    return KeyAction::None;
-                }
-                KeyCode::Char('l') => {
-                    // Clear screen
-                    self.messages.clear();
-                    return KeyAction::None;
-                }
-                KeyCode::Char('g') => {
-                    if self.input_focused
-                        && !self.approval_overlay.is_active()
-                        && !self.model_selector.is_active()
-                    {
-                        return KeyAction::OpenExternalEditor;
-                    }
-                    return KeyAction::None;
-                }
-                _ => {}
-            }
+    fn push_tool_message(
+        &mut self,
+        role: &str,
+        tool_name: String,
+        content: String,
+        is_collapsed: bool,
+    ) {
+        let summary = summarize_tool_output(&content);
+        self.messages.push(ChatMessage::tool(
+            role,
+            content,
+            tool_name,
+            summary,
+            is_collapsed,
+        ));
+        self.scroll_to_bottom();
+    }
 
-            // Ignore other Ctrl+<key> combinations for text input.
-            return KeyAction::None;
-        }
-
+    fn handle_key_event(&mut self, key: KeyEvent) {
         if self.model_selector.is_active() {
             if let Some(selected_model) = self.model_selector.handle_key(key.code) {
                 self.switch_model(&selected_model);
             }
-            return KeyAction::None;
+            return;
         }
 
         // Approval overlay takes priority for key handling
@@ -1341,7 +1388,31 @@ impl App {
             if !self.approval_overlay.is_active() {
                 self.agent_state = AgentState::Thinking;
             }
-            return KeyAction::None;
+            return;
+        }
+
+        // Global shortcuts
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('c') | KeyCode::Char('q') => {
+                    self.should_quit = true;
+                    return;
+                }
+                KeyCode::Char('l') => {
+                    // Clear screen
+                    self.messages.clear();
+                    return;
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        self.expand_all_tool_outputs();
+                    } else {
+                        self.collapse_all_tool_outputs();
+                    }
+                    return;
+                }
+                _ => {}
+            }
         }
 
         if key.modifiers.is_empty() && self.input.is_empty() {
@@ -1381,7 +1452,6 @@ impl App {
                     _ => {}
                 }
             }
-
             let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
@@ -1393,7 +1463,6 @@ impl App {
                         .unwrap_or(self.input.len());
                     self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
-                    self.update_file_picker_state();
                 }
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
@@ -1405,7 +1474,6 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(0);
                         self.input.remove(byte_pos);
-                        self.update_file_picker_state();
                     }
                 }
                 KeyCode::Delete => {
@@ -1417,43 +1485,40 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(self.input.len());
                         self.input.remove(byte_pos);
-                        self.update_file_picker_state();
                     }
                 }
                 KeyCode::Left => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
                     }
-                    self.update_file_picker_state();
                 }
                 KeyCode::Right => {
                     if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
                     }
-                    self.update_file_picker_state();
                 }
                 KeyCode::Home => {
                     self.cursor_pos = 0;
-                    self.update_file_picker_state();
                 }
                 KeyCode::End => {
                     self.cursor_pos = char_count;
-                    self.update_file_picker_state();
                 }
                 KeyCode::Enter => {
+                    if self.input.is_empty() && self.toggle_selected_tool_output() {
+                        return;
+                    }
+
                     if !self.input.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
-                        self.file_picker = None;
                         self.submit_input(input);
                     }
                 }
+                KeyCode::Tab => {
+                    let _ = self.toggle_selected_tool_output();
+                }
                 KeyCode::Esc => {
-                    if self.file_picker.is_some() {
-                        self.file_picker = None;
-                    } else {
-                        self.should_quit = true;
-                    }
+                    self.should_quit = true;
                 }
                 KeyCode::Up => {
                     self.scroll_up();
@@ -1464,165 +1529,6 @@ impl App {
                 _ => {}
             }
         }
-
-        KeyAction::None
-    }
-
-    fn open_external_editor(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    ) -> io::Result<()> {
-        let mut temp_file = Builder::new()
-            .prefix("uira-input-")
-            .suffix(".md")
-            .tempfile()?;
-        temp_file.write_all(self.input.as_bytes())?;
-        temp_file.flush()?;
-
-        let temp_path = temp_file.into_temp_path();
-        self.status = "Opening external editor...".to_string();
-
-        let mut guard = TerminalSuspendGuard::new(terminal)?;
-        let editor_result = self.run_editor_while_draining_events(temp_path.to_path_buf());
-        guard.resume()?;
-
-        match editor_result {
-            Ok(()) => {
-                let updated = fs::read(&temp_path)?;
-                let updated = String::from_utf8_lossy(&updated).to_string();
-                self.input = updated;
-                self.cursor_pos = self.input.chars().count();
-                self.status = "Loaded content from external editor".to_string();
-            }
-            Err(err) => {
-                self.status = format!("External editor failed: {}", err);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn run_editor_while_draining_events(
-        &mut self,
-        temp_path: std::path::PathBuf,
-    ) -> io::Result<()> {
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let _ = result_tx.send(Self::run_editor(&temp_path));
-        });
-
-        loop {
-            while let Ok(event) = self.event_rx.try_recv() {
-                self.handle_app_event(event);
-            }
-
-            match result_rx.try_recv() {
-                Ok(result) => return result,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    return Err(io::Error::other("External editor thread disconnected"));
-                }
-            }
-        }
-    }
-
-    fn run_editor(temp_path: &std::path::Path) -> io::Result<()> {
-        let mut candidates = Vec::new();
-        if let Some(visual) = env::var_os("VISUAL") {
-            if !visual.is_empty() {
-                candidates.push(visual.to_string_lossy().to_string());
-            }
-        }
-        if let Some(editor) = env::var_os("EDITOR") {
-            if !editor.is_empty() {
-                let editor = editor.to_string_lossy().to_string();
-                if !candidates.iter().any(|candidate| candidate == &editor) {
-                    candidates.push(editor);
-                }
-            }
-        }
-        candidates.push("vim".to_string());
-        candidates.push("nano".to_string());
-
-        let mut last_err: Option<io::Error> = None;
-        for editor in candidates {
-            match Self::run_editor_command(&editor, temp_path) {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    if err.kind() == io::ErrorKind::NotFound {
-                        last_err = Some(err);
-                        continue;
-                    }
-                    return Err(err);
-                }
-            }
-        }
-
-        Err(last_err.unwrap_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "No suitable external editor found")
-        }))
-    }
-
-    fn run_editor_command(editor: &str, temp_path: &std::path::Path) -> io::Result<()> {
-        if editor.trim().is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Editor command is empty",
-            ));
-        }
-
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg("eval \"$UIRA_EDITOR\" \"$1\"")
-            .arg("uira-editor")
-            .arg(temp_path)
-            .env("UIRA_EDITOR", editor)
-            .status()?;
-
-        if status.code() == Some(127) {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Editor not found: {}", editor),
-            ));
-        }
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err(io::Error::other(format!(
-                "Editor exited with status {}",
-                status
-            )))
-        }
-    }
-
-    fn suspend_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
-        use crossterm::{
-            execute,
-            terminal::{disable_raw_mode, LeaveAlternateScreen},
-        };
-
-        terminal.show_cursor()?;
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-
-        Ok(())
-    }
-
-    fn resume_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
-        use crossterm::{
-            execute,
-            terminal::{enable_raw_mode, EnterAlternateScreen},
-        };
-
-        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-        enable_raw_mode()?;
-        terminal.hide_cursor()?;
-        terminal.clear()?;
-
-        Ok(())
     }
 
     fn submit_input(&mut self, input: String) {
@@ -1641,7 +1547,7 @@ impl App {
             let tx = tx.clone();
             let prepared_input = input;
             tokio::spawn(async move {
-                if tx.send(prepared_input).await.is_err() {
+                if tx.send(input).await.is_err() {
                     tracing::warn!("Agent input channel closed");
                 }
             });
@@ -1698,6 +1604,7 @@ impl App {
                     role: "system".to_string(),
                     content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
                         .to_string(),
+                    tool_output: None,
                 });
             }
             "/auth" | "/status" => {
@@ -1706,10 +1613,10 @@ impl App {
                 } else {
                     "No agent connected"
                 };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
-                });
+                self.push_message(
+                    "system",
+                    format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
+                );
             }
             "/clear" => {
                 self.messages.clear();
@@ -1728,6 +1635,7 @@ impl App {
                             "{}\nUsage: /share [--public] [--description <text>]",
                             err
                         ),
+                        tool_output: None,
                     });
                 }
             },
@@ -1753,23 +1661,23 @@ impl App {
                     if is_known || model_name.contains('/') {
                         self.switch_model(&full_model);
                     } else {
-                        self.messages.push(ChatMessage {
-                            role: "system".to_string(),
-                            content: format!(
+                        self.push_message(
+                            "system",
+                            format!(
                                 "Unknown model: {}. Use /models to see available options.",
                                 model_name
                             ),
-                        });
+                        );
                     }
                 } else {
                     let current = self
                         .current_model
                         .as_deref()
                         .unwrap_or("(default from config)");
-                    self.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!("Current model: {}\nUsage: /model <name>", current),
-                    });
+                    self.push_message(
+                        "system",
+                        format!("Current model: {}\nUsage: /model <name>", current),
+                    );
                 }
             }
             "/review" => {
@@ -1783,12 +1691,14 @@ impl App {
                             self.messages.push(ChatMessage {
                                 role: "system".to_string(),
                                 content: format!("Theme set to {}", self.theme.name),
+                                tool_output: None,
                             });
                         }
                         Err(err) => {
                             self.messages.push(ChatMessage {
                                 role: "system".to_string(),
                                 content: err,
+                                tool_output: None,
                             });
                         }
                     }
@@ -1800,17 +1710,18 @@ impl App {
                             self.theme.name,
                             Theme::available_names().join(", ")
                         ),
+                        tool_output: None,
                     });
                 }
             }
             _ => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!(
+                self.push_message(
+                    "system",
+                    format!(
                         "Unknown command: {}. Type /help for available commands.",
                         command
                     ),
-                });
+                );
             }
         }
     }
@@ -1879,7 +1790,8 @@ impl App {
                 self.scroll_to_bottom();
             }
             ThreadEvent::ItemStarted { item } => match item {
-                Item::ToolCall { name, .. } => {
+                Item::ToolCall { id, name, .. } => {
+                    self.tool_call_names.insert(id, name.clone());
                     self.agent_state = AgentState::ExecutingTool;
                     self.status = format!("Executing: {}", name);
                 }
@@ -1908,10 +1820,16 @@ impl App {
             },
             ThreadEvent::ItemCompleted { item } => match item {
                 Item::ToolResult {
-                    output, is_error, ..
+                    tool_call_id,
+                    output,
+                    is_error,
                 } => {
+                    let tool_name = self
+                        .tool_call_names
+                        .remove(&tool_call_id)
+                        .unwrap_or_else(|| "tool".to_string());
                     let role = if is_error { "error" } else { "tool" };
-                    self.push_message(role, output);
+                    self.push_tool_message(role, tool_name, output, false);
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
@@ -2108,21 +2026,21 @@ impl App {
                         }
                     });
                 } else {
-                    self.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!(
+                    self.push_message(
+                        "system",
+                        format!(
                             "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
                             model_str
                         ),
-                    });
+                    );
                 }
             }
             Err(e) => {
                 self.status = "Model switch failed".to_string();
-                self.messages.push(ChatMessage {
-                    role: "error".to_string(),
-                    content: format!("Failed to create client for {}: {}", model_str, e),
-                });
+                self.push_message(
+                    "error",
+                    format!("Failed to create client for {}: {}", model_str, e),
+                );
             }
         }
     }
@@ -2132,6 +2050,7 @@ impl App {
             self.messages.push(ChatMessage {
                 role: "system".to_string(),
                 content: "No messages to share yet. Start a conversation first.".to_string(),
+                tool_output: None,
             });
             return;
         }
@@ -2214,10 +2133,10 @@ impl App {
                 }
             });
         } else {
-            self.messages.push(ChatMessage {
-                role: "error".to_string(),
-                content: "No agent connected. Cannot fork session.".to_string(),
-            });
+            self.push_message(
+                "error",
+                "No agent connected. Cannot fork session.".to_string(),
+            );
         }
     }
 }
@@ -2332,10 +2251,12 @@ mod tests {
             ChatMessage {
                 role: "user".to_string(),
                 content: "Fix auth bug".to_string(),
+                tool_output: None,
             },
             ChatMessage {
                 role: "assistant".to_string(),
                 content: "I'll help".to_string(),
+                tool_output: None,
             },
         ];
 
