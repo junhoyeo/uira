@@ -36,7 +36,7 @@ dependencies = [
  "bytestring",
  "derive_more",
  "encoding_rs",
- "flat2",
+ "flate2",
  "foldhash",
  "futures-core",
  "h2 0.3.27",
@@ -1210,10 +1210,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
-name = "flat2"
-version = "1.1.8"
+name = "flate2"
+version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b375d6465b98090a5f25b1c7703f3859783755aa9a80433b36e0379a3ec2f369"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -2628,7 +2628,7 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b1853bc34cadaa90aa09f95713d8b77ec0c0d3e2d90ccf7a74216f40d20850"
 dependencies = [
- "flat2",
+ "flate2",
  "postcard",
  "rustc-hash",
  "serde",
@@ -4150,7 +4150,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
 dependencies = [
  "bincode",
- "flat2",
+ "flate2",
  "fnv",
  "once_cell",
  "onig",
