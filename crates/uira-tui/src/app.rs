@@ -10,7 +10,12 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::{io::Stdout, process::Command, sync::Arc};
+use std::fs;
+use std::io::Stdout;
+use std::io::Write;
+use std::sync::Arc;
+use std::{env, io, process::Command, thread, time::Duration};
+use tempfile::Builder;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
@@ -40,6 +45,43 @@ impl ReviewTarget {
             Self::Staged => "staged changes".to_string(),
             Self::File(path) => format!("changes in `{}`", path),
             Self::Revision(revision) => format!("commit `{}`", revision),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum KeyAction {
+    None,
+    OpenExternalEditor,
+}
+
+struct TerminalSuspendGuard<'a> {
+    terminal: &'a mut Terminal<CrosstermBackend<Stdout>>,
+    suspended: bool,
+}
+
+impl<'a> TerminalSuspendGuard<'a> {
+    fn new(terminal: &'a mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<Self> {
+        App::suspend_terminal(terminal)?;
+        Ok(Self {
+            terminal,
+            suspended: true,
+        })
+    }
+
+    fn resume(&mut self) -> io::Result<()> {
+        if self.suspended {
+            App::resume_terminal(self.terminal)?;
+            self.suspended = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for TerminalSuspendGuard<'_> {
+    fn drop(&mut self) {
+        if self.suspended {
+            let _ = App::resume_terminal(self.terminal);
         }
     }
 }
@@ -374,7 +416,9 @@ impl App {
             // Handle events
             if event::poll(std::time::Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
-                    self.handle_key_event(key);
+                    if let KeyAction::OpenExternalEditor = self.handle_key_event(key) {
+                        self.open_external_editor(terminal)?;
+                    }
                 }
             }
 
@@ -593,7 +637,7 @@ impl App {
         let title = if self.approval_overlay.is_active() {
             " Input (approval overlay active) "
         } else {
-            " Input (Enter to send, Ctrl+C to quit) "
+            " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit) "
         };
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
@@ -831,12 +875,39 @@ impl App {
         self.scroll_to_bottom();
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) {
+    fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('c') | KeyCode::Char('q') => {
+                    self.should_quit = true;
+                    return KeyAction::None;
+                }
+                KeyCode::Char('l') => {
+                    // Clear screen
+                    self.messages.clear();
+                    return KeyAction::None;
+                }
+                KeyCode::Char('g') => {
+                    if self.input_focused
+                        && !self.approval_overlay.is_active()
+                        && !self.model_selector.is_active()
+                    {
+                        return KeyAction::OpenExternalEditor;
+                    }
+                    return KeyAction::None;
+                }
+                _ => {}
+            }
+
+            // Ignore other Ctrl+<key> combinations for text input.
+            return KeyAction::None;
+        }
+
         if self.model_selector.is_active() {
             if let Some(selected_model) = self.model_selector.handle_key(key.code) {
                 self.switch_model(&selected_model);
             }
-            return;
+            return KeyAction::None;
         }
 
         // Approval overlay takes priority for key handling
@@ -844,23 +915,7 @@ impl App {
             if !self.approval_overlay.is_active() {
                 self.agent_state = AgentState::Thinking;
             }
-            return;
-        }
-
-        // Global shortcuts
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            match key.code {
-                KeyCode::Char('c') | KeyCode::Char('q') => {
-                    self.should_quit = true;
-                    return;
-                }
-                KeyCode::Char('l') => {
-                    // Clear screen
-                    self.messages.clear();
-                    return;
-                }
-                _ => {}
-            }
+            return KeyAction::None;
         }
 
         if key.modifiers.is_empty() && self.input.is_empty() {
@@ -949,6 +1004,165 @@ impl App {
                 _ => {}
             }
         }
+
+        KeyAction::None
+    }
+
+    fn open_external_editor(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    ) -> io::Result<()> {
+        let mut temp_file = Builder::new()
+            .prefix("uira-input-")
+            .suffix(".md")
+            .tempfile()?;
+        temp_file.write_all(self.input.as_bytes())?;
+        temp_file.flush()?;
+
+        let temp_path = temp_file.into_temp_path();
+        self.status = "Opening external editor...".to_string();
+
+        let mut guard = TerminalSuspendGuard::new(terminal)?;
+        let editor_result = self.run_editor_while_draining_events(temp_path.to_path_buf());
+        guard.resume()?;
+
+        match editor_result {
+            Ok(()) => {
+                let updated = fs::read(&temp_path)?;
+                let updated = String::from_utf8_lossy(&updated).to_string();
+                self.input = updated;
+                self.cursor_pos = self.input.chars().count();
+                self.status = "Loaded content from external editor".to_string();
+            }
+            Err(err) => {
+                self.status = format!("External editor failed: {}", err);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn run_editor_while_draining_events(
+        &mut self,
+        temp_path: std::path::PathBuf,
+    ) -> io::Result<()> {
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let _ = result_tx.send(Self::run_editor(&temp_path));
+        });
+
+        loop {
+            while let Ok(event) = self.event_rx.try_recv() {
+                self.handle_app_event(event);
+            }
+
+            match result_rx.try_recv() {
+                Ok(result) => return result,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return Err(io::Error::other("External editor thread disconnected"));
+                }
+            }
+        }
+    }
+
+    fn run_editor(temp_path: &std::path::Path) -> io::Result<()> {
+        let mut candidates = Vec::new();
+        if let Some(visual) = env::var_os("VISUAL") {
+            if !visual.is_empty() {
+                candidates.push(visual.to_string_lossy().to_string());
+            }
+        }
+        if let Some(editor) = env::var_os("EDITOR") {
+            if !editor.is_empty() {
+                let editor = editor.to_string_lossy().to_string();
+                if !candidates.iter().any(|candidate| candidate == &editor) {
+                    candidates.push(editor);
+                }
+            }
+        }
+        candidates.push("vim".to_string());
+        candidates.push("nano".to_string());
+
+        let mut last_err: Option<io::Error> = None;
+        for editor in candidates {
+            match Self::run_editor_command(&editor, temp_path) {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    if err.kind() == io::ErrorKind::NotFound {
+                        last_err = Some(err);
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "No suitable external editor found")
+        }))
+    }
+
+    fn run_editor_command(editor: &str, temp_path: &std::path::Path) -> io::Result<()> {
+        if editor.trim().is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Editor command is empty",
+            ));
+        }
+
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg("eval \"$UIRA_EDITOR\" \"$1\"")
+            .arg("uira-editor")
+            .arg(temp_path)
+            .env("UIRA_EDITOR", editor)
+            .status()?;
+
+        if status.code() == Some(127) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Editor not found: {}", editor),
+            ));
+        }
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "Editor exited with status {}",
+                status
+            )))
+        }
+    }
+
+    fn suspend_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+        use crossterm::{
+            execute,
+            terminal::{disable_raw_mode, LeaveAlternateScreen},
+        };
+
+        terminal.show_cursor()?;
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+        Ok(())
+    }
+
+    fn resume_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+        use crossterm::{
+            execute,
+            terminal::{enable_raw_mode, EnterAlternateScreen},
+        };
+
+        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        enable_raw_mode()?;
+        terminal.hide_cursor()?;
+        terminal.clear()?;
+
+        Ok(())
     }
 
     fn submit_input(&mut self, input: String) {
@@ -1469,7 +1683,10 @@ impl Default for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_review_prompt, parse_review_target, ReviewTarget};
+    use super::{build_review_prompt, parse_review_target, ReviewTarget, App, KeyAction};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn parse_review_target_defaults_to_staged() {
@@ -1500,5 +1717,42 @@ mod tests {
         assert!(prompt.contains("## Suggestions"));
         assert!(prompt.contains("## Praise"));
         assert!(prompt.contains("```diff"));
+    }
+
+    #[test]
+    fn ctrl_g_triggers_external_editor_action() {
+        let mut app = App::new();
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, KeyAction::OpenExternalEditor);
+    }
+
+    #[test]
+    fn unknown_ctrl_shortcut_does_not_insert_text() {
+        let mut app = App::new();
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, KeyAction::None);
+        assert!(app.input.is_empty());
+        assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn run_editor_command_supports_true_and_cat() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "hello").unwrap();
+
+        App::run_editor_command("true", file.path()).unwrap();
+        App::run_editor_command("cat", file.path()).unwrap();
+    }
+
+    #[test]
+    fn run_editor_command_reports_non_zero_exit() {
+        let file = NamedTempFile::new().unwrap();
+
+        let err = App::run_editor_command("false", file.path()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
     }
 }
