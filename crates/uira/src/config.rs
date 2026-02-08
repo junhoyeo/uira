@@ -9,8 +9,38 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_hooks: Option<AiHooksConfig>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_colors: Option<ThemeColorOverrides>,
+
     #[serde(flatten)]
     pub hooks: HashMap<String, HookConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct ThemeColorOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub success: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub borders: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -81,6 +111,8 @@ impl Config {
 
         Config {
             ai_hooks: None,
+            theme: None,
+            theme_colors: None,
             hooks,
         }
     }
@@ -116,5 +148,30 @@ mod tests {
         let parsed: Config = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(config.hooks.len(), parsed.hooks.len());
+    }
+
+    #[test]
+    fn test_parse_theme_fields_without_hook_collision() {
+        let yaml = r##"
+theme: dracula
+theme_colors:
+  accent: "#ff79c6"
+
+pre-commit:
+  commands:
+    - run: cargo fmt --check
+"##;
+
+        let parsed: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(parsed.theme.as_deref(), Some("dracula"));
+        assert_eq!(
+            parsed
+                .theme_colors
+                .as_ref()
+                .and_then(|c| c.accent.as_deref()),
+            Some("#ff79c6")
+        );
+        assert!(parsed.hooks.contains_key("pre-commit"));
+        assert!(!parsed.hooks.contains_key("theme_colors"));
     }
 }
