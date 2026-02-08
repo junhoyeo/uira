@@ -43,6 +43,10 @@ toml = { workspace = true }
 regex = { workspace = true }
 dirs = { workspace = true }
 chrono = { workspace = true }
+globset = "0.4"
+typos = "0.10"
+typos-dict = "0.13"
+unicase = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
