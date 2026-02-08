@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::fs;
@@ -39,12 +39,6 @@ use crate::{AppEvent, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
-const MAX_FILE_PICKER_RESULTS: usize = 8;
-const MAX_WORKSPACE_FILES: usize = 12_000;
-const FILE_INDEX_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
-const MAX_REFERENCED_FILES: usize = 8;
-const MAX_REFERENCED_FILE_BYTES: usize = 16 * 1024;
-const MAX_REFERENCED_TOTAL_BYTES: usize = 64 * 1024;
 /// Maximum image size for prompt attachments (10MB)
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -974,7 +968,10 @@ impl App {
         let title = if self.approval_overlay.is_active() {
             format!(" Input (approval overlay active{}) ", pending_label)
         } else {
-            format!(" Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ", pending_label)
+            format!(
+                " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                pending_label
+            )
         };
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
@@ -1629,7 +1626,7 @@ impl App {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
-                if tx.send(input).await.is_err() {
+                if tx.send(message).await.is_err() {
                     tracing::warn!("Agent input channel closed");
                 }
             });
