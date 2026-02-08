@@ -5461,6 +5461,7 @@ dependencies = [
 name = "uira-sandbox"
 version = "0.1.0"
 dependencies = [
+ "enumflags2",
  "landlock",
  "nix",
  "serde",
