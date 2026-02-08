@@ -19,7 +19,8 @@ mod config;
 mod session;
 
 use commands::{
-    AuthCommands, Cli, Commands, ConfigCommands, GoalsCommands, SessionsCommands, TasksCommands,
+    AuthCommands, Cli, Commands, CompletionShell, ConfigCommands, GoalsCommands, SessionsCommands,
+    TasksCommands,
 };
 use config::CliConfig;
 use session::{
@@ -1094,9 +1095,14 @@ fn print_result(result: &ExecutionResult) {
 /// - `uira-agent completion zsh > ~/.zsh/completions/_uira`
 /// - `uira-agent completion fish > ~/.config/fish/completions/uira.fish`
 /// - `uira-agent completion powershell > uira.ps1`
-fn run_completion(shell: Shell) -> Result<(), Box<dyn std::error::Error>> {
+fn run_completion(shell: CompletionShell) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Cli::command();
-    generate(shell, &mut cmd, "uira-agent", &mut std::io::stdout());
+    generate(
+        Shell::from(shell),
+        &mut cmd,
+        "uira-agent",
+        &mut std::io::stdout(),
+    );
     Ok(())
 }
 

@@ -1,15 +1,16 @@
 //! CLI commands
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
 /// Uira - Native AI Coding Agent
 #[derive(Parser, Debug)]
 #[command(name = "uira")]
 #[command(author, version, about, long_about = None)]
+#[command(subcommand_precedence_over_arg = true)]
 pub struct Cli {
     /// Prompt to execute (interactive mode if omitted)
-    #[arg(allow_hyphen_values = true)]
+    #[arg(trailing_var_arg = true)]
     pub prompt: Vec<String>,
 
     /// Model to use (e.g., claude-sonnet-4-20250514, gpt-4o)
@@ -109,8 +110,27 @@ pub enum Commands {
     Completion {
         /// Shell to generate completion for
         #[arg(value_enum)]
-        shell: Shell,
+        shell: CompletionShell,
     },
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+}
+
+impl From<CompletionShell> for Shell {
+    fn from(value: CompletionShell) -> Self {
+        match value {
+            CompletionShell::Bash => Shell::Bash,
+            CompletionShell::Zsh => Shell::Zsh,
+            CompletionShell::Fish => Shell::Fish,
+            CompletionShell::Powershell => Shell::PowerShell,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -218,14 +238,15 @@ mod tests {
     #[test]
     fn generates_completion_for_all_supported_shells() {
         for shell in [
-            clap_complete::Shell::Bash,
-            clap_complete::Shell::Zsh,
-            clap_complete::Shell::Fish,
-            clap_complete::Shell::PowerShell,
+            super::CompletionShell::Bash,
+            super::CompletionShell::Zsh,
+            super::CompletionShell::Fish,
+            super::CompletionShell::Powershell,
         ] {
             let mut cmd = Cli::command();
             let mut output = Vec::new();
-            generate(shell, &mut cmd, "uira-agent", &mut output);
+            let generator: clap_complete::Shell = shell.into();
+            generate(generator, &mut cmd, "uira-agent", &mut output);
             assert!(!output.is_empty());
         }
     }
