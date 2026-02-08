@@ -1092,7 +1092,8 @@ fn print_result(result: &ExecutionResult) {
 
 fn generate_completions(shell: Shell) {
     let mut cmd = Cli::command();
-    generate(shell, &mut cmd, "uira-agent", &mut std::io::stdout());
+    let bin_name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
 }
 
 /// Extract text content from a message content
