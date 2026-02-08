@@ -241,12 +241,11 @@ mod tests {
         assert_eq!(byte_offset_to_line_col(content, 12), (3, 1));
 
         // Non-ASCII: multibyte UTF-8 characters
-        // "cafe" at byte 7 (after 2-byte char)
-        let utf8_content = "caf\u{00E9}\ncafe";
-        // Line 1: "cafe" (4 chars, 5 bytes due to e-acute)
-        // Line 2: "cafe" starts at byte 6
-        assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 1));
-        assert_eq!(byte_offset_to_line_col(utf8_content, 7), (2, 2));
+        // "abé" is 3 chars but 4 bytes due to the accented character.
+        let utf8_content = "ab\u{00E9}\ncafe";
+        // Line 2 starts at byte 5.
+        assert_eq!(byte_offset_to_line_col(utf8_content, 5), (2, 1));
+        assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 2));
     }
 
     #[test]
