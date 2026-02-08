@@ -21,6 +21,7 @@ crossterm = "0.28"
 tui-textarea = "0.7"
 syntect = "5"
 tracing = "0.1"
+tempfile = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
