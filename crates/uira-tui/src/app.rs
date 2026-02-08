@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::collections::HashMap;
@@ -1452,11 +1452,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return;
+                    return KeyAction::None;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return;
+                    return KeyAction::None;
                 }
                 _ => {}
             }
