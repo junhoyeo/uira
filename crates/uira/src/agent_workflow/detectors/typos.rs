@@ -246,6 +246,13 @@ mod tests {
         // Line 2 starts at byte 5.
         assert_eq!(byte_offset_to_line_col(utf8_content, 5), (2, 1));
         assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 2));
+
+        // "naive" at byte 8 (after 2-byte char)
+        let utf8_content = "na\u{00EF}ve\nnaive";
+        // Line 1: "naive" (5 chars, 6 bytes due to i-diaeresis)
+        // Line 2: "naive" starts at byte 7
+        assert_eq!(byte_offset_to_line_col(utf8_content, 7), (2, 1));
+        assert_eq!(byte_offset_to_line_col(utf8_content, 8), (2, 2));
     }
 
     #[test]
