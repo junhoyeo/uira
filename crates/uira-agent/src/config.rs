@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_config::schema::{GoalConfig, PermissionActionConfig, PermissionRuleConfig};
+use uira_config::schema::{
+    CompactionSettings, GoalConfig, PermissionActionConfig, PermissionRuleConfig,
+};
+use uira_context::{CompactionConfig, CompactionStrategy};
 use uira_permissions::{ConfigAction, ConfigRule};
 use uira_protocol::SandboxPreference;
 use uira_sandbox::SandboxPolicy;
@@ -57,6 +60,10 @@ pub struct AgentConfig {
     /// Goal verification configuration
     #[serde(default)]
     pub goals: AgentGoalsConfig,
+
+    /// Context compaction configuration
+    #[serde(default)]
+    pub compaction: CompactionConfig,
 
     /// Model to use
     #[serde(default)]
@@ -141,6 +148,7 @@ impl Default for AgentConfig {
             max_continuation_attempts: default_max_continuation_attempts(),
             task_system: false,
             goals: AgentGoalsConfig::default(),
+            compaction: CompactionConfig::default(),
             model: None,
             system_prompt: Some(default_system_prompt()),
             permission_rules: Vec::new(),
@@ -190,6 +198,28 @@ impl AgentConfig {
         self
     }
 
+    pub fn with_compaction(mut self, compaction: CompactionConfig) -> Self {
+        self.compaction = compaction;
+        self
+    }
+
+    pub fn with_compaction_settings(mut self, settings: &CompactionSettings) -> Self {
+        let strategy = if settings.enabled {
+            parse_compaction_strategy(&settings.strategy)
+        } else {
+            CompactionStrategy::None
+        };
+
+        self.compaction = CompactionConfig {
+            enabled: settings.enabled,
+            threshold: settings.threshold,
+            protected_tokens: settings.protected_tokens,
+            strategy,
+            summarization_model: settings.summarization_model.clone(),
+        };
+        self
+    }
+
     pub fn with_permission_rules(mut self, rules: Vec<PermissionRuleConfig>) -> Self {
         self.permission_rules = rules;
         self
@@ -211,6 +241,20 @@ impl AgentConfig {
             })
             .collect()
     }
+}
+
+fn parse_compaction_strategy(strategy: &str) -> CompactionStrategy {
+    match strategy.to_ascii_lowercase().as_str() {
+        "none" => CompactionStrategy::None,
+        "prune" => CompactionStrategy::Prune,
+        "summarize" => CompactionStrategy::summarize(default_summary_target_tokens()),
+        "hybrid" => CompactionStrategy::hybrid(default_summary_target_tokens()),
+        _ => CompactionStrategy::summarize(default_summary_target_tokens()),
+    }
+}
+
+fn default_summary_target_tokens() -> usize {
+    1_024
 }
 
 /// Configuration for agent goal verification
@@ -282,5 +326,40 @@ impl AgentGoalsConfig {
 
     pub fn has_goals(&self) -> bool {
         !self.goals.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_with_compaction_settings_summarize_strategy() {
+        let mut settings = CompactionSettings::default();
+        settings.strategy = "summarize".to_string();
+        settings.threshold = 0.65;
+
+        let config = AgentConfig::new().with_compaction_settings(&settings);
+
+        assert!((config.compaction.threshold - 0.65).abs() < f64::EPSILON);
+        assert!(matches!(
+            config.compaction.strategy,
+            CompactionStrategy::Summarize { .. }
+        ));
+    }
+
+    #[test]
+    fn test_with_compaction_settings_disabled() {
+        let mut settings = CompactionSettings::default();
+        settings.enabled = false;
+        settings.strategy = "summarize".to_string();
+
+        let config = AgentConfig::new().with_compaction_settings(&settings);
+
+        assert!(!config.compaction.enabled);
+        assert!(matches!(
+            config.compaction.strategy,
+            CompactionStrategy::None
+        ));
     }
 }

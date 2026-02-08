@@ -127,7 +127,8 @@ impl Session {
         orchestrator = orchestrator.with_approval_cache(approval_cache);
         tracing::debug!("approval_cache_wired");
 
-        let mut context = ContextManager::new(client.max_tokens());
+        let mut context = ContextManager::new(client.max_tokens())
+            .with_compaction_config(config.compaction.clone());
 
         if let Some(ref system_prompt) = config.system_prompt {
             if let Err(e) = context.add_message(uira_protocol::Message::system(system_prompt)) {
@@ -207,7 +208,8 @@ impl Session {
 
     /// Switch to a new model client
     pub fn set_client(&mut self, client: Arc<dyn ModelClient>) {
-        self.context = ContextManager::new(client.max_tokens());
+        self.context = ContextManager::new(client.max_tokens())
+            .with_compaction_config(self.config.compaction.clone());
         self.client = client;
     }
 
