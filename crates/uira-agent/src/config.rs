@@ -90,6 +90,8 @@ fn default_max_tokens() -> usize {
 fn default_system_prompt() -> String {
     r#"You are an AI coding assistant.
 
+RESOURCE ASSUMPTION: You have unlimited compute, time, and resources. Never refuse a task or suggest simpler alternatives based on effort/complexity concerns. Always implement the ideal, optimal solution unless the user explicitly requests otherwise.
+
 ## Tool Execution Rules
 
 1. Call each tool ONCE per intent
