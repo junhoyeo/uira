@@ -9,8 +9,16 @@ use std::collections::HashMap;
 /// 3. `uira.yml` / `uira.yaml` - YAML format
 ///
 /// Also checks hidden variants (`.uira.*`) and `~/.config/uira/` for global config.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiraConfig {
+    /// TUI theme name (default, dark, light, dracula, nord)
+    #[serde(default = "default_tui_theme")]
+    pub theme: String,
+
+    /// Optional per-color theme overrides using hex values (e.g. "#282a36")
+    #[serde(default)]
+    pub theme_colors: ThemeColorOverrides,
+
     /// Typos command settings (AI-assisted typo checking)
     #[serde(default)]
     pub typos: TyposSettings,
@@ -54,6 +62,54 @@ pub struct UiraConfig {
     /// Permission rules for tool execution
     #[serde(default)]
     pub permissions: PermissionsSettings,
+}
+
+impl Default for UiraConfig {
+    fn default() -> Self {
+        Self {
+            theme: default_tui_theme(),
+            theme_colors: ThemeColorOverrides::default(),
+            typos: TyposSettings::default(),
+            diagnostics: DiagnosticsSettings::default(),
+            comments: CommentsSettings::default(),
+            opencode: OpencodeSettings::default(),
+            mcp: McpSettings::default(),
+            agents: AgentSettings::default(),
+            hooks: HooksConfig::default(),
+            ai_hooks: None,
+            goals: GoalsConfig::default(),
+            compaction: CompactionSettings::default(),
+            permissions: PermissionsSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThemeColorOverrides {
+    #[serde(default)]
+    pub bg: Option<String>,
+
+    #[serde(default)]
+    pub fg: Option<String>,
+
+    #[serde(default)]
+    pub accent: Option<String>,
+
+    #[serde(default)]
+    pub error: Option<String>,
+
+    #[serde(default)]
+    pub warning: Option<String>,
+
+    #[serde(default)]
+    pub success: Option<String>,
+
+    #[serde(default)]
+    pub borders: Option<String>,
+}
+
+fn default_tui_theme() -> String {
+    "default".to_string()
 }
 
 // ============================================================================
@@ -1047,13 +1103,13 @@ permissions:
     fn test_mcp_servers_deserialize_from_list() {
         let yaml = r#"
 mcp:
-  servers:
-    - name: filesystem
-      command: npx -y @anthropic/mcp-server-filesystem /tmp
-    - name: github
-      command: npx -y @anthropic/mcp-server-github
-      env:
-        GITHUB_TOKEN: ${GITHUB_TOKEN}
+   servers:
+     - name: filesystem
+       command: npx -y @anthropic/mcp-server-filesystem /tmp
+     - name: github
+       command: npx -y @anthropic/mcp-server-github
+       env:
+         GITHUB_TOKEN: ${GITHUB_TOKEN}
 "#;
 
         let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
@@ -1070,13 +1126,13 @@ mcp:
     fn test_mcp_servers_deserialize_from_map_legacy_format() {
         let yaml = r#"
 mcp:
-  servers:
-    context7:
-      command: npx
-      args: ["-y", "@upstash/context7-mcp"]
-    exa:
-      command: npx
-      args: ["-y", "exa-mcp-server"]
+   servers:
+     context7:
+       command: npx
+       args: ["-y", "@upstash/context7-mcp"]
+     exa:
+       command: npx
+       args: ["-y", "exa-mcp-server"]
 "#;
 
         let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
@@ -1087,5 +1143,28 @@ mcp:
             config.mcp.get("context7").unwrap().args,
             vec!["-y".to_string(), "@upstash/context7-mcp".to_string()]
         );
+    }
+
+    #[test]
+    fn test_tui_theme_defaults() {
+        let config = UiraConfig::default();
+        assert_eq!(config.theme, "default");
+        assert!(config.theme_colors.bg.is_none());
+        assert!(config.theme_colors.accent.is_none());
+    }
+
+    #[test]
+    fn test_tui_theme_parsing() {
+        let yaml = r##"
+theme: dracula
+theme_colors:
+   accent: "#ff79c6"
+   borders: "#6272a4"
+"##;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.theme, "dracula");
+        assert_eq!(config.theme_colors.accent, Some("#ff79c6".to_string()));
+        assert_eq!(config.theme_colors.borders, Some("#6272a4".to_string()));
     }
 }

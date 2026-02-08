@@ -95,6 +95,8 @@ Credentials are securely stored in `~/.uira/credentials/`.
 | `/help`, `/h`, `/?` | Show available commands |
 | `/models` | Open model selector (keyboard-driven) |
 | `/model <name>` | Switch to a specific model |
+| `/theme` | List available TUI themes |
+| `/theme <name>` | Switch TUI theme |
 | `/share [--public] [--description <text>]` | Share current session as a GitHub Gist |
 | `/clear` | Clear chat history |
 | `/status`, `/auth` | Show connection status |
@@ -321,6 +323,11 @@ Create `uira.yml` in your project root:
 # Model configuration
 model: claude-sonnet-4-20250514
 max_tokens: 128000
+
+# TUI theme
+theme: dracula  # default | dark | light | dracula | nord
+theme_colors:
+  accent: "#ff79c6"   # optional custom override (hex)
 
 # Sandbox settings
 sandbox:

@@ -5,10 +5,12 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Paragraph, Widget, Wrap},
 };
+
+use crate::Theme;
 
 /// Message for display
 #[derive(Debug, Clone)]
@@ -21,6 +23,7 @@ pub struct ChatMessage {
 pub struct ChatWidget<'a> {
     messages: &'a [ChatMessage],
     block: Option<Block<'a>>,
+    theme: Theme,
 }
 
 impl<'a> ChatWidget<'a> {
@@ -28,6 +31,7 @@ impl<'a> ChatWidget<'a> {
         Self {
             messages,
             block: None,
+            theme: Theme::default(),
         }
     }
 
@@ -36,12 +40,18 @@ impl<'a> ChatWidget<'a> {
         self
     }
 
-    fn render_message(msg: &ChatMessage) -> Vec<Line<'static>> {
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    fn render_message(msg: &ChatMessage, theme: &Theme) -> Vec<Line<'static>> {
         let role_style = match msg.role.as_str() {
-            "user" => Style::default().fg(Color::Green),
-            "assistant" => Style::default().fg(Color::Blue),
-            "system" => Style::default().fg(Color::Yellow),
-            _ => Style::default().fg(Color::White),
+            "user" => Style::default().fg(theme.accent),
+            "assistant" => Style::default().fg(theme.fg),
+            "system" => Style::default().fg(theme.warning),
+            "error" => Style::default().fg(theme.error),
+            _ => Style::default().fg(theme.fg),
         };
 
         let mut lines = vec![Line::from(vec![Span::styled(
@@ -72,7 +82,7 @@ impl Widget for ChatWidget<'_> {
         let lines: Vec<Line> = self
             .messages
             .iter()
-            .flat_map(Self::render_message)
+            .flat_map(|msg| Self::render_message(msg, &self.theme))
             .collect();
 
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });

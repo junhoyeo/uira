@@ -912,6 +912,17 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
 
     // Run TUI
     let mut app = uira_tui::App::new();
+    let theme_name = uira_config
+        .as_ref()
+        .map(|cfg| cfg.theme.as_str())
+        .unwrap_or("default");
+    let theme_overrides = build_theme_overrides(uira_config.as_ref());
+
+    if let Err(err) = app.configure_theme(theme_name, theme_overrides) {
+        tracing::warn!("Failed to apply theme '{}': {}", theme_name, err);
+        let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
+    }
+
     let result = app
         .run_with_agent(&mut terminal, agent_config, client)
         .await;
@@ -936,6 +947,20 @@ fn build_agent_model_overrides(
         }
     }
     overrides
+}
+
+fn build_theme_overrides(
+    uira_config: Option<&uira_config::schema::UiraConfig>,
+) -> uira_tui::ThemeOverrides {
+    uira_tui::ThemeOverrides {
+        bg: uira_config.and_then(|cfg| cfg.theme_colors.bg.clone()),
+        fg: uira_config.and_then(|cfg| cfg.theme_colors.fg.clone()),
+        accent: uira_config.and_then(|cfg| cfg.theme_colors.accent.clone()),
+        error: uira_config.and_then(|cfg| cfg.theme_colors.error.clone()),
+        warning: uira_config.and_then(|cfg| cfg.theme_colors.warning.clone()),
+        success: uira_config.and_then(|cfg| cfg.theme_colors.success.clone()),
+        borders: uira_config.and_then(|cfg| cfg.theme_colors.borders.clone()),
+    }
 }
 
 fn create_client(

@@ -7,13 +7,15 @@ use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
     Frame,
 };
 use tokio::sync::oneshot;
 use uira_protocol::ReviewDecision;
+
+use crate::Theme;
 
 /// Approval request with response channel
 pub struct ApprovalRequest {
@@ -51,6 +53,8 @@ pub struct ApprovalOverlay {
     selected: usize,
     /// Scroll offset for long input display
     scroll: u16,
+    /// Current theme
+    theme: Theme,
 }
 
 impl ApprovalOverlay {
@@ -61,7 +65,12 @@ impl ApprovalOverlay {
             queue: Vec::new(),
             selected: 0,
             scroll: 0,
+            theme: Theme::default(),
         }
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
     }
 
     /// Add an approval request to the queue
@@ -203,6 +212,7 @@ impl ApprovalOverlay {
                     selected: self.selected,
                     scroll: self.scroll,
                     queue_count: self.queue.len(),
+                    theme: &self.theme,
                 },
                 modal_area,
             );
@@ -222,6 +232,7 @@ struct ApprovalModal<'a> {
     selected: usize,
     scroll: u16,
     queue_count: usize,
+    theme: &'a Theme,
 }
 
 impl Widget for ApprovalModal<'_> {
@@ -239,7 +250,7 @@ impl Widget for ApprovalModal<'_> {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow));
+            .border_style(Style::default().fg(self.theme.borders));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -259,7 +270,7 @@ impl Widget for ApprovalModal<'_> {
         // Reason section
         let reason_text = format!("Reason: {}", self.request.reason);
         let reason = Paragraph::new(reason_text)
-            .style(Style::default().fg(Color::White))
+            .style(Style::default().fg(self.theme.fg))
             .wrap(Wrap { trim: true });
         reason.render(chunks[0], buf);
 
@@ -270,13 +281,13 @@ impl Widget for ApprovalModal<'_> {
             .lines()
             .skip(self.scroll as usize)
             .take(chunks[1].height as usize)
-            .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::Cyan))))
+            .map(|line| Line::from(Span::styled(line, Style::default().fg(self.theme.accent))))
             .collect();
 
         let input_block = Block::default()
             .title(" Input ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_style(Style::default().fg(self.theme.borders));
 
         let input_inner = input_block.inner(chunks[1]);
         input_block.render(chunks[1], buf);
@@ -291,7 +302,7 @@ impl Widget for ApprovalModal<'_> {
         let help = Paragraph::new(
             "↑↓/jk: scroll | ←→/hl/Tab: select | Enter: confirm | y: yes | a: all | n/Esc: no",
         )
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(self.theme.borders))
         .alignment(Alignment::Center);
         help.render(chunks[4], buf);
     }
@@ -310,11 +321,11 @@ impl ApprovalModal<'_> {
 
             let style = if self.selected == *idx {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
+                    .fg(Theme::contrast_text(self.theme.accent))
+                    .bg(self.theme.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(self.theme.fg)
             };
 
             // Pad label to center in button width
@@ -329,6 +340,7 @@ pub struct ApprovalView<'a> {
     tool_name: &'a str,
     description: &'a str,
     selected: usize, // 0 = Approve, 1 = Deny, 2 = Edit
+    theme: Theme,
 }
 
 impl<'a> ApprovalView<'a> {
@@ -337,7 +349,13 @@ impl<'a> ApprovalView<'a> {
             tool_name,
             description,
             selected: 0,
+            theme: Theme::default(),
         }
+    }
+
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
     }
 
     pub fn select_next(&mut self) {
@@ -365,7 +383,7 @@ impl Widget for ApprovalView<'_> {
         let block = Block::default()
             .title(format!(" Approve: {} ", self.tool_name))
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Yellow));
+            .style(Style::default().fg(self.theme.borders));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -385,9 +403,11 @@ impl Widget for ApprovalView<'_> {
 
         for (i, button) in buttons.iter().enumerate() {
             let style = if i == self.selected {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
+                Style::default()
+                    .fg(Theme::contrast_text(self.theme.accent))
+                    .bg(self.theme.accent)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(self.theme.fg)
             };
 
             buf.set_string(x, button_y, *button, style);

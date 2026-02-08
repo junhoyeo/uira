@@ -129,6 +129,8 @@ pub fn find_all_config_files() -> Vec<PathBuf> {
 
 fn expand_env_vars(config: UiraConfig) -> UiraConfig {
     UiraConfig {
+        theme: expand_env_string(&config.theme),
+        theme_colors: expand_theme_color_overrides(config.theme_colors),
         typos: expand_typos_settings(config.typos),
         diagnostics: expand_diagnostics_settings(config.diagnostics),
         comments: expand_comments_settings(config.comments),
@@ -141,6 +143,19 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         compaction: expand_compaction_settings(config.compaction),
         permissions: config.permissions,
     }
+}
+
+fn expand_theme_color_overrides(
+    mut overrides: crate::schema::ThemeColorOverrides,
+) -> crate::schema::ThemeColorOverrides {
+    overrides.bg = overrides.bg.as_ref().map(|v| expand_env_string(v));
+    overrides.fg = overrides.fg.as_ref().map(|v| expand_env_string(v));
+    overrides.accent = overrides.accent.as_ref().map(|v| expand_env_string(v));
+    overrides.error = overrides.error.as_ref().map(|v| expand_env_string(v));
+    overrides.warning = overrides.warning.as_ref().map(|v| expand_env_string(v));
+    overrides.success = overrides.success.as_ref().map(|v| expand_env_string(v));
+    overrides.borders = overrides.borders.as_ref().map(|v| expand_env_string(v));
+    overrides
 }
 
 fn expand_compaction_settings(
@@ -281,6 +296,24 @@ mod tests {
     fn test_expand_env_string_missing_var() {
         let result = expand_env_string("prefix_${NONEXISTENT_VAR}_suffix");
         assert_eq!(result, "prefix_${NONEXISTENT_VAR}_suffix");
+    }
+
+    #[test]
+    fn test_expand_theme_env_settings() {
+        env::set_var("UIRA_THEME_NAME", "dracula");
+        env::set_var("UIRA_THEME_ACCENT", "#ff79c6");
+
+        let yaml = r#"
+theme: $UIRA_THEME_NAME
+theme_colors:
+  accent: ${UIRA_THEME_ACCENT}
+"#;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let expanded = expand_env_vars(config);
+
+        assert_eq!(expanded.theme, "dracula");
+        assert_eq!(expanded.theme_colors.accent, Some("#ff79c6".to_string()));
     }
 
     #[test]

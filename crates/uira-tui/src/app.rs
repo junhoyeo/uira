@@ -5,7 +5,7 @@ use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
@@ -13,6 +13,7 @@ use ratatui::{
 use std::fs;
 use std::io::Stdout;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, io, process::Command, thread, time::Duration};
@@ -29,16 +30,13 @@ use uira_providers::{
 
 use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
 use crate::widgets::ChatMessage;
-use crate::AppEvent;
+use crate::{AppEvent, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
 const MAX_FILE_PICKER_RESULTS: usize = 8;
 const MAX_WORKSPACE_FILES: usize = 12_000;
 const FILE_INDEX_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
-const MAX_REFERENCED_FILES: usize = 8;
-const MAX_REFERENCED_FILE_BYTES: usize = 16 * 1024;
-const MAX_REFERENCED_TOTAL_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewTarget {
@@ -358,7 +356,7 @@ async fn create_gist_from_markdown(
     let description = options.description.unwrap_or(default_desc);
     let file_path_str = temp_file.path().to_string_lossy().to_string();
 
-    let mut cmd = Command::new("gh");
+    let mut cmd = TokioCommand::new("gh");
     cmd.arg("gist")
         .arg("create")
         .arg(&file_path_str)
@@ -447,20 +445,6 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     }
 
     lines
-}
-
-#[derive(Debug, Clone)]
-struct FileReferenceToken {
-    pattern: String,
-    start_char: usize,
-    end_char: usize,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedFileReference {
-    path: String,
-    content: String,
-    truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -607,15 +591,27 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     session_id: Option<String>,
+    workspace_root: PathBuf,
+    workspace_files: Vec<String>,
+    last_file_index_refresh: Option<SystemTime>,
+    file_picker: Option<FilePickerState>,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
+    theme: Theme,
+    theme_overrides: ThemeOverrides,
 }
 
 impl App {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
         let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let theme = Theme::default();
+        let mut approval_overlay = ApprovalOverlay::new();
+        approval_overlay.set_theme(theme.clone());
+        let mut model_selector = ModelSelector::new();
+        model_selector.set_theme(theme.clone());
+
         Self {
             should_quit: false,
             event_tx,
@@ -629,16 +625,39 @@ impl App {
             input_focused: true,
             streaming_buffer: None,
             thinking_buffer: None,
-            approval_overlay: ApprovalOverlay::new(),
-            model_selector: ModelSelector::new(),
+            approval_overlay,
+            model_selector,
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
             session_id: None,
+            workspace_root,
+            workspace_files: Vec::new(),
+            last_file_index_refresh: None,
+            file_picker: None,
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
+            theme,
+            theme_overrides: ThemeOverrides::default(),
         }
+    }
+
+    pub fn configure_theme(
+        &mut self,
+        theme_name: &str,
+        overrides: ThemeOverrides,
+    ) -> Result<(), String> {
+        self.theme_overrides = overrides;
+        self.set_theme_by_name(theme_name)
+    }
+
+    fn set_theme_by_name(&mut self, theme_name: &str) -> Result<(), String> {
+        let theme = Theme::from_name_with_overrides(theme_name, &self.theme_overrides)?;
+        self.theme = theme;
+        self.approval_overlay.set_theme(self.theme.clone());
+        self.model_selector.set_theme(self.theme.clone());
+        Ok(())
     }
 
     pub fn with_model(mut self, model: &str) -> Self {
@@ -776,11 +795,22 @@ impl App {
         }
     }
 
+    fn message_style(&self, role: &str) -> Style {
+        match role {
+            "user" => Style::default().fg(self.theme.accent),
+            "assistant" => Style::default().fg(self.theme.fg),
+            "tool" => Style::default().fg(self.theme.accent),
+            "error" => Style::default().fg(self.theme.error),
+            "system" => Style::default().fg(self.theme.warning),
+            _ => Style::default().fg(self.theme.fg),
+        }
+    }
+
     fn render_chat(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let block = Block::default()
             .title(" Uira ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Cyan));
+            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
 
         let inner_width = area.width.saturating_sub(2) as usize;
 
@@ -792,18 +822,11 @@ impl App {
                     (
                         "thinking: ",
                         Style::default()
-                            .fg(Color::Gray)
+                            .fg(self.theme.borders)
                             .add_modifier(Modifier::ITALIC),
                     )
                 } else {
-                    let s = match msg.role.as_str() {
-                        "user" => Style::default().fg(Color::Green),
-                        "assistant" => Style::default().fg(Color::Cyan),
-                        "tool" => Style::default().fg(Color::Magenta),
-                        "error" => Style::default().fg(Color::Red),
-                        "system" => Style::default().fg(Color::Yellow),
-                        _ => Style::default(),
-                    };
+                    let s = self.message_style(msg.role.as_str());
                     ("", s)
                 };
 
@@ -821,7 +844,7 @@ impl App {
         if let Some(ref buffer) = self.thinking_buffer {
             if !buffer.is_empty() {
                 let style = Style::default()
-                    .fg(Color::Gray)
+                    .fg(self.theme.borders)
                     .add_modifier(Modifier::ITALIC);
                 let lines = wrap_message("> Thinking: ", buffer, inner_width, style);
                 items.push(ListItem::new(Text::from(lines)));
@@ -830,13 +853,13 @@ impl App {
 
         if let Some(ref buffer) = self.streaming_buffer {
             if !buffer.is_empty() {
-                let style = Style::default().fg(Color::Cyan);
+                let style = self.message_style("assistant");
                 let mut lines = wrap_message("assistant: ", buffer, inner_width, style);
                 if let Some(last) = lines.last_mut() {
                     last.spans.push(Span::styled(
                         "▌",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(self.theme.warning)
                             .add_modifier(Modifier::SLOW_BLINK),
                     ));
                 }
@@ -852,23 +875,25 @@ impl App {
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         let state_str = match self.agent_state {
-            AgentState::Idle => ("Idle", Color::Gray),
-            AgentState::Thinking => ("Thinking...", Color::Yellow),
-            AgentState::ExecutingTool => ("Executing tool...", Color::Magenta),
-            AgentState::WaitingForApproval => ("Awaiting approval", Color::Red),
-            AgentState::WaitingForUser => ("Waiting for input", Color::Blue),
-            AgentState::Complete => ("Complete", Color::Green),
-            AgentState::Cancelled => ("Cancelled", Color::Red),
-            AgentState::Failed => ("Failed", Color::Red),
+            AgentState::Idle => ("Idle", self.theme.borders),
+            AgentState::Thinking => ("Thinking...", self.theme.warning),
+            AgentState::ExecutingTool => ("Executing tool...", self.theme.accent),
+            AgentState::WaitingForApproval => ("Awaiting approval", self.theme.error),
+            AgentState::WaitingForUser => ("Waiting for input", self.theme.accent),
+            AgentState::Complete => ("Complete", self.theme.success),
+            AgentState::Cancelled => ("Cancelled", self.theme.error),
+            AgentState::Failed => ("Failed", self.theme.error),
         };
 
         let mut spans = vec![
             Span::styled(
                 format!(" {} ", state_str.0),
-                Style::default().fg(Color::Black).bg(state_str.1),
+                Style::default()
+                    .fg(Theme::contrast_text(state_str.1))
+                    .bg(state_str.1),
             ),
             Span::raw(" "),
-            Span::styled(&self.status, Style::default().fg(Color::DarkGray)),
+            Span::styled(&self.status, Style::default().fg(self.theme.fg)),
         ];
 
         // Show pending approval count
@@ -877,12 +902,12 @@ impl App {
             spans.push(Span::raw(" | "));
             spans.push(Span::styled(
                 format!("{} pending approval(s)", pending),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(self.theme.warning),
             ));
         }
 
         let status = Paragraph::new(Line::from(spans))
-            .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+            .style(Style::default().bg(self.theme.bg).fg(self.theme.fg));
 
         frame.render_widget(status, area);
     }
@@ -896,9 +921,9 @@ impl App {
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
             if self.input_focused && !self.approval_overlay.is_active() {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(self.theme.accent)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(self.theme.borders)
             },
         );
 
@@ -939,7 +964,7 @@ impl App {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Yellow));
+            .style(Style::default().fg(self.theme.borders));
 
         let inner = block.inner(area);
         let max_width = inner.width.saturating_sub(1) as usize;
@@ -949,18 +974,18 @@ impl App {
             .iter()
             .map(|todo| {
                 let (indicator, status_color) = match todo.status {
-                    TodoStatus::Completed => ("✓", Color::Green),
-                    TodoStatus::InProgress => ("•", Color::Yellow),
-                    TodoStatus::Cancelled => ("✗", Color::DarkGray),
-                    TodoStatus::Pending => (" ", Color::Gray),
+                    TodoStatus::Completed => ("✓", self.theme.success),
+                    TodoStatus::InProgress => ("•", self.theme.warning),
+                    TodoStatus::Cancelled => ("✗", self.theme.borders),
+                    TodoStatus::Pending => (" ", self.theme.borders),
                 };
 
                 // Priority marker and color override
                 let (priority_marker, color) = match (todo.status, todo.priority) {
                     (TodoStatus::Completed, _) => ("", status_color),
                     (TodoStatus::Cancelled, _) => ("", status_color),
-                    (_, TodoPriority::High) => ("⚡ ", Color::Red),
-                    (_, TodoPriority::Medium) => ("• ", Color::Yellow),
+                    (_, TodoPriority::High) => ("⚡ ", self.theme.error),
+                    (_, TodoPriority::Medium) => ("• ", self.theme.warning),
                     (_, TodoPriority::Low) => ("", status_color),
                 };
 
@@ -1121,6 +1146,153 @@ impl App {
         }
     }
 
+    fn refresh_file_index(&mut self) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.workspace_root)
+            .arg("ls-files")
+            .output();
+
+        let mut files = match output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+
+        if files.len() > MAX_WORKSPACE_FILES {
+            files.truncate(MAX_WORKSPACE_FILES);
+        }
+
+        self.workspace_files = files;
+        self.last_file_index_refresh = Some(SystemTime::now());
+    }
+
+    fn update_file_picker_state(&mut self) {
+        let needs_refresh = self
+            .last_file_index_refresh
+            .and_then(|last| SystemTime::now().duration_since(last).ok())
+            .map(|elapsed| elapsed >= FILE_INDEX_REFRESH_INTERVAL)
+            .unwrap_or(true);
+
+        if needs_refresh {
+            self.refresh_file_index();
+        }
+
+        let char_count = self.input.chars().count();
+        if self.cursor_pos == 0 || self.cursor_pos > char_count {
+            self.file_picker = None;
+            return;
+        }
+
+        let prefix: String = self.input.chars().take(self.cursor_pos).collect();
+        let token_start = prefix
+            .rfind(|c: char| c.is_whitespace())
+            .map_or(0, |i| i + 1);
+        let token = prefix[token_start..].to_string();
+
+        if !token.starts_with('@') || token.len() <= 1 {
+            self.file_picker = None;
+            return;
+        }
+
+        let query = token[1..].to_lowercase();
+        let mut matches: Vec<String> = self
+            .workspace_files
+            .iter()
+            .filter(|path| path.to_lowercase().contains(&query))
+            .take(MAX_FILE_PICKER_RESULTS)
+            .cloned()
+            .collect();
+
+        if matches.is_empty() {
+            self.file_picker = None;
+            return;
+        }
+
+        matches.sort();
+        self.file_picker = Some(FilePickerState {
+            query,
+            start_char: token_start,
+            end_char: self.cursor_pos,
+            matches,
+            selected: 0,
+        });
+    }
+
+    fn move_file_picker_selection(&mut self, delta: isize) {
+        let Some(state) = self.file_picker.as_mut() else {
+            return;
+        };
+        if state.matches.is_empty() {
+            return;
+        }
+
+        let len = state.matches.len() as isize;
+        let next = (state.selected as isize + delta).rem_euclid(len);
+        state.selected = next as usize;
+    }
+
+    fn apply_file_picker_selection(&mut self) {
+        let Some(state) = self.file_picker.take() else {
+            return;
+        };
+        if state.matches.is_empty() {
+            return;
+        }
+
+        let selected = state.matches[state.selected].clone();
+        let before: String = self.input.chars().take(state.start_char).collect();
+        let after: String = self.input.chars().skip(state.end_char).collect();
+        self.input = format!("{}@{} {}", before, selected, after.trim_start());
+        self.cursor_pos = self.input.chars().count();
+    }
+
+    fn render_file_picker(&self, frame: &mut ratatui::Frame, chat_area: Rect, _input_area: Rect) {
+        let Some(state) = self.file_picker.as_ref() else {
+            return;
+        };
+
+        let width = chat_area.width.min(80);
+        let height = (state.matches.len() as u16 + 3).min(chat_area.height.saturating_sub(2));
+        if height < 3 {
+            return;
+        }
+
+        let popup = Rect {
+            x: chat_area.x + 1,
+            y: chat_area.y + chat_area.height.saturating_sub(height + 1),
+            width,
+            height,
+        };
+
+        frame.render_widget(Clear, popup);
+        let block = Block::default()
+            .title(format!(" File suggestions: {} ", state.query))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
+
+        let items: Vec<ListItem> = state
+            .matches
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                let style = if idx == state.selected {
+                    Style::default().fg(self.theme.accent)
+                } else {
+                    Style::default().fg(self.theme.fg)
+                };
+                ListItem::new(Span::styled(item.clone(), style))
+            })
+            .collect();
+
+        let list = List::new(items).block(block);
+        frame.render_widget(list, popup);
+    }
+
     fn push_message(&mut self, role: &str, content: String) {
         self.messages.push(ChatMessage {
             role: role.to_string(),
@@ -1176,11 +1348,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return;
+                    return KeyAction::None;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return;
+                    return KeyAction::None;
                 }
                 _ => {}
             }
@@ -1192,19 +1364,19 @@ impl App {
                 match key.code {
                     KeyCode::Up => {
                         self.move_file_picker_selection(-1);
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Down => {
                         self.move_file_picker_selection(1);
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Enter | KeyCode::Tab => {
                         self.apply_file_picker_selection();
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Esc => {
                         self.file_picker = None;
-                        return;
+                        return KeyAction::None;
                     }
                     _ => {}
                 }
@@ -1467,6 +1639,7 @@ impl App {
     fn send_agent_input(&mut self, input: String) {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
+            let prepared_input = input;
             tokio::spawn(async move {
                 if tx.send(prepared_input).await.is_err() {
                     tracing::warn!("Agent input channel closed");
@@ -1523,7 +1696,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
                         .to_string(),
                 });
             }
@@ -1601,6 +1774,34 @@ impl App {
             }
             "/review" => {
                 self.run_review_command(&parts[1..], input);
+            }
+            "/theme" => {
+                if let Some(theme_name) = parts.get(1) {
+                    match self.set_theme_by_name(theme_name) {
+                        Ok(()) => {
+                            self.status = format!("Theme changed to {}", self.theme.name);
+                            self.messages.push(ChatMessage {
+                                role: "system".to_string(),
+                                content: format!("Theme set to {}", self.theme.name),
+                            });
+                        }
+                        Err(err) => {
+                            self.messages.push(ChatMessage {
+                                role: "system".to_string(),
+                                content: err,
+                            });
+                        }
+                    }
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Current theme: {}\nAvailable themes: {}\nUsage: /theme <name>",
+                            self.theme.name,
+                            Theme::available_names().join(", ")
+                        ),
+                    });
+                }
             }
             _ => {
                 self.messages.push(ChatMessage {
