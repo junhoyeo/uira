@@ -4,6 +4,7 @@ use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
 use std::sync::Arc;
+use std::time::Duration;
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
 use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_protocol::ExecutionResult;
@@ -80,7 +81,16 @@ async fn run_exec(
     let registry = ModelRegistry::new();
     let (client, provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs, uira_config.as_ref());
+    let (external_mcp_servers, external_mcp_specs) =
+        prepare_external_mcp(uira_config.as_ref()).await?;
+    let agent_config = create_agent_config(
+        cli,
+        config,
+        &agent_defs,
+        uira_config.as_ref(),
+        external_mcp_servers,
+        external_mcp_specs,
+    );
 
     let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
@@ -252,7 +262,7 @@ async fn run_resume(
                 );
             }
         }
-        None => {
+        _ => {
             println!("{}", "Recent sessions:".cyan().bold());
             println!("{}", "─".repeat(80).dimmed());
 
@@ -373,7 +383,7 @@ async fn run_auth(
         AuthCommands::Login { provider } => {
             let provider = match provider {
                 Some(p) => p.clone(),
-                None => {
+                _ => {
                     println!("{}", "Available providers:".cyan().bold());
                     println!("{}", "─".repeat(50).dimmed());
                     println!("  {} anthropic  - Anthropic (Claude)", "•".cyan());
@@ -571,7 +581,7 @@ async fn run_config(
             };
             match value {
                 Some(v) => println!("{}", v),
-                None => println!("{}: {}", "Unknown key".red(), key),
+                _ => println!("{}: {}", "Unknown key".red(), key),
             }
         }
         ConfigCommands::Set { key, value } => {
@@ -882,7 +892,16 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let registry = ModelRegistry::new();
     let (client, _provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
-    let agent_config = create_agent_config(cli, config, &agent_defs, uira_config.as_ref());
+    let (external_mcp_servers, external_mcp_specs) =
+        prepare_external_mcp(uira_config.as_ref()).await?;
+    let agent_config = create_agent_config(
+        cli,
+        config,
+        &agent_defs,
+        uira_config.as_ref(),
+        external_mcp_servers,
+        external_mcp_specs,
+    );
 
     // Setup terminal
     enable_raw_mode()?;
@@ -1030,6 +1049,8 @@ fn create_agent_config(
     _config: &CliConfig,
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
     uira_config: Option<&uira_config::schema::UiraConfig>,
+    external_mcp_servers: Vec<uira_config::schema::NamedMcpServerConfig>,
+    external_mcp_specs: Vec<uira_protocol::ToolSpec>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
@@ -1068,7 +1089,61 @@ fn create_agent_config(
         }
     }
 
+    if !external_mcp_servers.is_empty() && !external_mcp_specs.is_empty() {
+        config = config.with_external_mcp(external_mcp_servers, external_mcp_specs);
+    }
+
     config
+}
+
+async fn prepare_external_mcp(
+    uira_config: Option<&uira_config::schema::UiraConfig>,
+) -> Result<
+    (
+        Vec<uira_config::schema::NamedMcpServerConfig>,
+        Vec<uira_protocol::ToolSpec>,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let Some(uira_cfg) = uira_config else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+
+    if uira_cfg.mcp.servers.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let cwd = std::env::current_dir()?;
+    let parsed_servers = uira_cfg
+        .mcp
+        .servers
+        .iter()
+        .map(|server| {
+            uira_mcp_client::McpServerConfig::from_command(
+                server.name.clone(),
+                server.config.command.clone(),
+                server.config.args.clone(),
+                server.config.env.clone(),
+            )
+            .map_err(|e| format!("invalid MCP config for '{}': {}", server.name, e))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let discovered =
+        uira_mcp_client::discover_tools(&parsed_servers, &cwd, Duration::from_secs(20))
+            .await
+            .map_err(|e| format!("failed to discover MCP tools: {e}"))?;
+
+    let specs = discovered
+        .into_iter()
+        .map(|tool| {
+            let schema = serde_json::from_value::<uira_protocol::JsonSchema>(tool.input_schema)
+                .unwrap_or_else(|_| uira_protocol::JsonSchema::object());
+            uira_protocol::ToolSpec::new(tool.namespaced_name, tool.description, schema)
+        })
+        .collect::<Vec<_>>();
+
+    Ok((uira_cfg.mcp.servers.clone(), specs))
 }
 
 fn print_result(result: &ExecutionResult) {
