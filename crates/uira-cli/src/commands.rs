@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 
 /// Uira - Native AI Coding Agent
 #[derive(Parser, Debug)]
-#[command(name = "uira")]
+#[command(name = "uira-agent")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Prompt to execute (interactive mode if omitted)
@@ -102,6 +102,13 @@ pub enum Commands {
     Tasks {
         #[command(subcommand)]
         command: TasksCommands,
+    },
+
+    /// Generate shell completion scripts
+    Completion {
+        /// Target shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
     },
 }
 

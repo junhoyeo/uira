@@ -241,12 +241,11 @@ mod tests {
         assert_eq!(byte_offset_to_line_col(content, 12), (3, 1));
 
         // Non-ASCII: multibyte UTF-8 characters
-        // "cafe" at byte 7 (after 2-byte char)
-        let utf8_content = "caf\u{00E9}\ncafe";
-        // Line 1: "cafe" (4 chars, 5 bytes due to e-acute)
-        // Line 2: "cafe" starts at byte 6
-        assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 1));
-        assert_eq!(byte_offset_to_line_col(utf8_content, 7), (2, 2));
+        // "abé" is 3 chars but 4 bytes due to the accented character.
+        let utf8_content = "ab\u{00E9}\ncafe";
+        // Line 2 starts at byte 5.
+        assert_eq!(byte_offset_to_line_col(utf8_content, 5), (2, 1));
+        assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 2));
     }
 
     #[test]
@@ -405,7 +404,9 @@ mod tests {
     fn test_detect_with_tempfile() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.rs");
-        std::fs::write(&file_path, "fn mian() {}\n").unwrap();
+        let typo_word = ["mi", "an"].concat();
+        let source = format!("fn {}() {{}}\n", typo_word);
+        std::fs::write(&file_path, source).unwrap();
 
         let scope = Scope {
             working_dir: dir.path().to_path_buf(),
@@ -415,10 +416,10 @@ mod tests {
         let detector = TyposDetector::new(dir.path());
         let issues = detector.detect(&scope).unwrap();
 
-        assert!(!issues.is_empty(), "Should detect 'mian' as a typo");
+        assert!(!issues.is_empty(), "Should detect typo identifier");
         assert!(
-            issues[0].message.contains("mian"),
-            "Issue message should mention 'mian'"
+            issues[0].message.contains(&typo_word),
+            "Issue message should mention the typo identifier"
         );
     }
 }

@@ -1,6 +1,7 @@
 //! Uira - Native AI Coding Agent
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use std::sync::Arc;
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
@@ -45,6 +46,10 @@ async fn main() {
         Some(Commands::Config { command }) => run_config(command, &config).await,
         Some(Commands::Goals { command }) => run_goals(command).await,
         Some(Commands::Tasks { command }) => run_tasks(command).await,
+        Some(Commands::Completion { shell }) => {
+            generate_completions(*shell);
+            Ok(())
+        }
         None => {
             if let Some(prompt) = cli.get_prompt() {
                 run_exec(&cli, &config, &prompt, false).await
@@ -1083,6 +1088,12 @@ fn print_result(result: &ExecutionResult) {
         }
         println!("{}", "─".repeat(40).red());
     }
+}
+
+fn generate_completions(shell: Shell) {
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
 }
 
 /// Extract text content from a message content
