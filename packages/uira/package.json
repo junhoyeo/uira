@@ -79,7 +79,7 @@
     "npm"
   ],
   "scripts": {
-    "build": "napi build --platform --release",
+    "build": "bun run build:ts && bunx @napi-rs/cli build --platform --release --manifest-path ../../crates/uira-napi/Cargo.toml --package-json-path package.json --output-dir .",
     "build:ts": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "node bin/uira.js --version"
@@ -96,7 +96,7 @@
     "@uiradev/uira-win32-x64-msvc": "0.1.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.0.0-alpha.0",
+    "@napi-rs/cli": "^3.5.1",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },

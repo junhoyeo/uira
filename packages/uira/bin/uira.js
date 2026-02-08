@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require('child_process');
+const { existsSync } = require('fs');
 const path = require('path');
 
 const PLATFORMS = {
@@ -57,21 +58,80 @@ function getBinaryPath() {
     const packageDir = path.dirname(packagePath);
     const binaryName = process.platform === 'win32' ? 'uira.exe' : 'uira';
     return path.join(packageDir, binaryName);
-  } catch (e) {
-    console.error(`Failed to find binary package: ${packageName}`);
-    console.error('Try reinstalling: npm install @uiradev/uira');
-    process.exit(1);
+  } catch {
+    return null;
   }
 }
 
-const binary = getBinaryPath();
+function getLocalDevBinaryPath() {
+  const packageDir = path.resolve(__dirname, '..');
+  const repoRoot = path.resolve(packageDir, '..', '..');
+  const binaryName = process.platform === 'win32' ? 'uira.exe' : 'uira';
+  const releasePath = path.join(repoRoot, 'target', 'release', binaryName);
+  const debugPath = path.join(repoRoot, 'target', 'debug', binaryName);
+
+  if (existsSync(releasePath)) {
+    return releasePath;
+  }
+
+  if (existsSync(debugPath)) {
+    return debugPath;
+  }
+
+  return null;
+}
+
+function canRunLocalCargo() {
+  try {
+    execFileSync('cargo', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const args = process.argv.slice(2);
+const binary = getBinaryPath();
 
-try {
-  execFileSync(binary, args, { stdio: 'inherit' });
-} catch (e) {
-  if (e.status !== undefined) {
-    process.exit(e.status);
+if (binary) {
+  try {
+    execFileSync(binary, args, { stdio: 'inherit' });
+  } catch (e) {
+    if (e.status !== undefined) {
+      process.exit(e.status);
+    }
+    throw e;
   }
-  throw e;
+  process.exit(0);
 }
+
+const localBinary = getLocalDevBinaryPath();
+if (localBinary) {
+  try {
+    execFileSync(localBinary, args, { stdio: 'inherit' });
+    process.exit(0);
+  } catch (e) {
+    if (e.status !== undefined) {
+      process.exit(e.status);
+    }
+    throw e;
+  }
+}
+
+if (canRunLocalCargo()) {
+  try {
+    execFileSync('cargo', ['run', '-p', 'uira', '--', ...args], { stdio: 'inherit' });
+    process.exit(0);
+  } catch (e) {
+    if (e.status !== undefined) {
+      process.exit(e.status);
+    }
+    throw e;
+  }
+}
+
+const key = getPlatformKey();
+const packageName = PLATFORMS[key];
+console.error(`Failed to find binary package: ${packageName}`);
+console.error('Try reinstalling: npm install @uiradev/uira');
+process.exit(1);
