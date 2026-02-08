@@ -10,8 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::io::Stdout;
-use std::sync::Arc;
+use std::{io::Stdout, process::Command, sync::Arc};
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
@@ -27,6 +26,120 @@ use crate::AppEvent;
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReviewTarget {
+    Staged,
+    File(String),
+    Revision(String),
+}
+
+impl ReviewTarget {
+    fn description(&self) -> String {
+        match self {
+            Self::Staged => "staged changes".to_string(),
+            Self::File(path) => format!("changes in `{}`", path),
+            Self::Revision(revision) => format!("commit `{}`", revision),
+        }
+    }
+}
+
+fn parse_review_target(arguments: &[&str]) -> ReviewTarget {
+    if arguments.is_empty() {
+        return ReviewTarget::Staged;
+    }
+
+    let target = arguments.join(" ");
+    if is_commit_reference(&target) {
+        ReviewTarget::Revision(target)
+    } else {
+        ReviewTarget::File(target)
+    }
+}
+
+fn is_commit_reference(target: &str) -> bool {
+    target == "HEAD"
+        || target.starts_with("HEAD~")
+        || target.starts_with("HEAD^")
+        || (target.len() >= 7
+            && target.len() <= 40
+            && target.chars().all(|ch| ch.is_ascii_hexdigit()))
+}
+
+fn run_git_command(args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|err| format!("Failed to run `git {}`: {}", args.join(" "), err))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            Err(format!(
+                "`git {}` failed with status {}",
+                args.join(" "),
+                output.status
+            ))
+        } else {
+            Err(stderr)
+        }
+    }
+}
+
+fn collect_review_content(target: &ReviewTarget) -> Result<String, String> {
+    match target {
+        ReviewTarget::Staged => run_git_command(&["diff", "--staged", "--no-color"]),
+        ReviewTarget::File(path) => {
+            let staged = run_git_command(&["diff", "--staged", "--no-color", "--", path])?;
+            let unstaged = run_git_command(&["diff", "--no-color", "--", path])?;
+
+            let mut chunks = Vec::new();
+            if !staged.is_empty() {
+                chunks.push(format!("### Staged changes\n{}", staged));
+            }
+            if !unstaged.is_empty() {
+                chunks.push(format!("### Unstaged changes\n{}", unstaged));
+            }
+
+            Ok(chunks.join("\n\n"))
+        }
+        ReviewTarget::Revision(revision) => {
+            run_git_command(&["show", "--no-color", "--patch", revision])
+        }
+    }
+}
+
+fn build_review_prompt(target: &ReviewTarget, content: &str) -> String {
+    format!(
+        "You are reviewing {}.\n\
+\n\
+Provide structured feedback using this exact format:\n\
+## Issues\n\
+- ...\n\
+\n\
+## Suggestions\n\
+- ...\n\
+\n\
+## Praise\n\
+- ...\n\
+\n\
+Rules:\n\
+- Be specific and reference concrete diff lines when possible.\n\
+- Focus on correctness, security, performance, and maintainability.\n\
+- If a section has no points, write `- None.`.\n\
+\n\
+Diff/context:\n\
+```diff\n\
+{}\n\
+```",
+        target.description(),
+        content
+    )
+}
 
 fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> Vec<Line<'static>> {
     let prefix_len = prefix.chars().count();
@@ -846,6 +959,10 @@ impl App {
 
         self.push_message("user", input.clone());
 
+        self.send_agent_input(input);
+    }
+
+    fn send_agent_input(&mut self, input: String) {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -860,6 +977,39 @@ impl App {
         }
     }
 
+    fn run_review_command(&mut self, args: &[&str], raw_command: &str) {
+        let target = parse_review_target(args);
+        let target_description = target.description();
+
+        let content = match collect_review_content(&target) {
+            Ok(content) => content,
+            Err(err) => {
+                self.push_message("error", format!("Failed to gather review input: {}", err));
+                return;
+            }
+        };
+
+        if content.is_empty() {
+            self.push_message(
+                "system",
+                format!("No diff found for {}.", target_description),
+            );
+            return;
+        }
+
+        self.push_message("user", raw_command.to_string());
+        self.push_message(
+            "system",
+            format!(
+                "Starting review for {}. Output will be grouped into issues, suggestions, and praise.",
+                target_description
+            ),
+        );
+
+        let review_prompt = build_review_prompt(&target, &content);
+        self.send_agent_input(review_prompt);
+    }
+
     fn handle_slash_command(&mut self, input: &str) {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let command = parts.first().copied().unwrap_or("");
@@ -871,7 +1021,8 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /fork [count]     - Fork session (optional: keep only first N messages)\n  /clear            - Clear chat history".to_string(),
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /clear              - Clear chat history"
+                        .to_string(),
                 });
             }
             "/auth" | "/status" => {
@@ -933,6 +1084,9 @@ impl App {
                         content: format!("Current model: {}\nUsage: /model <name>", current),
                     });
                 }
+            }
+            "/review" => {
+                self.run_review_command(&parts[1..], input);
             }
             _ => {
                 self.messages.push(ChatMessage {
@@ -1310,5 +1464,41 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_review_prompt, parse_review_target, ReviewTarget};
+
+    #[test]
+    fn parse_review_target_defaults_to_staged() {
+        assert_eq!(parse_review_target(&[]), ReviewTarget::Staged);
+    }
+
+    #[test]
+    fn parse_review_target_handles_file_path() {
+        assert_eq!(
+            parse_review_target(&["crates/uira-tui/src/app.rs"]),
+            ReviewTarget::File("crates/uira-tui/src/app.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_review_target_handles_revision() {
+        assert_eq!(
+            parse_review_target(&["HEAD~1"]),
+            ReviewTarget::Revision("HEAD~1".to_string())
+        );
+    }
+
+    #[test]
+    fn review_prompt_enforces_required_sections() {
+        let prompt = build_review_prompt(&ReviewTarget::Staged, "diff --git a/foo b/foo");
+
+        assert!(prompt.contains("## Issues"));
+        assert!(prompt.contains("## Suggestions"));
+        assert!(prompt.contains("## Praise"));
+        assert!(prompt.contains("```diff"));
     }
 }
