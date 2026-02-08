@@ -7,6 +7,7 @@ mod linter;
 mod runtime;
 mod typos;
 
+use agent_workflow::detectors::{typos::TyposDetector, Scope};
 use agent_workflow::{AgentWorkflow, TaskOptions, WorkflowConfig, WorkflowResult, WorkflowTask};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -52,6 +53,8 @@ enum Commands {
     Typos {
         #[arg(long, help = "Use AI to decide whether to apply fixes or ignore")]
         ai: bool,
+        #[arg(long, help = "Only check staged files")]
+        staged: bool,
         #[arg(long, help = "Automatically stage modified files after fixing")]
         stage: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -181,7 +184,12 @@ fn main() {
         Commands::Install => install_command(),
         Commands::Run { hook } => run_command(&hook),
         Commands::Lint { files } => lint_command(&files),
-        Commands::Typos { ai, stage, files } => typos_command(ai, stage, &files),
+        Commands::Typos {
+            ai,
+            staged,
+            stage,
+            files,
+        } => typos_command(ai, staged, stage, &files),
         Commands::Format { check, files } => format_command(check, &files),
         Commands::Agent { action } => agent_command(action),
         Commands::Session { action } => session_command(action),
@@ -366,18 +374,35 @@ fn lint_command(files: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
+fn typos_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
     if ai {
         println!("🔍 Starting AI-assisted typos workflow...\n");
 
         let config = WorkflowConfig {
             auto_stage: stage,
+            staged_only: staged,
             files: files.to_vec(),
             ..Default::default()
         };
 
         block_on(async {
-            let mut workflow = AgentWorkflow::new(WorkflowTask::Typos, config).await?;
+            let working_dir = std::env::current_dir()?;
+            let detector = TyposDetector::new(&working_dir);
+            let scope = if !files.is_empty() {
+                Scope::from_files(working_dir.clone(), files.to_vec())
+            } else if staged {
+                Scope::from_staged(&working_dir)?
+            } else {
+                Scope::from_repo(&working_dir)?
+            };
+
+            let mut workflow = AgentWorkflow::new(
+                WorkflowTask::Typos,
+                config,
+                Some(Box::new(detector)),
+                Some(scope),
+            )
+            .await?;
             match workflow.run().await? {
                 WorkflowResult::Complete {
                     iterations,
@@ -425,11 +450,28 @@ fn typos_command(ai: bool, stage: bool, files: &[String]) -> anyhow::Result<()> 
     } else {
         println!("🔍 Checking for typos...\n");
         let mut cmd = std::process::Command::new("typos");
-        if files.is_empty() {
-            cmd.arg(".");
-        } else {
+
+        if !files.is_empty() {
             cmd.args(files);
+        } else if staged {
+            let output = std::process::Command::new("git")
+                .args(["diff", "--cached", "--name-only", "--diff-filter=ACM"])
+                .output()
+                .map_err(|_| anyhow::anyhow!("Failed to get staged files"))?;
+            let staged_files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect();
+            if staged_files.is_empty() {
+                println!("✓ No staged files to check");
+                return Ok(());
+            }
+            cmd.args(&staged_files);
+        } else {
+            cmd.arg(".");
         }
+
         let status = cmd.status().map_err(|_| {
             anyhow::anyhow!("Failed to run typos. Is it installed? Run: cargo install typos-cli")
         })?;
@@ -908,7 +950,7 @@ fn diagnostics_command(
 
         return block_on(async {
             let mut workflow =
-                AgentWorkflow::new(WorkflowTask::Diagnostics, workflow_config).await?;
+                AgentWorkflow::new(WorkflowTask::Diagnostics, workflow_config, None, None).await?;
             match workflow.run().await? {
                 WorkflowResult::Complete {
                     iterations,
@@ -1088,7 +1130,8 @@ fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> an
         };
 
         return block_on(async {
-            let mut workflow = AgentWorkflow::new(WorkflowTask::Comments, workflow_config).await?;
+            let mut workflow =
+                AgentWorkflow::new(WorkflowTask::Comments, workflow_config, None, None).await?;
             match workflow.run().await? {
                 WorkflowResult::Complete {
                     iterations,

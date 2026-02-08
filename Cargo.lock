@@ -1035,6 +1035,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dictgen"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bcf6fb1ed147c367b411d60785cbe97c2be424db2cf594146777b219a6fe9fd"
+dependencies = [
+ "phf",
+ "phf_shared",
+ "unicase",
+]
+
+[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3152,6 +3163,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+ "unicase",
 ]
 
 [[package]]
@@ -3161,6 +3173,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
+ "unicase",
 ]
 
 [[package]]
@@ -3961,6 +3974,12 @@ name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "siphasher"
@@ -5008,6 +5027,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
+name = "typos"
+version = "0.10.41"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65f53b6baea4f3d65153954db9ccf90e483fa7754d1aac10e71c2bf3888ca2f"
+dependencies = [
+ "bstr",
+ "itertools 0.14.0",
+ "serde",
+ "simdutf8",
+ "unicode-ident",
+ "winnow",
+]
+
+[[package]]
+name = "typos-dict"
+version = "0.13.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a7de8976bb0c6878ad8374b3fa11ed7e93c22f8a6974e5ab7764cc67b037445"
+dependencies = [
+ "dictgen",
+ "phf",
+]
+
+[[package]]
 name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5023,6 +5066,7 @@ dependencies = [
  "clap",
  "colored",
  "dirs",
+ "globset",
  "oxc",
  "predicates",
  "rayon",
@@ -5035,6 +5079,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "typos",
+ "typos-dict",
  "uira-agent",
  "uira-agents",
  "uira-comment-checker",
@@ -5049,6 +5095,7 @@ dependencies = [
  "uira-sdk",
  "uira-telemetry",
  "uira-tools",
+ "unicase",
 ]
 
 [[package]]
@@ -5505,6 +5552,12 @@ dependencies = [
  "uira-protocol",
  "uira-providers",
 ]
+
+[[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-id-start"

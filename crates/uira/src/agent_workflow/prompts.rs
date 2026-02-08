@@ -2,41 +2,25 @@ use super::{TaskOptions, WorkflowTask};
 
 pub fn build_system_prompt(task: WorkflowTask, options: &TaskOptions) -> String {
     let base = format!(
-        r#"You are a code quality agent specialized in {task_name}.
+        r#"You are a code quality fixer. Issues have been pre-detected for you.
 
 ## Your Mission
 {mission}
 
 ## Available Tools
-You have access to these tools:
-
-### File Operations
-- **Read**: Read file contents
+- **Read**: View file contents (for context only)
 - **Edit**: Modify files (use oldString/newString for precise edits)
-- **Write**: Create or overwrite files
-- **Glob**: Find files matching patterns
-- **Grep**: Search for patterns in the codebase
 
-### Shell Commands
-- **Bash**: Run shell commands (git, tests, build commands)
-
-### Code Analysis (if enabled)
-- **lsp_diagnostics**: Get TypeScript/JavaScript errors and warnings
-- **lsp_goto_definition**: Jump to symbol definitions
-- **lsp_find_references**: Find all references to a symbol
-
-## Workflow
-1. First, understand the scope of the task
-2. Use Grep/Glob to find relevant files
-3. Use Read to examine file contents
-4. Use Edit to apply fixes (be precise!)
-5. Verify your changes work (run tests/lsp_diagnostics if applicable)
-6. When ALL issues are fixed, output: `<DONE/>`
+## Your Role
+- You will receive a list of pre-detected issues
+- For each issue: FIX it with Edit, or SKIP if intentional
+- Do NOT run detection tools - issues are already detected
+- Do NOT scan the codebase - work only with provided issues
 
 ## Completion Protocol
-When you have completed ALL fixes and verified they work:
-- Output exactly: `<DONE/>`
-- Or with summary: `<DONE>Fixed N issues</DONE>`
+When ALL issues are handled, output:
+- `<DONE/>`
+- Or with summary: `<DONE>Fixed N issues, skipped M</DONE>`
 
 DO NOT output <DONE/> until you are certain all issues are resolved.
 If you encounter an error you cannot fix, explain the issue instead.
@@ -46,9 +30,7 @@ If you encounter an error you cannot fix, explain the issue instead.
 - Preserve existing code style
 - Do not introduce new issues while fixing old ones
 - If unsure about a fix, skip it rather than break code
-- Use Bash for git operations (e.g., `git add <file>`)
 "#,
-        task_name = task.name(),
         mission = task_mission(task, options),
     );
 
@@ -58,13 +40,16 @@ If you encounter an error you cannot fix, explain the issue instead.
 fn task_mission(task: WorkflowTask, options: &TaskOptions) -> String {
     match task {
         WorkflowTask::Typos => r#"
-Fix typos in the codebase. This includes:
-- Misspelled words in comments
-- Typos in string literals
-- Incorrect variable names (if clearly typos)
+Fix or ignore the typos that have been pre-detected for you.
 
-Use the `typos` CLI via Bash to detect typos, then fix them with Edit.
-Example: `typos --format brief` to list typos.
+For each typo:
+1. If it's a genuine mistake → use Edit to fix it
+2. If it's intentional (variable name, domain term) → skip it
+
+Do NOT run the `typos` CLI or scan for issues - detection is already done.
+Use Read only if you need to see surrounding code context.
+
+When all typos have been handled (fixed or intentionally skipped), output <DONE/>.
 "#
         .to_string(),
 

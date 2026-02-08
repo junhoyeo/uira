@@ -1,16 +1,15 @@
 pub mod completion;
 pub mod config;
+pub mod detectors;
 pub mod git_tracker;
 pub mod prompts;
 pub mod state;
-pub mod verification;
 pub mod workflow;
 
 pub use completion::CompletionDetector;
 pub use config::{TaskOptions, WorkflowConfig};
 pub use git_tracker::GitTracker;
 pub use state::WorkflowState;
-pub use verification::{VerificationResult, WorkflowVerifier};
 pub use workflow::{AgentWorkflow, WorkflowResult};
 
 use serde::{Deserialize, Serialize};

@@ -6,8 +6,9 @@ use uira_protocol::Provider;
 use uira_providers::{ModelClientBuilder, ProviderConfig};
 
 use super::{
-    prompts::build_system_prompt, CompletionDetector, GitTracker, VerificationResult,
-    WorkflowConfig, WorkflowState, WorkflowTask, WorkflowVerifier,
+    detectors::{Detector, RenderBudget, Scope},
+    prompts::build_system_prompt,
+    CompletionDetector, GitTracker, WorkflowConfig, WorkflowState, WorkflowTask,
 };
 
 #[derive(Debug)]
@@ -34,10 +35,12 @@ pub enum WorkflowResult {
 pub struct AgentWorkflow {
     task: WorkflowTask,
     config: WorkflowConfig,
-    agent: Agent,
+    agent: Option<Agent>,
     state: WorkflowState,
     completion_detector: CompletionDetector,
     git_tracker: GitTracker,
+    detector: Option<Box<dyn Detector>>,
+    scope: Option<Scope>,
 }
 
 fn parse_provider(s: &str) -> Provider {
@@ -53,9 +56,45 @@ fn parse_provider(s: &str) -> Provider {
 }
 
 impl AgentWorkflow {
-    pub async fn new(task: WorkflowTask, config: WorkflowConfig) -> Result<Self> {
+    pub async fn new(
+        task: WorkflowTask,
+        config: WorkflowConfig,
+        detector: Option<Box<dyn Detector>>,
+        scope: Option<Scope>,
+    ) -> Result<Self> {
         let existing_state = WorkflowState::read(task);
 
+        let git_tracker = GitTracker::new(&config.working_directory);
+
+        let has_detector = detector.is_some() && scope.is_some();
+        let (agent, state) = if has_detector {
+            let state = existing_state.unwrap_or_else(|| {
+                WorkflowState::new(task, "pending".to_string(), config.max_iterations)
+            });
+            (None, state)
+        } else {
+            let (agent, state) =
+                Self::create_agent_and_state(task, &config, existing_state).await?;
+            (Some(agent), state)
+        };
+
+        Ok(Self {
+            task,
+            config,
+            agent,
+            state,
+            completion_detector: CompletionDetector::new(),
+            git_tracker,
+            detector,
+            scope,
+        })
+    }
+
+    async fn create_agent_and_state(
+        task: WorkflowTask,
+        config: &WorkflowConfig,
+        existing_state: Option<WorkflowState>,
+    ) -> Result<(Agent, WorkflowState)> {
         let provider = parse_provider(&config.provider);
         let provider_config = ProviderConfig {
             provider,
@@ -90,27 +129,145 @@ impl AgentWorkflow {
 
         let agent = agent.with_rollout()?;
 
-        let git_tracker = GitTracker::new(&config.working_directory);
-
         let state = existing_state.unwrap_or_else(|| {
             WorkflowState::new(task, agent.session().id.to_string(), config.max_iterations)
         });
 
-        Ok(Self {
-            task,
-            config,
-            agent,
-            state,
-            completion_detector: CompletionDetector::new(),
-            git_tracker,
-        })
+        Ok((agent, state))
     }
 
     pub async fn run(&mut self) -> Result<WorkflowResult> {
+        let has_detector = self.detector.is_some() && self.scope.is_some();
+        if has_detector {
+            self.run_with_detector().await
+        } else {
+            self.run_legacy().await
+        }
+    }
+
+    async fn run_with_detector(&mut self) -> Result<WorkflowResult> {
+        let detector = self.detector.take().expect("detector must be set");
+        let scope = self.scope.take().expect("scope must be set");
+
+        let issues = detector.detect(&scope)?;
+
+        if issues.is_empty() {
+            let _ = WorkflowState::clear(self.task);
+            return Ok(WorkflowResult::Complete {
+                iterations: 0,
+                files_modified: vec![],
+                summary: Some("No issues found.".to_string()),
+            });
+        }
+
+        let (agent, state) =
+            Self::create_agent_and_state(self.task, &self.config, Some(self.state.clone())).await?;
+        self.agent = Some(agent);
+        self.state = state;
+
+        if let Some(ref agent) = self.agent {
+            if let Some(path) = agent.rollout_path() {
+                self.state.rollout_path = Some(path.to_string_lossy().to_string());
+            }
+        }
+        self.state.write()?;
+
+        let mut current_issues = issues;
+
+        loop {
+            if self.state.iteration >= self.state.max_iterations {
+                let files_modified = self.git_tracker.get_modifications();
+                let result = WorkflowResult::MaxIterationsReached {
+                    iterations: self.state.iteration,
+                    files_modified,
+                };
+                let _ = WorkflowState::clear(self.task);
+                return Ok(result);
+            }
+
+            let prompt = detector.render_prompt(
+                &current_issues,
+                &RenderBudget {
+                    max_issues: 50,
+                    include_context: true,
+                },
+            );
+
+            let agent = self
+                .agent
+                .as_mut()
+                .expect("agent must exist after lazy creation");
+
+            match agent.run(&prompt).await {
+                Ok(exec_result) => {
+                    let response_text = &exec_result.output;
+
+                    if self.completion_detector.is_done(response_text) {
+                        let remaining = detector.detect(&scope)?;
+
+                        if remaining.is_empty() {
+                            let summary = self.completion_detector.extract_summary(response_text);
+                            let files_modified = self.git_tracker.get_modifications();
+
+                            if self.config.auto_stage && !files_modified.is_empty() {
+                                self.git_tracker.stage_files(&files_modified)?;
+                            }
+
+                            let result = WorkflowResult::Complete {
+                                iterations: self.state.iteration + 1,
+                                files_modified,
+                                summary,
+                            };
+
+                            let _ = WorkflowState::clear(self.task);
+                            return Ok(result);
+                        } else {
+                            current_issues = remaining.clone();
+                            self.state.increment();
+                            self.state.write()?;
+
+                            if self.state.iteration >= self.state.max_iterations {
+                                let result = WorkflowResult::VerificationFailed {
+                                    remaining_issues: remaining.len(),
+                                    details: format!(
+                                        "{} issues remain after {} iterations",
+                                        remaining.len(),
+                                        self.state.iteration
+                                    ),
+                                };
+                                let _ = WorkflowState::clear(self.task);
+                                return Ok(result);
+                            }
+                        }
+                    } else {
+                        self.state.increment();
+                        self.state.write()?;
+                    }
+                }
+                Err(AgentLoopError::Cancelled) => {
+                    return Ok(WorkflowResult::Cancelled);
+                }
+                Err(e) => {
+                    let _ = WorkflowState::clear(self.task);
+                    return Ok(WorkflowResult::Failed {
+                        error: e.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    async fn run_legacy(&mut self) -> Result<WorkflowResult> {
         let initial_prompt = self.build_initial_prompt();
 
-        if let Some(path) = self.agent.rollout_path() {
-            self.state.rollout_path = Some(path.to_string_lossy().to_string());
+        {
+            let agent = self
+                .agent
+                .as_mut()
+                .expect("legacy path requires eager agent creation");
+            if let Some(path) = agent.rollout_path() {
+                self.state.rollout_path = Some(path.to_string_lossy().to_string());
+            }
         }
         self.state.write()?;
 
@@ -131,50 +288,27 @@ impl AgentWorkflow {
                 self.build_continuation_prompt()
             };
 
-            match self.agent.run(&prompt).await {
+            let agent = self.agent.as_mut().expect("agent must exist");
+            match agent.run(&prompt).await {
                 Ok(exec_result) => {
                     let response_text = &exec_result.output;
 
                     if self.completion_detector.is_done(response_text) {
-                        let verification =
-                            WorkflowVerifier::verify(self.task, &self.config.working_directory)?;
+                        let summary = self.completion_detector.extract_summary(response_text);
+                        let files_modified = self.git_tracker.get_modifications();
 
-                        match verification {
-                            VerificationResult::Pass => {
-                                let summary =
-                                    self.completion_detector.extract_summary(response_text);
-                                let files_modified = self.git_tracker.get_modifications();
-
-                                if self.config.auto_stage && !files_modified.is_empty() {
-                                    self.git_tracker.stage_files(&files_modified)?;
-                                }
-
-                                let result = WorkflowResult::Complete {
-                                    iterations: self.state.iteration + 1,
-                                    files_modified,
-                                    summary,
-                                };
-
-                                let _ = WorkflowState::clear(self.task);
-                                return Ok(result);
-                            }
-                            VerificationResult::Fail {
-                                remaining_issues,
-                                details,
-                            } => {
-                                self.state.increment();
-                                self.state.write()?;
-
-                                if self.state.iteration >= self.state.max_iterations {
-                                    let result = WorkflowResult::VerificationFailed {
-                                        remaining_issues,
-                                        details,
-                                    };
-                                    let _ = WorkflowState::clear(self.task);
-                                    return Ok(result);
-                                }
-                            }
+                        if self.config.auto_stage && !files_modified.is_empty() {
+                            self.git_tracker.stage_files(&files_modified)?;
                         }
+
+                        let result = WorkflowResult::Complete {
+                            iterations: self.state.iteration + 1,
+                            files_modified,
+                            summary,
+                        };
+
+                        let _ = WorkflowState::clear(self.task);
+                        return Ok(result);
                     } else {
                         self.state.increment();
                         self.state.write()?;

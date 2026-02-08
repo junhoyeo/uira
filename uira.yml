@@ -23,7 +23,7 @@ pre-commit:
     - name: diagnostics
       run: ./target/debug/uira diagnostics --staged --severity error
     - name: typos
-      run: ./target/debug/uira typos --ai --stage
+      run: ./target/debug/uira typos --ai --staged --stage
 
 post-commit:
   parallel: false
