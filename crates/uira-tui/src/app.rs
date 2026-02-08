@@ -238,6 +238,27 @@ fn parse_share_command(parts: &[&str]) -> Result<ShareCommandOptions, String> {
     Ok(options)
 }
 
+#[cfg(unix)]
+fn write_private_temp_markdown(path: &std::path::Path, markdown: &str) -> Result<(), String> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| format!("Failed to create temporary gist file: {}", e))?;
+
+    file.write_all(markdown.as_bytes())
+        .map_err(|e| format!("Failed to write temporary gist file: {}", e))
+}
+
+#[cfg(not(unix))]
+fn write_private_temp_markdown(path: &std::path::Path, markdown: &str) -> Result<(), String> {
+    std::fs::write(path, markdown)
+        .map_err(|e| format!("Failed to write temporary gist file: {}", e))
+}
+
 fn sanitize_filename_part(input: &str) -> String {
     input
         .chars()
@@ -352,9 +373,7 @@ async fn create_gist_from_markdown(
     let file_name = format!("uira-{}-{}.md", session_slug, timestamp);
     let file_path = std::env::temp_dir().join(file_name);
 
-    tokio::fs::write(&file_path, markdown)
-        .await
-        .map_err(|e| format!("Failed to write temporary gist file: {}", e))?;
+    write_private_temp_markdown(&file_path, &markdown)?;
 
     let default_desc = format!("Uira session {}", session_slug);
     let description = options.description.unwrap_or(default_desc);
@@ -371,7 +390,10 @@ async fn create_gist_from_markdown(
         cmd.arg("--public");
     }
 
-    let output = cmd.output().await.map_err(|e| {
+    let output_result = cmd.output().await;
+    let _ = tokio::fs::remove_file(&file_path).await;
+
+    let output = output_result.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             "GitHub CLI (`gh`) is not installed. Install it from https://cli.github.com/"
                 .to_string()
@@ -379,8 +401,6 @@ async fn create_gist_from_markdown(
             format!("Failed to run `gh gist create`: {}", e)
         }
     })?;
-
-    let _ = tokio::fs::remove_file(&file_path).await;
 
     if !output.status.success() {
         return Err(format_gh_error(&String::from_utf8_lossy(&output.stderr)));
@@ -397,6 +417,10 @@ async fn create_gist_from_markdown(
         })
         .map(|s| s.trim().to_string())
         .ok_or_else(|| "Gist created, but no URL was returned by gh CLI.".to_string())?;
+
+    if !url.contains("gist.github.com/") {
+        return Err(format!("Unexpected gist URL returned by gh CLI: {}", url));
+    }
 
     Ok(url)
 }
@@ -1940,6 +1964,11 @@ impl App {
         let model = self.current_model.clone();
         let event_tx = self.event_tx.clone();
         self.status = "Sharing session to GitHub Gist...".to_string();
+        self.push_message(
+            "system",
+            "Warning: sharing may include sensitive content from system/tool outputs. Review before sharing.\nUse /share --public only when intentional."
+                .to_string(),
+        );
 
         tokio::spawn(async move {
             let markdown =
