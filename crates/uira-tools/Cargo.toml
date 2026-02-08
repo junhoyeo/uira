@@ -33,6 +33,7 @@ uira-sandbox = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-permissions = { workspace = true }
 once_cell = "1.19"
+reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
