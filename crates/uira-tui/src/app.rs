@@ -211,6 +211,8 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     todos: Vec<TodoItem>,
+    show_todo_sidebar: bool,
+    todo_list_state: ListState,
 }
 
 impl App {
@@ -235,6 +237,8 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             todos: Vec::new(),
+            show_todo_sidebar: true,
+            todo_list_state: ListState::default(),
         }
     }
 
@@ -326,7 +330,7 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if !self.todos.is_empty() {
+        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -510,7 +514,9 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
-    fn render_todo_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_todo_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        self.ensure_todo_selection();
+
         let completed = self
             .todos
             .iter()
@@ -566,8 +572,11 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items).block(block);
-        frame.render_widget(list, area);
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol("> ");
+        frame.render_stateful_widget(list, area, &mut self.todo_list_state);
     }
 
     fn scroll_up(&mut self) {
@@ -614,6 +623,93 @@ impl App {
         count
     }
 
+    fn ensure_todo_selection(&mut self) {
+        if self.todos.is_empty() {
+            self.todo_list_state.select(None);
+            return;
+        }
+
+        if let Some(selected) = self.todo_list_state.selected() {
+            if selected < self.todos.len() {
+                let status = self.todos[selected].status;
+                if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                    return;
+                }
+            }
+        }
+
+        let selected = self
+            .todos
+            .iter()
+            .position(|todo| {
+                todo.status != TodoStatus::Completed && todo.status != TodoStatus::Cancelled
+            })
+            .unwrap_or(0);
+        self.todo_list_state.select(Some(selected));
+    }
+
+    fn toggle_todo_sidebar(&mut self) {
+        self.show_todo_sidebar = !self.show_todo_sidebar;
+        if self.show_todo_sidebar {
+            self.ensure_todo_selection();
+            self.status = "TODO sidebar shown".to_string();
+        } else {
+            self.status = "TODO sidebar hidden".to_string();
+        }
+    }
+
+    fn next_open_todo_index(&self, after: usize) -> Option<usize> {
+        if self.todos.is_empty() {
+            return None;
+        }
+
+        for offset in 1..=self.todos.len() {
+            let index = (after + offset) % self.todos.len();
+            let status = self.todos[index].status;
+            if status != TodoStatus::Completed && status != TodoStatus::Cancelled {
+                return Some(index);
+            }
+        }
+
+        None
+    }
+
+    fn mark_selected_todo_done(&mut self) {
+        if !self.show_todo_sidebar {
+            self.status = "TODO sidebar is hidden".to_string();
+            return;
+        }
+
+        self.ensure_todo_selection();
+
+        let Some(selected) = self.todo_list_state.selected() else {
+            self.status = "No TODO selected".to_string();
+            return;
+        };
+
+        if selected >= self.todos.len() {
+            self.todo_list_state.select(None);
+            self.status = "No TODO selected".to_string();
+            return;
+        }
+
+        let status = self.todos[selected].status;
+        if status == TodoStatus::Completed || status == TodoStatus::Cancelled {
+            self.status = "Selected TODO is already closed".to_string();
+            return;
+        }
+
+        let content = self.todos[selected].content.clone();
+        self.todos[selected].status = TodoStatus::Completed;
+        self.status = format!("Marked TODO done: {}", content);
+
+        if let Some(next) = self.next_open_todo_index(selected) {
+            self.todo_list_state.select(Some(next));
+        } else {
+            self.todo_list_state.select(Some(selected));
+        }
+    }
+
     fn push_message(&mut self, role: &str, content: String) {
         self.messages.push(ChatMessage {
             role: role.to_string(),
@@ -648,6 +744,20 @@ impl App {
                 KeyCode::Char('l') => {
                     // Clear screen
                     self.messages.clear();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        if key.modifiers.is_empty() && self.input.is_empty() {
+            match key.code {
+                KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
+                    self.toggle_todo_sidebar();
+                    return;
+                }
+                KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
+                    self.mark_selected_todo_done();
                     return;
                 }
                 _ => {}
@@ -850,6 +960,7 @@ impl App {
             }
             AppEvent::TodoUpdated(todos) => {
                 self.todos = todos;
+                self.ensure_todo_selection();
             }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
@@ -1078,6 +1189,7 @@ impl App {
                     .count();
                 self.status = format!("{} todos ({} remaining)", todos.len(), pending);
                 self.todos = todos;
+                self.ensure_todo_selection();
             }
             _ => {
                 tracing::debug!("Unhandled ThreadEvent variant");
