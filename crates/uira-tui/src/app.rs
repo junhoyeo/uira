@@ -746,6 +746,12 @@ impl App {
                     self.messages.clear();
                     return;
                 }
+                _ => {}
+            }
+        }
+
+        if key.modifiers.is_empty() && self.input.is_empty() {
+            match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
                     return;
