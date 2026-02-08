@@ -36,10 +36,10 @@
     "*.node"
   ],
   "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
-    "prepublishOnly": "napi prepublish -t npm",
-    "artifacts": "napi artifacts"
+    "build": "bunx @napi-rs/cli build --platform --release",
+    "build:debug": "bunx @napi-rs/cli build --platform",
+    "prepublishOnly": "bunx @napi-rs/cli prepublish -t npm",
+    "artifacts": "bunx @napi-rs/cli artifacts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.5.1"

@@ -35,7 +35,7 @@
     "scripts"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "bun run --cwd ../uira build:ts && tsup",
     "postinstall": "node scripts/install.js"
   },
   "dependencies": {
