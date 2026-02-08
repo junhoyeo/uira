@@ -238,27 +238,6 @@ fn parse_share_command(parts: &[&str]) -> Result<ShareCommandOptions, String> {
     Ok(options)
 }
 
-#[cfg(unix)]
-fn write_private_temp_markdown(path: &std::path::Path, markdown: &str) -> Result<(), String> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|e| format!("Failed to create temporary gist file: {}", e))?;
-
-    file.write_all(markdown.as_bytes())
-        .map_err(|e| format!("Failed to write temporary gist file: {}", e))
-}
-
-#[cfg(not(unix))]
-fn write_private_temp_markdown(path: &std::path::Path, markdown: &str) -> Result<(), String> {
-    std::fs::write(path, markdown)
-        .map_err(|e| format!("Failed to write temporary gist file: {}", e))
-}
-
 fn sanitize_filename_part(input: &str) -> String {
     input
         .chars()
@@ -360,24 +339,24 @@ async fn create_gist_from_markdown(
     options: ShareCommandOptions,
     session_id: Option<String>,
 ) -> Result<String, String> {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     let session_slug = session_id
         .as_deref()
         .map(sanitize_filename_part)
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "session".to_string());
 
-    let file_name = format!("uira-{}-{}.md", session_slug, timestamp);
-    let file_path = std::env::temp_dir().join(file_name);
-
-    write_private_temp_markdown(&file_path, &markdown)?;
+    let mut temp_file = tempfile::Builder::new()
+        .prefix("uira-share-")
+        .suffix(".md")
+        .tempfile()
+        .map_err(|e| format!("Failed to create temporary gist file: {}", e))?;
+    temp_file
+        .write_all(markdown.as_bytes())
+        .map_err(|e| format!("Failed to write temporary gist file: {}", e))?;
 
     let default_desc = format!("Uira session {}", session_slug);
     let description = options.description.unwrap_or(default_desc);
-    let file_path_str = file_path.to_string_lossy().to_string();
+    let file_path_str = temp_file.path().to_string_lossy().to_string();
 
     let mut cmd = Command::new("gh");
     cmd.arg("gist")
@@ -390,10 +369,7 @@ async fn create_gist_from_markdown(
         cmd.arg("--public");
     }
 
-    let output_result = cmd.output().await;
-    let _ = tokio::fs::remove_file(&file_path).await;
-
-    let output = output_result.map_err(|e| {
+    let output = cmd.output().await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             "GitHub CLI (`gh`) is not installed. Install it from https://cli.github.com/"
                 .to_string()
