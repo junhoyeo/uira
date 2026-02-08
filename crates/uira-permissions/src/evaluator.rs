@@ -150,6 +150,9 @@ fn extract_path_from_input(input: &serde_json::Value) -> String {
         "file_path",
         "filePath",
         "file",
+        "url",
+        "uri",
+        "query",
         "target",
         "directory",
         "dir",
@@ -312,6 +315,12 @@ mod tests {
 
         let input = serde_json::json!({"path": "/different/path"});
         assert_eq!(extract_path_from_input(&input), "/different/path");
+
+        let input = serde_json::json!({"url": "https://example.com/docs"});
+        assert_eq!(extract_path_from_input(&input), "https://example.com/docs");
+
+        let input = serde_json::json!({"query": "rust serde"});
+        assert_eq!(extract_path_from_input(&input), "rust serde");
 
         let input = serde_json::json!({"command": "ls -la"});
         assert_eq!(extract_path_from_input(&input), "ls -la");

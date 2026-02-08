@@ -3,6 +3,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
@@ -16,6 +17,7 @@ const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_REQUESTS: usize = 10;
 const FETCH_DEFAULT_MAX_CHARS: usize = 10000;
 const FETCH_MAX_CHARS: usize = 50000;
+const FETCH_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 static STATE: Lazy<Mutex<WebState>> = Lazy::new(|| Mutex::new(WebState::new()));
 
@@ -301,6 +303,15 @@ impl Tool for FetchUrlTool {
         let url = reqwest::Url::parse(&input.url).map_err(|e| ToolError::InvalidInput {
             message: format!("Invalid URL: {e}"),
         })?;
+        validate_fetch_url(&url)?;
+
+        {
+            let mut state = STATE.lock().await;
+            state.cleanup();
+            state.check_rate_limit()?;
+            state.request_times.push_back(Instant::now());
+        }
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
@@ -334,12 +345,25 @@ impl Tool for FetchUrlTool {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_string();
-        let body = response
-            .text()
+
+        let body_bytes = response
+            .bytes()
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Failed to read response body: {e}"),
             })?;
+
+        if body_bytes.len() > FETCH_MAX_RESPONSE_BYTES {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "Response too large: {} bytes exceeds limit of {} bytes",
+                    body_bytes.len(),
+                    FETCH_MAX_RESPONSE_BYTES
+                ),
+            });
+        }
+
+        let body = String::from_utf8_lossy(&body_bytes).to_string();
 
         let title = extract_title(&body);
         let text = normalize_whitespace(&decode_html_entities(&strip_html_tags(&body)));
@@ -479,4 +503,82 @@ fn decode_html_entities(input: &str) -> String {
 
 fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
+    match url.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(ToolError::InvalidInput {
+                message: format!("Unsupported URL scheme: {other}"),
+            });
+        }
+    }
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| ToolError::InvalidInput {
+            message: "URL must include a hostname".to_string(),
+        })?
+        .to_ascii_lowercase();
+
+    if host == "localhost" || host.ends_with(".local") {
+        return Err(ToolError::ExecutionFailed {
+            message: "Blocked local hostname for fetch_url".to_string(),
+        });
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_or_local_ip(ip) {
+            return Err(ToolError::ExecutionFailed {
+                message: "Blocked private or local IP address for fetch_url".to_string(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn is_private_or_local_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_multicast()
+                || v4 == Ipv4Addr::new(169, 254, 169, 254)
+                || v4 == Ipv4Addr::new(0, 0, 0, 0)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6 == Ipv6Addr::LOCALHOST
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_localhost_urls() {
+        let url = reqwest::Url::parse("http://localhost:8080").unwrap();
+        assert!(validate_fetch_url(&url).is_err());
+    }
+
+    #[test]
+    fn blocks_private_ip_urls() {
+        let url = reqwest::Url::parse("http://127.0.0.1/api").unwrap();
+        assert!(validate_fetch_url(&url).is_err());
+    }
+
+    #[test]
+    fn allows_public_https_urls() {
+        let url = reqwest::Url::parse("https://example.com/docs").unwrap();
+        assert!(validate_fetch_url(&url).is_ok());
+    }
 }
