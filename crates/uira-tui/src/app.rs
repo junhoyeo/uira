@@ -13,6 +13,7 @@ use ratatui::{
 use std::fs;
 use std::io::Stdout;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, io, process::Command, thread, time::Duration};
@@ -36,9 +37,6 @@ const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
 const MAX_FILE_PICKER_RESULTS: usize = 8;
 const MAX_WORKSPACE_FILES: usize = 12_000;
 const FILE_INDEX_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
-const MAX_REFERENCED_FILES: usize = 8;
-const MAX_REFERENCED_FILE_BYTES: usize = 16 * 1024;
-const MAX_REFERENCED_TOTAL_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewTarget {
@@ -358,7 +356,7 @@ async fn create_gist_from_markdown(
     let description = options.description.unwrap_or(default_desc);
     let file_path_str = temp_file.path().to_string_lossy().to_string();
 
-    let mut cmd = Command::new("gh");
+    let mut cmd = TokioCommand::new("gh");
     cmd.arg("gist")
         .arg("create")
         .arg(&file_path_str)
@@ -447,20 +445,6 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     }
 
     lines
-}
-
-#[derive(Debug, Clone)]
-struct FileReferenceToken {
-    pattern: String,
-    start_char: usize,
-    end_char: usize,
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedFileReference {
-    path: String,
-    content: String,
-    truncated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -607,6 +591,10 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     session_id: Option<String>,
+    workspace_root: PathBuf,
+    workspace_files: Vec<String>,
+    last_file_index_refresh: Option<SystemTime>,
+    file_picker: Option<FilePickerState>,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
@@ -643,6 +631,10 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             session_id: None,
+            workspace_root,
+            workspace_files: Vec::new(),
+            last_file_index_refresh: None,
+            file_picker: None,
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
@@ -1154,6 +1146,153 @@ impl App {
         }
     }
 
+    fn refresh_file_index(&mut self) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.workspace_root)
+            .arg("ls-files")
+            .output();
+
+        let mut files = match output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        };
+
+        if files.len() > MAX_WORKSPACE_FILES {
+            files.truncate(MAX_WORKSPACE_FILES);
+        }
+
+        self.workspace_files = files;
+        self.last_file_index_refresh = Some(SystemTime::now());
+    }
+
+    fn update_file_picker_state(&mut self) {
+        let needs_refresh = self
+            .last_file_index_refresh
+            .and_then(|last| SystemTime::now().duration_since(last).ok())
+            .map(|elapsed| elapsed >= FILE_INDEX_REFRESH_INTERVAL)
+            .unwrap_or(true);
+
+        if needs_refresh {
+            self.refresh_file_index();
+        }
+
+        let char_count = self.input.chars().count();
+        if self.cursor_pos == 0 || self.cursor_pos > char_count {
+            self.file_picker = None;
+            return;
+        }
+
+        let prefix: String = self.input.chars().take(self.cursor_pos).collect();
+        let token_start = prefix
+            .rfind(|c: char| c.is_whitespace())
+            .map_or(0, |i| i + 1);
+        let token = prefix[token_start..].to_string();
+
+        if !token.starts_with('@') || token.len() <= 1 {
+            self.file_picker = None;
+            return;
+        }
+
+        let query = token[1..].to_lowercase();
+        let mut matches: Vec<String> = self
+            .workspace_files
+            .iter()
+            .filter(|path| path.to_lowercase().contains(&query))
+            .take(MAX_FILE_PICKER_RESULTS)
+            .cloned()
+            .collect();
+
+        if matches.is_empty() {
+            self.file_picker = None;
+            return;
+        }
+
+        matches.sort();
+        self.file_picker = Some(FilePickerState {
+            query,
+            start_char: token_start,
+            end_char: self.cursor_pos,
+            matches,
+            selected: 0,
+        });
+    }
+
+    fn move_file_picker_selection(&mut self, delta: isize) {
+        let Some(state) = self.file_picker.as_mut() else {
+            return;
+        };
+        if state.matches.is_empty() {
+            return;
+        }
+
+        let len = state.matches.len() as isize;
+        let next = (state.selected as isize + delta).rem_euclid(len);
+        state.selected = next as usize;
+    }
+
+    fn apply_file_picker_selection(&mut self) {
+        let Some(state) = self.file_picker.take() else {
+            return;
+        };
+        if state.matches.is_empty() {
+            return;
+        }
+
+        let selected = state.matches[state.selected].clone();
+        let before: String = self.input.chars().take(state.start_char).collect();
+        let after: String = self.input.chars().skip(state.end_char).collect();
+        self.input = format!("{}@{} {}", before, selected, after.trim_start());
+        self.cursor_pos = self.input.chars().count();
+    }
+
+    fn render_file_picker(&self, frame: &mut ratatui::Frame, chat_area: Rect, _input_area: Rect) {
+        let Some(state) = self.file_picker.as_ref() else {
+            return;
+        };
+
+        let width = chat_area.width.min(80);
+        let height = (state.matches.len() as u16 + 3).min(chat_area.height.saturating_sub(2));
+        if height < 3 {
+            return;
+        }
+
+        let popup = Rect {
+            x: chat_area.x + 1,
+            y: chat_area.y + chat_area.height.saturating_sub(height + 1),
+            width,
+            height,
+        };
+
+        frame.render_widget(Clear, popup);
+        let block = Block::default()
+            .title(format!(" File suggestions: {} ", state.query))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
+
+        let items: Vec<ListItem> = state
+            .matches
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                let style = if idx == state.selected {
+                    Style::default().fg(self.theme.accent)
+                } else {
+                    Style::default().fg(self.theme.fg)
+                };
+                ListItem::new(Span::styled(item.clone(), style))
+            })
+            .collect();
+
+        let list = List::new(items).block(block);
+        frame.render_widget(list, popup);
+    }
+
     fn push_message(&mut self, role: &str, content: String) {
         self.messages.push(ChatMessage {
             role: role.to_string(),
@@ -1209,11 +1348,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return;
+                    return KeyAction::None;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return;
+                    return KeyAction::None;
                 }
                 _ => {}
             }
@@ -1225,19 +1364,19 @@ impl App {
                 match key.code {
                     KeyCode::Up => {
                         self.move_file_picker_selection(-1);
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Down => {
                         self.move_file_picker_selection(1);
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Enter | KeyCode::Tab => {
                         self.apply_file_picker_selection();
-                        return;
+                        return KeyAction::None;
                     }
                     KeyCode::Esc => {
                         self.file_picker = None;
-                        return;
+                        return KeyAction::None;
                     }
                     _ => {}
                 }
@@ -1500,6 +1639,7 @@ impl App {
     fn send_agent_input(&mut self, input: String) {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
+            let prepared_input = input;
             tokio::spawn(async move {
                 if tx.send(prepared_input).await.is_err() {
                     tracing::warn!("Agent input channel closed");
