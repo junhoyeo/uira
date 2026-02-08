@@ -90,7 +90,6 @@ pub fn identify_components(analysis: &TaskAnalysis, context: &ProjectContext) ->
             description: analysis.task.clone(),
             can_parallelize: false,
             dependencies: vec![],
-            effort: analysis.complexity,
             technologies: analysis.technologies.clone(),
         }];
     }
@@ -121,7 +120,7 @@ pub fn generate_subtasks(
             },
             blocked_by: component.dependencies.clone(),
             agent_type: select_agent_type(component),
-            model_tier: select_model_tier(component),
+            model_tier: ModelTier::Medium,
             acceptance_criteria: generate_acceptance_criteria(component, analysis),
             verification: generate_verification_steps(component, analysis),
         })
@@ -461,7 +460,6 @@ impl DecompositionStrategy for FullstackStrategy {
                 description: "Frontend UI and components".to_string(),
                 can_parallelize: true,
                 dependencies: frontend_deps,
-                effort: 0.4,
                 technologies: analysis
                     .technologies
                     .iter()
@@ -488,7 +486,6 @@ impl DecompositionStrategy for FullstackStrategy {
                 description: "Backend API and business logic".to_string(),
                 can_parallelize: true,
                 dependencies: deps,
-                effort: 0.4,
                 technologies: analysis
                     .technologies
                     .iter()
@@ -507,7 +504,6 @@ impl DecompositionStrategy for FullstackStrategy {
                 description: "Database schema and migrations".to_string(),
                 can_parallelize: true,
                 dependencies: vec![],
-                effort: 0.2,
                 technologies: analysis
                     .technologies
                     .iter()
@@ -525,7 +521,6 @@ impl DecompositionStrategy for FullstackStrategy {
             description: "Shared types, utilities, and configuration".to_string(),
             can_parallelize: true,
             dependencies: vec![],
-            effort: 0.2,
             technologies: vec![],
         });
 
@@ -546,7 +541,6 @@ impl DecompositionStrategy for RefactoringStrategy {
                 description: format!("Refactor {} module", area),
                 can_parallelize: true,
                 dependencies: vec![],
-                effort: analysis.complexity / analysis.areas.len() as f64,
                 technologies: vec![],
             })
             .collect()
@@ -563,7 +557,6 @@ impl DecompositionStrategy for BugFixStrategy {
             description: analysis.task.clone(),
             can_parallelize: false,
             dependencies: vec![],
-            effort: analysis.complexity,
             technologies: vec![],
         }]
     }
@@ -582,7 +575,6 @@ impl DecompositionStrategy for FeatureStrategy {
                 description: format!("Implement {} for the feature", area),
                 can_parallelize: true,
                 dependencies: vec![],
-                effort: analysis.complexity / analysis.areas.len() as f64,
                 technologies: vec![],
             })
             .collect()
@@ -599,7 +591,6 @@ impl DecompositionStrategy for DefaultStrategy {
             description: analysis.task.clone(),
             can_parallelize: false,
             dependencies: vec![],
-            effort: analysis.complexity,
             technologies: vec![],
         }]
     }
@@ -655,16 +646,6 @@ fn select_agent_type(component: &Component) -> String {
         ComponentRole::Coordinator => "uira:architect".to_string(),
         ComponentRole::Testing => "uira:qa-tester".to_string(),
         ComponentRole::Docs => "uira:writer".to_string(),
-    }
-}
-
-fn select_model_tier(component: &Component) -> ModelTier {
-    if component.effort < 0.3 {
-        ModelTier::Low
-    } else if component.effort < 0.7 {
-        ModelTier::Medium
-    } else {
-        ModelTier::High
     }
 }
 
