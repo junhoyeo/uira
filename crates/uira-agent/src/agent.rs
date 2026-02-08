@@ -250,7 +250,7 @@ impl Agent {
                     current_prompt = format!(
                         "{}\n\n[Status: {}/{} completed, {} remaining]",
                         uira_protocol::TODO_CONTINUATION_PROMPT,
-                        total - incomplete_count,
+                        total.saturating_sub(incomplete_count),
                         total,
                         incomplete_count
                     );
