@@ -3,11 +3,13 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
+
+use crate::Theme;
 
 pub struct ModelGroup {
     pub provider: &'static str,
@@ -49,6 +51,7 @@ pub struct ModelSelector {
     group_index: usize,
     model_index: usize,
     current_model: Option<String>,
+    theme: Theme,
 }
 
 impl ModelSelector {
@@ -58,7 +61,12 @@ impl ModelSelector {
             group_index: 0,
             model_index: 0,
             current_model: None,
+            theme: Theme::default(),
         }
+    }
+
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
     }
 
     pub fn open(&mut self, current_model: Option<String>) {
@@ -170,7 +178,7 @@ impl ModelSelector {
         let block = Block::default()
             .title(" Select Model ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(self.theme.borders));
 
         let inner = block.inner(modal_area);
         frame.render_widget(block, modal_area);
@@ -185,7 +193,7 @@ impl ModelSelector {
             items.push(ListItem::new(Line::from(Span::styled(
                 format!("  {}", group.provider.to_uppercase()),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(self.theme.warning)
                     .add_modifier(Modifier::BOLD),
             ))));
 
@@ -201,15 +209,15 @@ impl ModelSelector {
                 let prefix = if is_current { "→ " } else { "  " };
                 let style = if is_selected {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Cyan)
+                        .fg(Theme::contrast_text(self.theme.accent))
+                        .bg(self.theme.accent)
                         .add_modifier(Modifier::BOLD)
                 } else if is_current {
                     Style::default()
-                        .fg(Color::Green)
+                        .fg(self.theme.success)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(self.theme.fg)
                 };
 
                 items.push(ListItem::new(Line::from(Span::styled(
@@ -223,7 +231,7 @@ impl ModelSelector {
         frame.render_widget(list, chunks[0]);
 
         let help = Paragraph::new("↑↓/jk: navigate | ←→/hl: group | Enter: select | Esc: cancel")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(self.theme.borders))
             .alignment(Alignment::Center);
         frame.render_widget(help, chunks[1]);
     }

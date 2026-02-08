@@ -5,7 +5,7 @@ use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
@@ -29,7 +29,7 @@ use uira_providers::{
 
 use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
 use crate::widgets::ChatMessage;
-use crate::AppEvent;
+use crate::{AppEvent, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
@@ -610,12 +610,20 @@ pub struct App {
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
+    theme: Theme,
+    theme_overrides: ThemeOverrides,
 }
 
 impl App {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
         let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let theme = Theme::default();
+        let mut approval_overlay = ApprovalOverlay::new();
+        approval_overlay.set_theme(theme.clone());
+        let mut model_selector = ModelSelector::new();
+        model_selector.set_theme(theme.clone());
+
         Self {
             should_quit: false,
             event_tx,
@@ -629,8 +637,8 @@ impl App {
             input_focused: true,
             streaming_buffer: None,
             thinking_buffer: None,
-            approval_overlay: ApprovalOverlay::new(),
-            model_selector: ModelSelector::new(),
+            approval_overlay,
+            model_selector,
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
@@ -638,7 +646,26 @@ impl App {
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
+            theme,
+            theme_overrides: ThemeOverrides::default(),
         }
+    }
+
+    pub fn configure_theme(
+        &mut self,
+        theme_name: &str,
+        overrides: ThemeOverrides,
+    ) -> Result<(), String> {
+        self.theme_overrides = overrides;
+        self.set_theme_by_name(theme_name)
+    }
+
+    fn set_theme_by_name(&mut self, theme_name: &str) -> Result<(), String> {
+        let theme = Theme::from_name_with_overrides(theme_name, &self.theme_overrides)?;
+        self.theme = theme;
+        self.approval_overlay.set_theme(self.theme.clone());
+        self.model_selector.set_theme(self.theme.clone());
+        Ok(())
     }
 
     pub fn with_model(mut self, model: &str) -> Self {
@@ -776,11 +803,22 @@ impl App {
         }
     }
 
+    fn message_style(&self, role: &str) -> Style {
+        match role {
+            "user" => Style::default().fg(self.theme.accent),
+            "assistant" => Style::default().fg(self.theme.fg),
+            "tool" => Style::default().fg(self.theme.accent),
+            "error" => Style::default().fg(self.theme.error),
+            "system" => Style::default().fg(self.theme.warning),
+            _ => Style::default().fg(self.theme.fg),
+        }
+    }
+
     fn render_chat(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let block = Block::default()
             .title(" Uira ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Cyan));
+            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
 
         let inner_width = area.width.saturating_sub(2) as usize;
 
@@ -792,18 +830,11 @@ impl App {
                     (
                         "thinking: ",
                         Style::default()
-                            .fg(Color::Gray)
+                            .fg(self.theme.borders)
                             .add_modifier(Modifier::ITALIC),
                     )
                 } else {
-                    let s = match msg.role.as_str() {
-                        "user" => Style::default().fg(Color::Green),
-                        "assistant" => Style::default().fg(Color::Cyan),
-                        "tool" => Style::default().fg(Color::Magenta),
-                        "error" => Style::default().fg(Color::Red),
-                        "system" => Style::default().fg(Color::Yellow),
-                        _ => Style::default(),
-                    };
+                    let s = self.message_style(msg.role.as_str());
                     ("", s)
                 };
 
@@ -821,7 +852,7 @@ impl App {
         if let Some(ref buffer) = self.thinking_buffer {
             if !buffer.is_empty() {
                 let style = Style::default()
-                    .fg(Color::Gray)
+                    .fg(self.theme.borders)
                     .add_modifier(Modifier::ITALIC);
                 let lines = wrap_message("> Thinking: ", buffer, inner_width, style);
                 items.push(ListItem::new(Text::from(lines)));
@@ -830,13 +861,13 @@ impl App {
 
         if let Some(ref buffer) = self.streaming_buffer {
             if !buffer.is_empty() {
-                let style = Style::default().fg(Color::Cyan);
+                let style = self.message_style("assistant");
                 let mut lines = wrap_message("assistant: ", buffer, inner_width, style);
                 if let Some(last) = lines.last_mut() {
                     last.spans.push(Span::styled(
                         "▌",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(self.theme.warning)
                             .add_modifier(Modifier::SLOW_BLINK),
                     ));
                 }
@@ -852,23 +883,25 @@ impl App {
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
         let state_str = match self.agent_state {
-            AgentState::Idle => ("Idle", Color::Gray),
-            AgentState::Thinking => ("Thinking...", Color::Yellow),
-            AgentState::ExecutingTool => ("Executing tool...", Color::Magenta),
-            AgentState::WaitingForApproval => ("Awaiting approval", Color::Red),
-            AgentState::WaitingForUser => ("Waiting for input", Color::Blue),
-            AgentState::Complete => ("Complete", Color::Green),
-            AgentState::Cancelled => ("Cancelled", Color::Red),
-            AgentState::Failed => ("Failed", Color::Red),
+            AgentState::Idle => ("Idle", self.theme.borders),
+            AgentState::Thinking => ("Thinking...", self.theme.warning),
+            AgentState::ExecutingTool => ("Executing tool...", self.theme.accent),
+            AgentState::WaitingForApproval => ("Awaiting approval", self.theme.error),
+            AgentState::WaitingForUser => ("Waiting for input", self.theme.accent),
+            AgentState::Complete => ("Complete", self.theme.success),
+            AgentState::Cancelled => ("Cancelled", self.theme.error),
+            AgentState::Failed => ("Failed", self.theme.error),
         };
 
         let mut spans = vec![
             Span::styled(
                 format!(" {} ", state_str.0),
-                Style::default().fg(Color::Black).bg(state_str.1),
+                Style::default()
+                    .fg(Theme::contrast_text(state_str.1))
+                    .bg(state_str.1),
             ),
             Span::raw(" "),
-            Span::styled(&self.status, Style::default().fg(Color::DarkGray)),
+            Span::styled(&self.status, Style::default().fg(self.theme.fg)),
         ];
 
         // Show pending approval count
@@ -877,12 +910,12 @@ impl App {
             spans.push(Span::raw(" | "));
             spans.push(Span::styled(
                 format!("{} pending approval(s)", pending),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(self.theme.warning),
             ));
         }
 
         let status = Paragraph::new(Line::from(spans))
-            .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+            .style(Style::default().bg(self.theme.bg).fg(self.theme.fg));
 
         frame.render_widget(status, area);
     }
@@ -896,9 +929,9 @@ impl App {
 
         let block = Block::default().title(title).borders(Borders::ALL).style(
             if self.input_focused && !self.approval_overlay.is_active() {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(self.theme.accent)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(self.theme.borders)
             },
         );
 
@@ -939,7 +972,7 @@ impl App {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Yellow));
+            .style(Style::default().fg(self.theme.borders));
 
         let inner = block.inner(area);
         let max_width = inner.width.saturating_sub(1) as usize;
@@ -949,18 +982,18 @@ impl App {
             .iter()
             .map(|todo| {
                 let (indicator, status_color) = match todo.status {
-                    TodoStatus::Completed => ("✓", Color::Green),
-                    TodoStatus::InProgress => ("•", Color::Yellow),
-                    TodoStatus::Cancelled => ("✗", Color::DarkGray),
-                    TodoStatus::Pending => (" ", Color::Gray),
+                    TodoStatus::Completed => ("✓", self.theme.success),
+                    TodoStatus::InProgress => ("•", self.theme.warning),
+                    TodoStatus::Cancelled => ("✗", self.theme.borders),
+                    TodoStatus::Pending => (" ", self.theme.borders),
                 };
 
                 // Priority marker and color override
                 let (priority_marker, color) = match (todo.status, todo.priority) {
                     (TodoStatus::Completed, _) => ("", status_color),
                     (TodoStatus::Cancelled, _) => ("", status_color),
-                    (_, TodoPriority::High) => ("⚡ ", Color::Red),
-                    (_, TodoPriority::Medium) => ("• ", Color::Yellow),
+                    (_, TodoPriority::High) => ("⚡ ", self.theme.error),
+                    (_, TodoPriority::Medium) => ("• ", self.theme.warning),
                     (_, TodoPriority::Low) => ("", status_color),
                 };
 
@@ -1523,7 +1556,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
                         .to_string(),
                 });
             }
@@ -1601,6 +1634,34 @@ impl App {
             }
             "/review" => {
                 self.run_review_command(&parts[1..], input);
+            }
+            "/theme" => {
+                if let Some(theme_name) = parts.get(1) {
+                    match self.set_theme_by_name(theme_name) {
+                        Ok(()) => {
+                            self.status = format!("Theme changed to {}", self.theme.name);
+                            self.messages.push(ChatMessage {
+                                role: "system".to_string(),
+                                content: format!("Theme set to {}", self.theme.name),
+                            });
+                        }
+                        Err(err) => {
+                            self.messages.push(ChatMessage {
+                                role: "system".to_string(),
+                                content: err,
+                            });
+                        }
+                    }
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "Current theme: {}\nAvailable themes: {}\nUsage: /theme <name>",
+                            self.theme.name,
+                            Theme::available_names().join(", ")
+                        ),
+                    });
+                }
             }
             _ => {
                 self.messages.push(ChatMessage {

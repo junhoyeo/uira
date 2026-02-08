@@ -8,9 +8,11 @@
 
 mod app;
 mod events;
+mod theme;
 pub mod views;
 mod widgets;
 
 pub use app::App;
 pub use events::AppEvent;
+pub use theme::{Theme, ThemeOverrides};
 pub use views::{ApprovalOverlay, ApprovalRequest, ApprovalView};
