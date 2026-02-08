@@ -3,11 +3,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uira_config::schema::{
-    CompactionSettings, GoalConfig, PermissionActionConfig, PermissionRuleConfig,
+    CompactionSettings, GoalConfig, NamedMcpServerConfig, PermissionActionConfig,
+    PermissionRuleConfig,
 };
 use uira_context::{CompactionConfig, CompactionStrategy};
 use uira_permissions::{ConfigAction, ConfigRule};
-use uira_protocol::SandboxPreference;
+use uira_protocol::{SandboxPreference, ToolSpec};
 use uira_sandbox::SandboxPolicy;
 
 /// Configuration for the agent
@@ -80,6 +81,14 @@ pub struct AgentConfig {
     /// Directory for caching approval decisions
     #[serde(default)]
     pub cache_directory: Option<PathBuf>,
+
+    /// External MCP servers loaded from uira.yml
+    #[serde(default)]
+    pub external_mcp_servers: Vec<NamedMcpServerConfig>,
+
+    /// Discovered MCP tool specs (namespaced as mcp__<server>__<tool>)
+    #[serde(default)]
+    pub external_mcp_tool_specs: Vec<ToolSpec>,
 }
 
 fn default_system_prompt_option() -> Option<String> {
@@ -155,6 +164,8 @@ impl Default for AgentConfig {
             system_prompt: Some(default_system_prompt()),
             permission_rules: Vec::new(),
             cache_directory: None,
+            external_mcp_servers: Vec::new(),
+            external_mcp_tool_specs: Vec::new(),
         }
     }
 }
@@ -224,6 +235,16 @@ impl AgentConfig {
 
     pub fn with_permission_rules(mut self, rules: Vec<PermissionRuleConfig>) -> Self {
         self.permission_rules = rules;
+        self
+    }
+
+    pub fn with_external_mcp(
+        mut self,
+        servers: Vec<NamedMcpServerConfig>,
+        tool_specs: Vec<ToolSpec>,
+    ) -> Self {
+        self.external_mcp_servers = servers;
+        self.external_mcp_tool_specs = tool_specs;
         self
     }
 

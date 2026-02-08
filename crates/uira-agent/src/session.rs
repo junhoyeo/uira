@@ -9,8 +9,8 @@ use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
 use uira_tools::{
     register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
-    DelegationToolProvider, LspToolProvider, TodoStore, ToolCallRuntime, ToolContext,
-    ToolOrchestrator, ToolRouter,
+    DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
+    ToolContext, ToolOrchestrator, ToolRouter,
 };
 
 use crate::AgentConfig;
@@ -90,6 +90,17 @@ impl Session {
         register_builtins_with_todos(&mut tool_router, todo_store.clone());
         tool_router.register_provider(Arc::new(LspToolProvider::new()));
         tool_router.register_provider(Arc::new(AstToolProvider::new()));
+
+        if !config.external_mcp_servers.is_empty() {
+            match McpToolProvider::new(
+                config.external_mcp_servers.clone(),
+                config.external_mcp_tool_specs.clone(),
+                cwd.clone(),
+            ) {
+                Ok(provider) => tool_router.register_provider(Arc::new(provider)),
+                Err(e) => tracing::warn!(error = %e, "failed to initialize MCP tool provider"),
+            }
+        }
 
         let delegation_provider = match executor {
             Some(exec) => DelegationToolProvider::with_executor(exec),

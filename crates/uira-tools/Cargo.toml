@@ -30,6 +30,7 @@ uira-agents = { workspace = true }
 uira-config = { workspace = true }
 uira-features = { workspace = true }
 uira-sdk = { workspace = true }
+uira-mcp-client = { workspace = true }
 uira-protocol = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-comment-checker = { workspace = true }
