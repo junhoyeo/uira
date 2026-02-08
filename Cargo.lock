@@ -5203,6 +5203,7 @@ dependencies = [
  "uira-core",
  "uira-features",
  "uira-goals",
+ "uira-mcp-client",
  "uira-protocol",
  "uira-providers",
  "uira-sandbox",
@@ -5352,6 +5353,19 @@ dependencies = [
  "uira-events",
  "uira-goals",
  "uira-protocol",
+]
+
+[[package]]
+name = "uira-mcp-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -5537,6 +5551,7 @@ dependencies = [
  "uira-comment-checker",
  "uira-config",
  "uira-features",
+ "uira-mcp-client",
  "uira-permissions",
  "uira-protocol",
  "uira-sandbox",

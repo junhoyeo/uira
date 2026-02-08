@@ -11,6 +11,7 @@ members = [
   "crates/uira-agents",
   "crates/uira-tools",
   "crates/uira-config",
+  "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
   "crates/uira-goals",
@@ -49,6 +50,7 @@ uira-sdk = { path = "crates/uira-sdk" }
 
 # Internal crates - Tools
 uira-tools = { path = "crates/uira-tools" }
+uira-mcp-client = { path = "crates/uira-mcp-client" }
 uira-oxc = { path = "crates/uira-oxc" }
 uira-comment-checker = { path = "crates/uira-comment-checker" }
 
