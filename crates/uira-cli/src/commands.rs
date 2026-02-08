@@ -103,6 +103,13 @@ pub enum Commands {
         #[command(subcommand)]
         command: TasksCommands,
     },
+
+    /// Generate shell completion scripts
+    Completion {
+        /// Target shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand, Debug)]
