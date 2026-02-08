@@ -62,7 +62,7 @@ impl Permission {
             "write" | "write_file" | "file_write" | "edit" => Permission::FileWrite,
             "delete" | "remove" | "rm" => Permission::FileDelete,
             "bash" | "shell" | "exec" | "execute" => Permission::ShellExecute,
-            "fetch" | "http" | "request" | "web_search" => Permission::NetworkAccess,
+            "fetch" | "http" | "request" | "web_search" | "fetch_url" => Permission::NetworkAccess,
             name if name.starts_with("mcp_") => Permission::McpTool,
             name => Permission::Tool(name.to_string()),
         }
@@ -119,6 +119,10 @@ mod tests {
         assert_eq!(Permission::from_tool_name("bash"), Permission::ShellExecute);
         assert_eq!(
             Permission::from_tool_name("fetch"),
+            Permission::NetworkAccess
+        );
+        assert_eq!(
+            Permission::from_tool_name("fetch_url"),
             Permission::NetworkAccess
         );
         assert_eq!(Permission::from_tool_name("mcp_lsp"), Permission::McpTool);
