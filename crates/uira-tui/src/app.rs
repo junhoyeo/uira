@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use std::{env, io, process::Command, thread, time::Duration};
 use tempfile::Builder;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
-use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
+use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender};
 use uira_protocol::Provider;
 use uira_protocol::{AgentState, Item, ThreadEvent, TodoItem, TodoPriority, TodoStatus};
 use uira_providers::{
@@ -419,6 +419,32 @@ struct FilePickerState {
     selected: usize,
 }
 
+fn format_branch_list(branches: &[BranchInfo]) -> String {
+    if branches.is_empty() {
+        return "No branches available.".to_string();
+    }
+
+    let mut lines = Vec::with_capacity(branches.len() + 1);
+    lines.push("Branches:".to_string());
+
+    for branch in branches {
+        let marker = if branch.is_current { "*" } else { " " };
+        let parent = branch
+            .parent
+            .as_deref()
+            .map(|p| format!(" (from {})", p))
+            .unwrap_or_default();
+        let short_id = branch.session_id.get(..8).unwrap_or(&branch.session_id);
+
+        lines.push(format!(
+            "{} {} -> {}{}",
+            marker, branch.name, short_id, parent
+        ));
+    }
+
+    lines.join("\n")
+}
+
 fn truncate_chars(input: &str, max_chars: usize) -> String {
     let mut chars = input.chars();
     let mut output: String = chars.by_ref().take(max_chars).collect();
@@ -591,6 +617,7 @@ pub struct App {
     workspace_files: Vec<String>,
     last_file_index_refresh: Option<SystemTime>,
     file_picker: Option<FilePickerState>,
+    current_branch: String,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
@@ -631,6 +658,7 @@ impl App {
             workspace_files: Vec::new(),
             last_file_index_refresh: None,
             file_picker: None,
+            current_branch: "main".to_string(),
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
@@ -893,6 +921,11 @@ impl App {
             ),
             Span::raw(" "),
             Span::styled(&self.status, Style::default().fg(self.theme.fg)),
+            Span::raw(" | "),
+            Span::styled(
+                format!("branch: {}", self.current_branch),
+                Style::default().fg(self.theme.accent),
+            ),
         ];
 
         // Show pending approval count
@@ -1419,11 +1452,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return;
+                    return KeyAction::None;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return;
+                    return KeyAction::None;
                 }
                 _ => {}
             }
@@ -1601,7 +1634,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
                         .to_string(),
                     tool_output: None,
                 });
@@ -1622,8 +1655,30 @@ impl App {
                 self.status = "Chat cleared".to_string();
             }
             "/fork" => {
-                let message_count = parts.get(1).and_then(|s| s.parse::<usize>().ok());
-                self.fork_session(message_count);
+                let (branch_name, message_count) = match parts.get(1).copied() {
+                    Some(arg) => match arg.parse::<usize>() {
+                        Ok(count) => (None, Some(count)),
+                        Err(_) => (Some(arg.to_string()), None),
+                    },
+                    None => (None, None),
+                };
+                self.fork_session(branch_name, message_count);
+            }
+            "/switch" => {
+                if let Some(branch_name) = parts.get(1) {
+                    self.switch_branch(branch_name);
+                } else {
+                    self.messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: "Usage: /switch <branch>".to_string(),
+                    });
+                }
+            }
+            "/branches" => {
+                self.list_branches();
+            }
+            "/tree" => {
+                self.show_branch_tree();
             }
             "/share" => match parse_share_command(&parts) {
                 Ok(options) => self.share_session(options),
@@ -1741,8 +1796,12 @@ impl App {
                 self.todos = todos;
                 self.ensure_todo_selection();
             }
-            AppEvent::SystemMessage(msg) => {
-                self.push_message("system", msg);
+            AppEvent::Info(message) => {
+                self.status = message.clone();
+                self.push_message("system", message);
+            }
+            AppEvent::BranchChanged(branch_name) => {
+                self.current_branch = branch_name;
             }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
@@ -2072,7 +2131,7 @@ impl App {
                 Ok(url) => {
                     let visibility = if options.public { "public" } else { "secret" };
                     let _ = event_tx
-                        .send(AppEvent::SystemMessage(format!(
+                        .send(AppEvent::Info(format!(
                             "Session shared to GitHub Gist ({})\nURL: {}",
                             visibility, url
                         )))
@@ -2087,11 +2146,14 @@ impl App {
         });
     }
 
-    fn fork_session(&mut self, message_count: Option<usize>) {
-        let msg_desc = message_count
-            .map(|c| format!("at message {}", c))
-            .unwrap_or_else(|| "at current point".to_string());
-        self.status = format!("Forking session {}...", msg_desc);
+    fn fork_session(&mut self, branch_name: Option<String>, message_count: Option<usize>) {
+        let target = branch_name
+            .clone()
+            .unwrap_or_else(|| "auto-generated branch".to_string());
+        let scope = message_count
+            .map(|count| format!(" from first {} message(s)", count))
+            .unwrap_or_default();
+        self.status = format!("Forking into '{}'{}...", target, scope);
 
         if let Some(ref tx) = self.agent_command_tx {
             let tx = tx.clone();
@@ -2100,6 +2162,7 @@ impl App {
                 let (response_tx, response_rx) = tokio::sync::oneshot::channel();
                 if tx
                     .send(AgentCommand::Fork {
+                        branch_name,
                         message_count,
                         response_tx,
                     })
@@ -2111,11 +2174,11 @@ impl App {
                 }
 
                 match response_rx.await {
-                    Ok(Ok(new_session_id)) => {
+                    Ok(Ok(result)) => {
                         let _ = event_tx
-                            .send(AppEvent::Error(format!(
-                                "Session forked! New session ID: {}",
-                                new_session_id
+                            .send(AppEvent::Info(format!(
+                                "Created branch '{}' from '{}' (session {})",
+                                result.branch_name, result.parent_branch, result.session_id
                             )))
                             .await;
                     }
@@ -2136,6 +2199,153 @@ impl App {
                 "error",
                 "No agent connected. Cannot fork session.".to_string(),
             );
+        }
+    }
+
+    fn switch_branch(&mut self, branch_name: &str) {
+        self.status = format!("Switching to branch '{}'...", branch_name);
+
+        if let Some(ref tx) = self.agent_command_tx {
+            let tx = tx.clone();
+            let event_tx = self.event_tx.clone();
+            let branch_name = branch_name.to_string();
+
+            tokio::spawn(async move {
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                if tx
+                    .send(AgentCommand::SwitchBranch {
+                        branch_name: branch_name.clone(),
+                        response_tx,
+                    })
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Failed to send switch branch command");
+                    return;
+                }
+
+                match response_rx.await {
+                    Ok(Ok(message)) => {
+                        let _ = event_tx
+                            .send(AppEvent::BranchChanged(branch_name.clone()))
+                            .await;
+                        let _ = event_tx.send(AppEvent::Info(message)).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!("Switch failed: {}", e)))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(
+                                "Switch branch response channel closed".to_string(),
+                            ))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            self.messages.push(ChatMessage {
+                role: "error".to_string(),
+                content: "No agent connected. Cannot switch branches.".to_string(),
+            });
+        }
+    }
+
+    fn list_branches(&mut self) {
+        self.status = "Loading branches...".to_string();
+
+        if let Some(ref tx) = self.agent_command_tx {
+            let tx = tx.clone();
+            let event_tx = self.event_tx.clone();
+
+            tokio::spawn(async move {
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                if tx
+                    .send(AgentCommand::ListBranches { response_tx })
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Failed to send list branches command");
+                    return;
+                }
+
+                match response_rx.await {
+                    Ok(Ok(branches)) => {
+                        if let Some(current) = branches.iter().find(|b| b.is_current) {
+                            let _ = event_tx
+                                .send(AppEvent::BranchChanged(current.name.clone()))
+                                .await;
+                        }
+
+                        let _ = event_tx
+                            .send(AppEvent::Info(format_branch_list(&branches)))
+                            .await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!("List branches failed: {}", e)))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(
+                                "List branches response channel closed".to_string(),
+                            ))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            self.messages.push(ChatMessage {
+                role: "error".to_string(),
+                content: "No agent connected. Cannot list branches.".to_string(),
+            });
+        }
+    }
+
+    fn show_branch_tree(&mut self) {
+        self.status = "Loading branch tree...".to_string();
+
+        if let Some(ref tx) = self.agent_command_tx {
+            let tx = tx.clone();
+            let event_tx = self.event_tx.clone();
+
+            tokio::spawn(async move {
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                if tx
+                    .send(AgentCommand::BranchTree { response_tx })
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Failed to send branch tree command");
+                    return;
+                }
+
+                match response_rx.await {
+                    Ok(Ok(tree)) => {
+                        let _ = event_tx.send(AppEvent::Info(tree)).await;
+                    }
+                    Ok(Err(e)) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(format!("Branch tree failed: {}", e)))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = event_tx
+                            .send(AppEvent::Error(
+                                "Branch tree response channel closed".to_string(),
+                            ))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            self.messages.push(ChatMessage {
+                role: "error".to_string(),
+                content: "No agent connected. Cannot show branch tree.".to_string(),
+            });
         }
     }
 }

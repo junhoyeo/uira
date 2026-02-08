@@ -44,10 +44,36 @@ pub use session::Session;
 pub use streaming::{StreamController, StreamOutput};
 pub use turn::{TurnContext, TurnState};
 
+#[derive(Debug, Clone)]
+pub struct BranchInfo {
+    pub name: String,
+    pub parent: Option<String>,
+    pub session_id: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForkResult {
+    pub branch_name: String,
+    pub session_id: String,
+    pub parent_branch: String,
+}
+
 pub enum AgentCommand {
     SwitchClient(Arc<dyn ModelClient>),
     Fork {
+        branch_name: Option<String>,
         message_count: Option<usize>,
+        response_tx: tokio::sync::oneshot::Sender<Result<ForkResult, String>>,
+    },
+    SwitchBranch {
+        branch_name: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    ListBranches {
+        response_tx: tokio::sync::oneshot::Sender<Result<Vec<BranchInfo>, String>>,
+    },
+    BranchTree {
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
 }
