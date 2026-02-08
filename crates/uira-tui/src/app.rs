@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::collections::HashMap;
@@ -1419,11 +1419,11 @@ impl App {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return KeyAction::None;
+                    return;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return KeyAction::None;
+                    return;
                 }
                 _ => {}
             }
@@ -1435,19 +1435,19 @@ impl App {
                 match key.code {
                     KeyCode::Up => {
                         self.move_file_picker_selection(-1);
-                        return KeyAction::None;
+                        return;
                     }
                     KeyCode::Down => {
                         self.move_file_picker_selection(1);
-                        return KeyAction::None;
+                        return;
                     }
                     KeyCode::Enter | KeyCode::Tab => {
                         self.apply_file_picker_selection();
-                        return KeyAction::None;
+                        return;
                     }
                     KeyCode::Esc => {
                         self.file_picker = None;
-                        return KeyAction::None;
+                        return;
                     }
                     _ => {}
                 }
@@ -1545,7 +1545,6 @@ impl App {
     fn send_agent_input(&mut self, input: String) {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
-            let prepared_input = input;
             tokio::spawn(async move {
                 if tx.send(input).await.is_err() {
                     tracing::warn!("Agent input channel closed");
