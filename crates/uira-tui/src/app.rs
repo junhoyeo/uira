@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
 use std::fs;
@@ -31,6 +31,12 @@ use crate::AppEvent;
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
+const MAX_FILE_PICKER_RESULTS: usize = 8;
+const MAX_WORKSPACE_FILES: usize = 12_000;
+const FILE_INDEX_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_REFERENCED_FILES: usize = 8;
+const MAX_REFERENCED_FILE_BYTES: usize = 16 * 1024;
+const MAX_REFERENCED_TOTAL_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewTarget {
@@ -231,6 +237,29 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     lines
 }
 
+#[derive(Debug, Clone)]
+struct FileReferenceToken {
+    pattern: String,
+    start_char: usize,
+    end_char: usize,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedFileReference {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone)]
+struct FilePickerState {
+    query: String,
+    start_char: usize,
+    end_char: usize,
+    matches: Vec<String>,
+    selected: usize,
+}
+
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
 fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
     let (provider, model) = model_str
@@ -373,6 +402,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
+        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {
             should_quit: false,
             event_tx,
@@ -454,6 +484,9 @@ impl App {
                     .to_string()
             });
 
+        self.workspace_root = PathBuf::from(&working_directory);
+        self.refresh_file_index();
+
         let mut event_system = uira_agent::create_event_system(working_directory);
         event_system.start();
 
@@ -510,6 +543,13 @@ impl App {
         self.render_chat(frame, chunks[0]);
         self.render_status(frame, chunks[1]);
         self.render_input(frame, chunks[2]);
+
+        if self.file_picker.is_some()
+            && !self.approval_overlay.is_active()
+            && !self.model_selector.is_active()
+        {
+            self.render_file_picker(frame, chunks[0], chunks[2]);
+        }
 
         // Render approval overlay on top if active
         if self.approval_overlay.is_active() {
@@ -934,6 +974,28 @@ impl App {
 
         // Input handling (cursor_pos is char index, not byte index for UTF-8 safety)
         if self.input_focused {
+            if self.file_picker.is_some() {
+                match key.code {
+                    KeyCode::Up => {
+                        self.move_file_picker_selection(-1);
+                        return;
+                    }
+                    KeyCode::Down => {
+                        self.move_file_picker_selection(1);
+                        return;
+                    }
+                    KeyCode::Enter | KeyCode::Tab => {
+                        self.apply_file_picker_selection();
+                        return;
+                    }
+                    KeyCode::Esc => {
+                        self.file_picker = None;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+
             let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
@@ -945,6 +1007,7 @@ impl App {
                         .unwrap_or(self.input.len());
                     self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
+                    self.update_file_picker_state();
                 }
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
@@ -956,6 +1019,7 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(0);
                         self.input.remove(byte_pos);
+                        self.update_file_picker_state();
                     }
                 }
                 KeyCode::Delete => {
@@ -967,33 +1031,43 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(self.input.len());
                         self.input.remove(byte_pos);
+                        self.update_file_picker_state();
                     }
                 }
                 KeyCode::Left => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
                     }
+                    self.update_file_picker_state();
                 }
                 KeyCode::Right => {
                     if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
                     }
+                    self.update_file_picker_state();
                 }
                 KeyCode::Home => {
                     self.cursor_pos = 0;
+                    self.update_file_picker_state();
                 }
                 KeyCode::End => {
                     self.cursor_pos = char_count;
+                    self.update_file_picker_state();
                 }
                 KeyCode::Enter => {
                     if !self.input.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
+                        self.file_picker = None;
                         self.submit_input(input);
                     }
                 }
                 KeyCode::Esc => {
-                    self.should_quit = true;
+                    if self.file_picker.is_some() {
+                        self.file_picker = None;
+                    } else {
+                        self.should_quit = true;
+                    }
                 }
                 KeyCode::Up => {
                     self.scroll_up();
@@ -1180,7 +1254,7 @@ impl App {
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
-                if tx.send(input).await.is_err() {
+                if tx.send(prepared_input).await.is_err() {
                     tracing::warn!("Agent input channel closed");
                 }
             });
