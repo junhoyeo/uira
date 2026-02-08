@@ -1,6 +1,7 @@
 //! Main agent implementation
 
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use uira_events::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_protocol::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
-    Role, ThreadEvent, ToolCall,
+    Role, SessionId, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
 use uira_telemetry::{SessionSpan, TurnSpan};
@@ -20,15 +21,23 @@ use crate::{
     events::{EventSender, EventStream},
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
-    AgentCommand, AgentConfig, AgentControl, AgentLoopError, CommandReceiver, CommandSender,
-    Session,
+    AgentCommand, AgentConfig, AgentControl, AgentLoopError, BranchInfo, CommandReceiver,
+    CommandSender, ForkResult, Session,
 };
 
 /// Timeout for approval requests (5 minutes)
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
 
+struct BranchState {
+    parent: Option<String>,
+    session: Session,
+}
+
 pub struct Agent {
     session: Session,
+    branches: HashMap<String, BranchState>,
+    current_branch: String,
+    current_branch_parent: Option<String>,
     control: AgentControl,
     state: AgentState,
     event_sender: Option<EventSender>,
@@ -55,6 +64,9 @@ impl Agent {
     ) -> Self {
         Self {
             session: Session::new_with_executor(config, client, executor),
+            branches: HashMap::new(),
+            current_branch: "main".to_string(),
+            current_branch_parent: None,
             control: AgentControl::default(),
             state: AgentState::Idle,
             event_sender: None,
@@ -161,9 +173,22 @@ impl Agent {
                             tracing::info!("Switched to {} ({})", model, provider);
                             self.emit_event(ThreadEvent::ModelSwitched { model, provider }).await;
                         }
-                        AgentCommand::Fork { message_count, response_tx } => {
-                            let result = self.handle_fork(message_count).await;
+                        AgentCommand::Fork { branch_name, message_count, response_tx } => {
+                            let result = self.handle_fork(branch_name, message_count).await;
                             let _ = response_tx.send(result);
+                        }
+                        AgentCommand::SwitchBranch {
+                            branch_name,
+                            response_tx,
+                        } => {
+                            let result = self.handle_switch_branch(branch_name);
+                            let _ = response_tx.send(result);
+                        }
+                        AgentCommand::ListBranches { response_tx } => {
+                            let _ = response_tx.send(Ok(self.list_branches()));
+                        }
+                        AgentCommand::BranchTree { response_tx } => {
+                            let _ = response_tx.send(Ok(self.render_branch_tree()));
                         }
                     }
                     continue;
@@ -325,20 +350,59 @@ impl Agent {
         self.rollout.as_ref().map(|r| r.path())
     }
 
-    async fn handle_fork(&mut self, message_count: Option<usize>) -> Result<String, String> {
+    async fn handle_fork(
+        &mut self,
+        branch_name: Option<String>,
+        message_count: Option<usize>,
+    ) -> Result<ForkResult, String> {
+        let branch_name = match branch_name {
+            Some(name) => {
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    return Err("Branch name cannot be empty".to_string());
+                }
+                if trimmed.len() > 64 {
+                    return Err("Branch name must be 64 characters or fewer".to_string());
+                }
+                if !trimmed
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Err(
+                        "Branch name must contain only letters, numbers, '-' or '_'".to_string()
+                    );
+                }
+                trimmed.to_string()
+            }
+            None => self.next_branch_name(),
+        };
+
+        if self.branch_exists(&branch_name) {
+            return Err(format!("Branch '{}' already exists", branch_name));
+        }
+
         let forked_session = match message_count {
             Some(count) => self.session.fork_at_message(count),
             None => self.session.fork(),
         };
 
         let forked_session_id = forked_session.id.to_string();
+        let parent_branch = self.current_branch.clone();
         let parent_session_id = self.session.id.to_string();
         let fork_point_message_id = forked_session.forked_from_message.clone();
         let msg_count = forked_session.context.messages().len();
 
+        self.branches.insert(
+            branch_name.clone(),
+            BranchState {
+                parent: Some(parent_branch.clone()),
+                session: forked_session,
+            },
+        );
+
         if let Some(ref mut rollout) = self.rollout {
             if let Err(e) = rollout.record_fork(
-                forked_session.id.clone(),
+                SessionId::from_string(forked_session_id.clone()),
                 fork_point_message_id.clone(),
                 msg_count,
             ) {
@@ -362,7 +426,191 @@ impl Agent {
             message_count.map_or("end".to_string(), |c| c.to_string())
         );
 
-        Ok(forked_session_id)
+        Ok(ForkResult {
+            branch_name,
+            session_id: forked_session_id,
+            parent_branch,
+        })
+    }
+
+    fn handle_switch_branch(&mut self, branch_name: String) -> Result<String, String> {
+        let branch_name = branch_name.trim().to_string();
+        if branch_name.is_empty() {
+            return Err("Branch name cannot be empty".to_string());
+        }
+
+        if branch_name == self.current_branch {
+            return Ok(format!("Already on branch '{}'", branch_name));
+        }
+
+        let target = self
+            .branches
+            .remove(&branch_name)
+            .ok_or_else(|| format!("Branch '{}' not found", branch_name))?;
+
+        let previous_branch_name = std::mem::replace(&mut self.current_branch, branch_name.clone());
+        let previous_parent =
+            std::mem::replace(&mut self.current_branch_parent, target.parent.clone());
+        let previous_session = std::mem::replace(&mut self.session, target.session);
+
+        self.branches.insert(
+            previous_branch_name,
+            BranchState {
+                parent: previous_parent,
+                session: previous_session,
+            },
+        );
+
+        Ok(format!(
+            "Switched to branch '{}' (session {})",
+            branch_name, self.session.id
+        ))
+    }
+
+    fn list_branches(&self) -> Vec<BranchInfo> {
+        let mut infos = Vec::with_capacity(self.branches.len() + 1);
+        infos.push(BranchInfo {
+            name: self.current_branch.clone(),
+            parent: self.current_branch_parent.clone(),
+            session_id: self.session.id.to_string(),
+            is_current: true,
+        });
+
+        for (name, branch) in &self.branches {
+            infos.push(BranchInfo {
+                name: name.clone(),
+                parent: branch.parent.clone(),
+                session_id: branch.session.id.to_string(),
+                is_current: false,
+            });
+        }
+
+        infos.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if let Some(index) = infos.iter().position(|b| b.is_current) {
+            let current = infos.remove(index);
+            infos.insert(0, current);
+        }
+
+        infos
+    }
+
+    fn render_branch_tree(&self) -> String {
+        let branches = self.list_branches();
+        if branches.is_empty() {
+            return "No branches available.".to_string();
+        }
+
+        let mut nodes: HashMap<String, BranchInfo> = HashMap::new();
+        for branch in branches {
+            nodes.insert(branch.name.clone(), branch);
+        }
+
+        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+        let mut roots: Vec<String> = Vec::new();
+
+        for node in nodes.values() {
+            if let Some(parent) = &node.parent {
+                if nodes.contains_key(parent) {
+                    children
+                        .entry(parent.clone())
+                        .or_default()
+                        .push(node.name.clone());
+                    continue;
+                }
+            }
+            roots.push(node.name.clone());
+        }
+
+        roots.sort();
+        for child_names in children.values_mut() {
+            child_names.sort();
+        }
+
+        let mut lines = vec!["Session Branch Tree:".to_string()];
+        for (idx, root) in roots.iter().enumerate() {
+            Self::append_branch_tree_node(
+                root,
+                &nodes,
+                &children,
+                "",
+                idx == roots.len() - 1,
+                &mut lines,
+            );
+        }
+
+        lines.join("\n")
+    }
+
+    fn append_branch_tree_node(
+        name: &str,
+        nodes: &HashMap<String, BranchInfo>,
+        children: &HashMap<String, Vec<String>>,
+        prefix: &str,
+        is_last: bool,
+        lines: &mut Vec<String>,
+    ) {
+        let Some(node) = nodes.get(name) else {
+            return;
+        };
+
+        let connector = if prefix.is_empty() {
+            ""
+        } else if is_last {
+            "└── "
+        } else {
+            "├── "
+        };
+
+        let current_marker = if node.is_current { " <- current" } else { "" };
+        lines.push(format!(
+            "{}{}{} ({}){}",
+            prefix,
+            connector,
+            node.name,
+            Self::short_session_id(&node.session_id),
+            current_marker
+        ));
+
+        if let Some(child_nodes) = children.get(name) {
+            let child_prefix = if prefix.is_empty() {
+                "    ".to_string()
+            } else if is_last {
+                format!("{}    ", prefix)
+            } else {
+                format!("{}│   ", prefix)
+            };
+
+            for (index, child_name) in child_nodes.iter().enumerate() {
+                Self::append_branch_tree_node(
+                    child_name,
+                    nodes,
+                    children,
+                    &child_prefix,
+                    index == child_nodes.len() - 1,
+                    lines,
+                );
+            }
+        }
+    }
+
+    fn short_session_id(session_id: &str) -> &str {
+        session_id.get(..8).unwrap_or(session_id)
+    }
+
+    fn branch_exists(&self, name: &str) -> bool {
+        name == self.current_branch || self.branches.contains_key(name)
+    }
+
+    fn next_branch_name(&self) -> String {
+        let mut index = 1;
+        loop {
+            let candidate = format!("branch-{}", index);
+            if !self.branch_exists(&candidate) {
+                return candidate;
+            }
+            index += 1;
+        }
     }
 
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
