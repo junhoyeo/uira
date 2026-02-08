@@ -1,7 +1,0 @@
-{
-  "name": "uira-workspace",
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ]
-}
