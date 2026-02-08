@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uira_protocol::{
@@ -18,6 +18,21 @@ pub struct TodoStore {
 }
 
 impl TodoStore {
+    fn todo_file_path(dir: &Path, session_id: &str) -> Result<PathBuf, std::io::Error> {
+        if session_id.is_empty()
+            || session_id.contains("..")
+            || session_id.contains('/')
+            || session_id.contains('\\')
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid session id",
+            ));
+        }
+
+        Ok(dir.join(format!("{}.json", session_id)))
+    }
+
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
@@ -75,14 +90,14 @@ impl TodoStore {
         todos: &[TodoItem],
     ) -> Result<(), std::io::Error> {
         tokio::fs::create_dir_all(dir).await?;
-        let path = dir.join(format!("{}.json", session_id));
+        let path = Self::todo_file_path(dir, session_id)?;
         let json = serde_json::to_string_pretty(todos).map_err(std::io::Error::other)?;
         tokio::fs::write(path, json).await
     }
 
     pub async fn load_from_disk(&self, session_id: &str) -> Option<Vec<TodoItem>> {
         let dir = self.persist_dir.as_ref()?;
-        let path = dir.join(format!("{}.json", session_id));
+        let path = Self::todo_file_path(dir, session_id).ok()?;
         let content = tokio::fs::read_to_string(path).await.ok()?;
         serde_json::from_str(&content).ok()
     }
@@ -186,7 +201,7 @@ impl TodoStore {
             Some(d) => d,
             None => return Ok(()),
         };
-        let path = dir.join(format!("{}.json", session_id));
+        let path = Self::todo_file_path(dir, session_id)?;
         match tokio::fs::remove_file(path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -626,6 +641,37 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
         assert!(store.delete_session_todos("nonexistent").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_invalid_session_id_rejected_for_disk_access() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TodoStore::new().with_persistence(dir.path().to_path_buf());
+
+        let items = vec![TodoItem {
+            id: "1".to_string(),
+            content: "Task".to_string(),
+            status: TodoStatus::Pending,
+            priority: TodoPriority::Medium,
+        }];
+
+        let persist_result = store
+            .persist(&dir.path().to_path_buf(), "../escape", &items)
+            .await;
+        assert!(persist_result.is_err());
+        assert_eq!(
+            persist_result.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+
+        assert!(store.load_from_disk("../escape").await.is_none());
+
+        let delete_result = store.delete_session_todos("../escape").await;
+        assert!(delete_result.is_err());
+        assert_eq!(
+            delete_result.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
     }
 
     #[tokio::test]
