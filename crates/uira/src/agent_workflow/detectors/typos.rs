@@ -404,7 +404,9 @@ mod tests {
     fn test_detect_with_tempfile() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.rs");
-        std::fs::write(&file_path, "fn mian() {}\n").unwrap();
+        let typo_word = ["mi", "an"].concat();
+        let source = format!("fn {}() {{}}\n", typo_word);
+        std::fs::write(&file_path, source).unwrap();
 
         let scope = Scope {
             working_dir: dir.path().to_path_buf(),
@@ -414,10 +416,10 @@ mod tests {
         let detector = TyposDetector::new(dir.path());
         let issues = detector.detect(&scope).unwrap();
 
-        assert!(!issues.is_empty(), "Should detect 'mian' as a typo");
+        assert!(!issues.is_empty(), "Should detect typo identifier");
         assert!(
-            issues[0].message.contains("mian"),
-            "Issue message should mention 'mian'"
+            issues[0].message.contains(&typo_word),
+            "Issue message should mention the typo identifier"
         );
     }
 }
