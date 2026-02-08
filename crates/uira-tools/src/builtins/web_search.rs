@@ -1,9 +1,11 @@
 use async_trait::async_trait;
+use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
@@ -18,6 +20,7 @@ const RATE_LIMIT_MAX_REQUESTS: usize = 10;
 const FETCH_DEFAULT_MAX_CHARS: usize = 10000;
 const FETCH_MAX_CHARS: usize = 50000;
 const FETCH_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const DEFAULT_PROVIDER: &str = "duckduckgo";
 
 static STATE: Lazy<Mutex<WebState>> = Lazy::new(|| Mutex::new(WebState::new()));
 
@@ -35,11 +38,11 @@ impl WebState {
         }
     }
 
-    fn cleanup(&mut self) {
+    fn cleanup(&mut self, rate_limit_window_secs: u64) {
         let now = Instant::now();
         self.cache.retain(|_, v| v.expires_at > now);
         while let Some(ts) = self.request_times.front().copied() {
-            if now.duration_since(ts).as_secs() >= RATE_LIMIT_WINDOW_SECS {
+            if now.duration_since(ts).as_secs() >= rate_limit_window_secs {
                 self.request_times.pop_front();
             } else {
                 break;
@@ -47,11 +50,11 @@ impl WebState {
         }
     }
 
-    fn check_rate_limit(&self) -> Result<(), ToolError> {
-        if self.request_times.len() >= RATE_LIMIT_MAX_REQUESTS {
+    fn check_rate_limit(&self, max_requests: usize, window_secs: u64) -> Result<(), ToolError> {
+        if self.request_times.len() >= max_requests {
             return Err(ToolError::ExecutionFailed {
                 message: format!(
-                    "Rate limit exceeded: max {RATE_LIMIT_MAX_REQUESTS} requests per {RATE_LIMIT_WINDOW_SECS} seconds"
+                    "Rate limit exceeded: max {max_requests} requests per {window_secs} seconds"
                 ),
             });
         }
@@ -62,6 +65,53 @@ impl WebState {
 struct CachedResults {
     results: Vec<SearchResult>,
     expires_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeConfig {
+    enabled: bool,
+    provider: String,
+    cache_ttl_secs: u64,
+    rate_limit_max_requests: usize,
+    rate_limit_window_secs: u64,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            provider: DEFAULT_PROVIDER.to_string(),
+            cache_ttl_secs: CACHE_TTL_SECS,
+            rate_limit_max_requests: RATE_LIMIT_MAX_REQUESTS,
+            rate_limit_window_secs: RATE_LIMIT_WINDOW_SECS,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct UiraConfigFile {
+    #[serde(default)]
+    tools: Option<ToolsConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolsConfig {
+    #[serde(default)]
+    web_search: Option<WebSearchConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WebSearchConfig {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    cache_ttl: Option<u64>,
+    #[serde(default)]
+    rate_limit_max_requests: Option<usize>,
+    #[serde(default)]
+    rate_limit_window_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,8 +214,24 @@ impl Tool for WebSearchTool {
     async fn execute(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
+        let runtime = load_runtime_config(&ctx.cwd);
+        if !runtime.enabled {
+            return Err(ToolError::ExecutionFailed {
+                message: "web_search is disabled by uira.yml tools.web_search.enabled=false"
+                    .to_string(),
+            });
+        }
+        if runtime.provider != DEFAULT_PROVIDER {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "Unsupported web_search provider '{}'; only '{}' is currently implemented",
+                    runtime.provider, DEFAULT_PROVIDER
+                ),
+            });
+        }
+
         let input: WebSearchInput =
             serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
                 message: e.to_string(),
@@ -190,7 +256,7 @@ impl Tool for WebSearchTool {
 
         {
             let mut state = STATE.lock().await;
-            state.cleanup();
+            state.cleanup(runtime.rate_limit_window_secs);
 
             if mode == "fast" {
                 if let Some(cached) = state.cache.get(&key) {
@@ -205,7 +271,10 @@ impl Tool for WebSearchTool {
                 }
             }
 
-            state.check_rate_limit()?;
+            state.check_rate_limit(
+                runtime.rate_limit_max_requests,
+                runtime.rate_limit_window_secs,
+            )?;
             state.request_times.push_back(Instant::now());
         }
 
@@ -224,7 +293,7 @@ impl Tool for WebSearchTool {
                 key,
                 CachedResults {
                     results,
-                    expires_at: Instant::now() + Duration::from_secs(CACHE_TTL_SECS),
+                    expires_at: Instant::now() + Duration::from_secs(runtime.cache_ttl_secs),
                 },
             );
         }
@@ -289,8 +358,16 @@ impl Tool for FetchUrlTool {
     async fn execute(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
+        let runtime = load_runtime_config(&ctx.cwd);
+        if !runtime.enabled {
+            return Err(ToolError::ExecutionFailed {
+                message: "fetch_url is disabled by uira.yml tools.web_search.enabled=false"
+                    .to_string(),
+            });
+        }
+
         let input: FetchUrlInput =
             serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
                 message: e.to_string(),
@@ -303,17 +380,21 @@ impl Tool for FetchUrlTool {
         let url = reqwest::Url::parse(&input.url).map_err(|e| ToolError::InvalidInput {
             message: format!("Invalid URL: {e}"),
         })?;
-        validate_fetch_url(&url)?;
+        validate_fetch_url(&url).await?;
 
         {
             let mut state = STATE.lock().await;
-            state.cleanup();
-            state.check_rate_limit()?;
+            state.cleanup(runtime.rate_limit_window_secs);
+            state.check_rate_limit(
+                runtime.rate_limit_max_requests,
+                runtime.rate_limit_window_secs,
+            )?;
             state.request_times.push_back(Instant::now());
         }
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
@@ -346,21 +427,32 @@ impl Tool for FetchUrlTool {
             .unwrap_or("application/octet-stream")
             .to_string();
 
-        let body_bytes = response
-            .bytes()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        if let Some(len) = response.content_length() {
+            if len as usize > FETCH_MAX_RESPONSE_BYTES {
+                return Err(ToolError::ExecutionFailed {
+                    message: format!(
+                        "Response too large: {} bytes exceeds limit of {} bytes",
+                        len, FETCH_MAX_RESPONSE_BYTES
+                    ),
+                });
+            }
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut body_bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Failed to read response body: {e}"),
             })?;
-
-        if body_bytes.len() > FETCH_MAX_RESPONSE_BYTES {
-            return Err(ToolError::ExecutionFailed {
-                message: format!(
-                    "Response too large: {} bytes exceeds limit of {} bytes",
-                    body_bytes.len(),
-                    FETCH_MAX_RESPONSE_BYTES
-                ),
-            });
+            body_bytes.extend_from_slice(&chunk);
+            if body_bytes.len() > FETCH_MAX_RESPONSE_BYTES {
+                return Err(ToolError::ExecutionFailed {
+                    message: format!(
+                        "Response too large: exceeded limit of {} bytes",
+                        FETCH_MAX_RESPONSE_BYTES
+                    ),
+                });
+            }
         }
 
         let body = String::from_utf8_lossy(&body_bytes).to_string();
@@ -505,7 +597,41 @@ fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
+fn load_runtime_config(cwd: &Path) -> RuntimeConfig {
+    let config_path = cwd.join("uira.yml");
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(content) => content,
+        Err(_) => return RuntimeConfig::default(),
+    };
+
+    let parsed: UiraConfigFile = match serde_yaml_ng::from_str(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return RuntimeConfig::default(),
+    };
+
+    let mut runtime = RuntimeConfig::default();
+    if let Some(web_search) = parsed.tools.and_then(|t| t.web_search) {
+        if let Some(enabled) = web_search.enabled {
+            runtime.enabled = enabled;
+        }
+        if let Some(provider) = web_search.provider {
+            runtime.provider = provider;
+        }
+        if let Some(cache_ttl) = web_search.cache_ttl {
+            runtime.cache_ttl_secs = cache_ttl;
+        }
+        if let Some(max_requests) = web_search.rate_limit_max_requests {
+            runtime.rate_limit_max_requests = max_requests.max(1);
+        }
+        if let Some(window_secs) = web_search.rate_limit_window_secs {
+            runtime.rate_limit_window_secs = window_secs.max(1);
+        }
+    }
+
+    runtime
+}
+
+async fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
     match url.scheme() {
         "http" | "https" => {}
         other => {
@@ -533,6 +659,21 @@ fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
             return Err(ToolError::ExecutionFailed {
                 message: "Blocked private or local IP address for fetch_url".to_string(),
             });
+        }
+    } else {
+        let port = url.port_or_known_default().unwrap_or(80);
+        let resolved = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to resolve host '{host}': {e}"),
+            })?;
+
+        for addr in resolved {
+            if is_private_or_local_ip(addr.ip()) {
+                return Err(ToolError::ExecutionFailed {
+                    message: "Blocked hostname resolving to private or local address".to_string(),
+                });
+            }
         }
     }
 
@@ -564,21 +705,21 @@ fn is_private_or_local_ip(ip: IpAddr) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn blocks_localhost_urls() {
+    #[tokio::test]
+    async fn blocks_localhost_urls() {
         let url = reqwest::Url::parse("http://localhost:8080").unwrap();
-        assert!(validate_fetch_url(&url).is_err());
+        assert!(validate_fetch_url(&url).await.is_err());
     }
 
-    #[test]
-    fn blocks_private_ip_urls() {
+    #[tokio::test]
+    async fn blocks_private_ip_urls() {
         let url = reqwest::Url::parse("http://127.0.0.1/api").unwrap();
-        assert!(validate_fetch_url(&url).is_err());
+        assert!(validate_fetch_url(&url).await.is_err());
     }
 
-    #[test]
-    fn allows_public_https_urls() {
+    #[tokio::test]
+    async fn allows_public_https_urls() {
         let url = reqwest::Url::parse("https://example.com/docs").unwrap();
-        assert!(validate_fetch_url(&url).is_ok());
+        assert!(validate_fetch_url(&url).await.is_ok());
     }
 }
