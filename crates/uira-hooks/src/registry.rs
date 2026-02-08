@@ -132,12 +132,15 @@ impl Default for HookRegistry {
 pub fn default_hooks() -> HookRegistry {
     let mut registry = HookRegistry::new();
 
-    // Register all 23 hooks
+    // Register all 22 hooks
     registry.register(Arc::new(AgentUsageReminderHook));
     registry.register(Arc::new(AutoSlashCommandHook));
     registry.register(Arc::new(AutopilotHook::new()));
     registry.register(Arc::new(BackgroundNotificationHook::new()));
     registry.register(Arc::new(DirectoryReadmeInjectorHook::new(
+        std::env::current_dir().unwrap_or_default(),
+    )));
+    registry.register(Arc::new(DirectoryAgentsInjectorHook::new(
         std::env::current_dir().unwrap_or_default(),
     )));
     registry.register(Arc::new(EmptyMessageSanitizerHook::new()));
@@ -155,7 +158,6 @@ pub fn default_hooks() -> HookRegistry {
     )));
     registry.register(Arc::new(ThinkModeHook::new()));
     registry.register(Arc::new(ThinkingBlockValidatorHook));
-    registry.register(Arc::new(TodoContinuationHook::new()));
     registry.register(Arc::new(UltrapilotHook::new()));
     registry.register(Arc::new(UltraQAHook::new()));
     registry.register(Arc::new(UltraworkHook::new()));

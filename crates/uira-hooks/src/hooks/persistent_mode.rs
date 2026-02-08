@@ -1,35 +1,23 @@
 //! Persistent Mode Hook
 //!
-//! Unified handler for persistent work modes: ultrawork, ralph, and todo-continuation.
+//! Unified handler for persistent work modes: ultrawork and ralph.
 //! This hook intercepts Stop events and enforces work continuation based on:
 //! 1. Active ralph with incomplete promise
 //! 2. Active ultrawork mode with pending todos
-//! 3. Any pending todos (general enforcement)
 //!
-//! Priority order: Ralph > Ultrawork > Todo Continuation
+//! Priority order: Ralph > Ultrawork
 
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 
 use crate::hook::{Hook, HookContext, HookResult};
-use crate::hooks::todo_continuation::{
-    StopContext, TodoContinuationHook, TODO_CONTINUATION_PROMPT,
-};
+use crate::hooks::todo_continuation::{StopContext, TodoContinuationHook};
 use crate::hooks::ultrawork::UltraworkHook;
 use crate::types::{HookEvent, HookInput, HookOutput};
-
-const MAX_TODO_CONTINUATION_ATTEMPTS: u32 = 5;
-
-lazy_static::lazy_static! {
-    static ref TODO_CONTINUATION_ATTEMPTS: RwLock<HashMap<String, u32>> = RwLock::new(HashMap::new());
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PersistentMode {
     Ralph,
     Ultrawork,
-    TodoContinuation,
     None,
 }
 
@@ -47,20 +35,6 @@ pub struct PersistentModeMetadata {
     pub iteration: Option<u32>,
     pub max_iterations: Option<u32>,
     pub reinforcement_count: Option<u32>,
-    pub todo_continuation_attempts: Option<u32>,
-}
-
-fn track_todo_continuation_attempt(session_id: &str) -> u32 {
-    let mut attempts = TODO_CONTINUATION_ATTEMPTS.write().unwrap();
-    let current = attempts.get(session_id).copied().unwrap_or(0);
-    let next = current + 1;
-    attempts.insert(session_id.to_string(), next);
-    next
-}
-
-pub fn reset_todo_continuation_attempts(session_id: &str) {
-    let mut attempts = TODO_CONTINUATION_ATTEMPTS.write().unwrap();
-    attempts.remove(session_id);
 }
 fn check_ultrawork(
     session_id: Option<&str>,
@@ -105,73 +79,6 @@ fn check_ultrawork(
     })
 }
 
-fn check_todo_continuation(
-    session_id: Option<&str>,
-    directory: &str,
-) -> Option<PersistentModeResult> {
-    let result = TodoContinuationHook::check_incomplete_todos(session_id, directory, None);
-
-    if result.count == 0 {
-        if let Some(sid) = session_id {
-            reset_todo_continuation_attempts(sid);
-        }
-        return None;
-    }
-
-    let attempt_count = session_id.map(track_todo_continuation_attempt).unwrap_or(1);
-
-    if attempt_count > MAX_TODO_CONTINUATION_ATTEMPTS {
-        return Some(PersistentModeResult {
-            should_block: false,
-            message: format!(
-                "[TODO CONTINUATION LIMIT] Attempted {} continuations without progress. {} tasks remain incomplete. Consider reviewing the stuck tasks or asking the user for guidance.",
-                MAX_TODO_CONTINUATION_ATTEMPTS,
-                result.count
-            ),
-            mode: PersistentMode::None,
-            metadata: PersistentModeMetadata {
-                todo_count: Some(result.count),
-                todo_continuation_attempts: Some(attempt_count),
-                ..Default::default()
-            },
-        });
-    }
-
-    let next_todo = TodoContinuationHook::get_next_pending_todo(&result);
-    let next_task_info = next_todo
-        .map(|t| format!("\n\nNext task: \"{}\" ({:?})", t.content, t.status))
-        .unwrap_or_default();
-
-    let attempt_info = if attempt_count > 1 {
-        format!(
-            "\n[Continuation attempt {}/{}]",
-            attempt_count, MAX_TODO_CONTINUATION_ATTEMPTS
-        )
-    } else {
-        String::new()
-    };
-
-    let message = format!(
-        "<todo-continuation>\n\n{}\n\n[Status: {} of {} tasks remaining]{}{}\n\n</todo-continuation>\n\n---\n\n",
-        TODO_CONTINUATION_PROMPT,
-        result.count,
-        result.total,
-        next_task_info,
-        attempt_info
-    );
-
-    Some(PersistentModeResult {
-        should_block: true,
-        message,
-        mode: PersistentMode::TodoContinuation,
-        metadata: PersistentModeMetadata {
-            todo_count: Some(result.count),
-            todo_continuation_attempts: Some(attempt_count),
-            ..Default::default()
-        },
-    })
-}
-
 pub fn check_persistent_modes(
     session_id: Option<&str>,
     directory: &str,
@@ -192,18 +99,9 @@ pub fn check_persistent_modes(
         TodoContinuationHook::check_incomplete_todos(session_id, directory, stop_context);
     let has_incomplete_todos = todo_result.count > 0;
 
-    // Ralph is now handled by the RalphHook directly for full goal-based verification
     if let Some(result) = check_ultrawork(session_id, directory, has_incomplete_todos) {
         if result.should_block {
             return result;
-        }
-    }
-
-    if has_incomplete_todos {
-        if let Some(result) = check_todo_continuation(session_id, directory) {
-            if result.should_block {
-                return result;
-            }
         }
     }
 

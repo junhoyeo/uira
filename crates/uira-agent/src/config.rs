@@ -42,6 +42,18 @@ pub struct AgentConfig {
     #[serde(default)]
     pub ralph_mode: bool,
 
+    /// Enable todo continuation enforcer (auto-continue when incomplete todos exist)
+    #[serde(default = "default_true")]
+    pub todo_continuation: bool,
+
+    /// Maximum auto-continuation attempts before stopping
+    #[serde(default = "default_max_continuation_attempts")]
+    pub max_continuation_attempts: usize,
+
+    /// Enable experimental task system (disables TodoWrite/TodoRead in favor of TaskCreate)
+    #[serde(default)]
+    pub task_system: bool,
+
     /// Goal verification configuration
     #[serde(default)]
     pub goals: AgentGoalsConfig,
@@ -110,6 +122,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_max_continuation_attempts() -> usize {
+    10
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -121,6 +137,9 @@ impl Default for AgentConfig {
             require_approval_for_writes: true,
             require_approval_for_commands: true,
             ralph_mode: false,
+            todo_continuation: true,
+            max_continuation_attempts: default_max_continuation_attempts(),
+            task_system: false,
             goals: AgentGoalsConfig::default(),
             model: None,
             system_prompt: Some(default_system_prompt()),

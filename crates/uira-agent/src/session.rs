@@ -8,8 +8,9 @@ use uira_protocol::{MessageId, SessionId, TokenUsage};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
 use uira_tools::{
-    create_builtin_router, AgentExecutor, ApprovalCache, AstToolProvider, DelegationToolProvider,
-    LspToolProvider, ToolCallRuntime, ToolContext, ToolOrchestrator, ToolRouter,
+    register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
+    DelegationToolProvider, LspToolProvider, TodoStore, ToolCallRuntime, ToolContext,
+    ToolOrchestrator, ToolRouter,
 };
 
 use crate::AgentConfig;
@@ -49,10 +50,10 @@ pub struct Session {
     /// Model client
     pub client: Arc<dyn ModelClient>,
 
-    /// Working directory
+    pub todo_store: TodoStore,
+
     pub cwd: PathBuf,
 
-    /// Current turn number
     pub turn: usize,
 
     /// Total token usage
@@ -74,7 +75,19 @@ impl Session {
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-        let mut tool_router = create_builtin_router();
+        let todo_persist_dir = dirs::home_dir().map(|h| h.join(".uira").join("todos"));
+        let todo_store = match todo_persist_dir {
+            Some(dir) => TodoStore::new().with_persistence(dir),
+            None => TodoStore::new(),
+        };
+
+        let mut tool_router = ToolRouter::new();
+        if config.task_system {
+            tracing::warn!(
+                "task_system enabled but no replacement task tool is registered yet; keeping TodoWrite/TodoRead enabled"
+            );
+        }
+        register_builtins_with_todos(&mut tool_router, todo_store.clone());
         tool_router.register_provider(Arc::new(LspToolProvider::new()));
         tool_router.register_provider(Arc::new(AstToolProvider::new()));
 
@@ -131,6 +144,7 @@ impl Session {
             fork_count: 0,
             context,
             sandbox: SandboxManager::new(config.sandbox_policy.clone()),
+            todo_store,
             tool_router,
             orchestrator,
             parallel_runtime,

@@ -186,26 +186,78 @@ impl Agent {
                 break;
             }
 
-            match self.run(&prompt).await {
-                Ok(result) => {
-                    tracing::debug!(
-                        "Turn completed: {} turns, success={}",
-                        result.turns,
-                        result.success
-                    );
-                }
-                Err(AgentLoopError::Cancelled) => {
-                    tracing::info!("Agent cancelled");
-                    self.emit_event(ThreadEvent::ThreadCancelled).await;
-                }
-                Err(e) => {
-                    tracing::error!("Agent error: {}", e);
-                    self.emit_event(ThreadEvent::Error {
-                        message: e.to_string(),
-                        recoverable: true,
+            let mut current_prompt = prompt;
+            let mut continuation_attempts: usize = 0;
+            loop {
+                let (was_error, was_cancel) = match self.run(&current_prompt).await {
+                    Ok(result) => {
+                        tracing::debug!(
+                            "Turn completed: {} turns, success={}",
+                            result.turns,
+                            result.success
+                        );
+                        (false, false)
+                    }
+                    Err(AgentLoopError::Cancelled) => {
+                        tracing::info!("Agent cancelled");
+                        self.emit_event(ThreadEvent::ThreadCancelled).await;
+                        (false, true)
+                    }
+                    Err(e) => {
+                        tracing::error!("Agent error: {}", e);
+                        self.emit_event(ThreadEvent::Error {
+                            message: e.to_string(),
+                            recoverable: true,
+                        })
+                        .await;
+                        (true, false)
+                    }
+                };
+
+                // Check todo continuation: if incomplete todos remain, auto-inject prompt
+                let should_continue = self.session.config.todo_continuation
+                    && !was_error
+                    && !was_cancel
+                    && continuation_attempts < self.session.config.max_continuation_attempts
+                    && self
+                        .session
+                        .todo_store
+                        .has_incomplete(&self.session.id.to_string())
+                        .await;
+
+                if should_continue {
+                    continuation_attempts += 1;
+                    let incomplete_count = self
+                        .session
+                        .todo_store
+                        .incomplete_count(&self.session.id.to_string())
+                        .await;
+                    let total = self
+                        .session
+                        .todo_store
+                        .get(&self.session.id.to_string())
+                        .await
+                        .len();
+
+                    self.emit_event(ThreadEvent::ContentDelta {
+                        delta: format!(
+                            "\n[Todo continuation: {} incomplete tasks, auto-resuming...]\n",
+                            incomplete_count
+                        ),
                     })
                     .await;
+
+                    current_prompt = format!(
+                        "{}\n\n[Status: {}/{} completed, {} remaining]",
+                        uira_protocol::TODO_CONTINUATION_PROMPT,
+                        total.saturating_sub(incomplete_count),
+                        total,
+                        incomplete_count
+                    );
+                    continue;
                 }
+
+                break;
             }
 
             self.state = AgentState::WaitingForUser;

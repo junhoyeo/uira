@@ -1,6 +1,5 @@
 [default.extend-words]
 trivias = "trivias"
 ratatui = "ratatui"
-preceeding = "preceeding"
 unparseable = "unparseable"
 teh = "teh"

@@ -220,6 +220,10 @@ impl From<ThreadEvent> for Event {
                 token_count_after,
                 messages_removed,
             },
+            ThreadEvent::TodoUpdated { todos } => Event::TodoUpdated {
+                session_id: String::new(),
+                todos,
+            },
             _ => Event::MessagesTransform {
                 session_id: String::new(),
             },
@@ -345,6 +349,7 @@ impl From<Event> for Option<ThreadEvent> {
                 pattern,
                 decision: "cached".to_string(),
             }),
+            Event::TodoUpdated { todos, .. } => Some(ThreadEvent::TodoUpdated { todos }),
             Event::CompactionStarted {
                 strategy,
                 token_count_before,

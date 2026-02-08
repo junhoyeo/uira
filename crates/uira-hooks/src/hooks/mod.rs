@@ -5,6 +5,7 @@ pub mod background_notification;
 pub mod circuit_breaker;
 pub mod comment_checker;
 pub mod delegation_enforcer;
+pub mod directory_agents_injector;
 pub mod directory_readme_injector;
 pub mod empty_message_sanitizer;
 pub mod keyword_detector;
@@ -50,6 +51,11 @@ pub use background_notification::{
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState, CircuitState};
 pub use comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME};
 pub use delegation_enforcer::{DelegationEnforcerHook, HOOK_NAME as DELEGATION_ENFORCER_HOOK_NAME};
+pub use directory_agents_injector::{
+    clear_agents_injected_paths, get_agents_for_path, load_agents_injected_paths,
+    save_agents_injected_paths, AgentsInjectedPathsData, DirectoryAgentsInjectorHook,
+    AGENTS_FILENAME, TRACKED_TOOLS as AGENTS_TRACKED_TOOLS,
+};
 pub use directory_readme_injector::{
     clear_injected_paths, get_readmes_for_path, load_injected_paths, save_injected_paths,
     DirectoryReadmeInjectorHook, InjectedPathsData, README_FILENAME, TRACKED_TOOLS,
@@ -89,8 +95,8 @@ pub use orchestrator_constants::{
     SINGLE_TASK_DIRECTIVE, VERIFICATION_REMINDER, WARNED_EXTENSIONS, WRITE_EDIT_TOOLS,
 };
 pub use persistent_mode::{
-    check_persistent_modes, reset_todo_continuation_attempts, PersistentMode, PersistentModeHook,
-    PersistentModeMetadata, PersistentModeResult,
+    check_persistent_modes, PersistentMode, PersistentModeHook, PersistentModeMetadata,
+    PersistentModeResult,
 };
 pub use plugin_patterns::{
     format_file, get_auto_format_message, get_formatter, get_linter,
@@ -127,10 +133,7 @@ pub use thinking_block_validator::{
     ValidationStats, CONTENT_PART_TYPES, DEFAULT_THINKING_CONTENT, HOOK_NAME as THINKING_HOOK_NAME,
     PREVENTED_ERROR, SYNTHETIC_THINKING_ID_PREFIX, THINKING_MODEL_PATTERNS, THINKING_PART_TYPES,
 };
-pub use todo_continuation::{
-    IncompleteTodosResult, StopContext, Todo, TodoContinuationHook, TodoStatus,
-    TODO_CONTINUATION_PROMPT,
-};
+pub use todo_continuation::{IncompleteTodosResult, StopContext, TodoContinuationHook};
 pub use uira_orchestrator::{UiraOrchestratorHook, HOOK_NAME as UIRA_ORCHESTRATOR_HOOK_NAME};
 pub use ultrapilot::{
     FileOwnership, IntegrationResult, UltrapilotConfig, UltrapilotHook, UltrapilotState,

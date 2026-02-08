@@ -342,7 +342,7 @@ impl NotepadHook {
                     let entry_utc = entry_date.and_utc();
                     entry_utc >= cutoff
                 } else {
-                    true // Keep entries with unparseable timestamps
+                    true // Keep entries with unparsable timestamps
                 }
             })
             .collect();
