@@ -67,7 +67,7 @@ pub fn generate_rules(policy: &SandboxPolicy) -> Vec<LandlockRule> {
         }
         SandboxPolicy::WorkspaceWrite {
             workspace,
-            protected_paths,
+            protected_paths: _,
         } => {
             // Read-only root
             rules.push(LandlockRule {
@@ -134,13 +134,11 @@ pub fn generate_rules(policy: &SandboxPolicy) -> Vec<LandlockRule> {
 /// Apply Landlock rules to the current process
 #[cfg(target_os = "linux")]
 pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError> {
+    use enumflags2::BitFlag;
     use landlock::{
-        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
+        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
     };
     use std::os::unix::io::AsFd;
-
-    // Use the latest available ABI
-    let abi = ABI::V5;
 
     // Define the access rights we want to handle
     let access_fs_read = AccessFs::Execute
@@ -164,9 +162,9 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
     // Create the ruleset
     let mut ruleset = Ruleset::default()
         .handle_access(access_fs_all)
-        .map_err(|e| crate::SandboxError::PolicyError(e.to_string()))?
+        .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?
         .create()
-        .map_err(|e| crate::SandboxError::PolicyError(e.to_string()))?;
+        .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?;
 
     // Add rules for each path
     for rule in rules {
@@ -176,7 +174,10 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
         }
 
         let path_fd = PathFd::new(path).map_err(|e| {
-            crate::SandboxError::PolicyError(format!("Failed to open path {}: {}", rule.path, e))
+            crate::SandboxError::PolicyViolation(format!(
+                "Failed to open path {}: {}",
+                rule.path, e
+            ))
         })?;
 
         let mut access = AccessFs::empty();
@@ -204,14 +205,14 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
         if !access.is_empty() {
             ruleset = ruleset
                 .add_rule(PathBeneath::new(path_fd, access))
-                .map_err(|e| crate::SandboxError::PolicyError(e.to_string()))?;
+                .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?;
         }
     }
 
     // Restrict the current thread
-    ruleset
-        .restrict_self()
-        .map_err(|e| crate::SandboxError::PolicyError(format!("Failed to restrict self: {}", e)))?;
+    ruleset.restrict_self().map_err(|e| {
+        crate::SandboxError::PolicyViolation(format!("Failed to restrict self: {}", e))
+    })?;
 
     Ok(())
 }
