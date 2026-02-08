@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
+use std::collections::HashMap;
 use std::io::Stdout;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -74,6 +75,39 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     }
 
     lines
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    let mut chars = input.chars();
+    let mut output: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        output.push_str("...");
+    }
+    output
+}
+
+fn summarize_tool_output(output: &str) -> String {
+    let total_lines = output.lines().count();
+    if total_lines == 0 {
+        return "no output".to_string();
+    }
+
+    let first_non_empty = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("(empty lines)");
+
+    let preview = truncate_chars(first_non_empty, 80);
+    if total_lines == 1 {
+        preview
+    } else {
+        format!(
+            "{} (+{} more lines)",
+            preview,
+            total_lines.saturating_sub(1)
+        )
+    }
 }
 
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
@@ -211,6 +245,7 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     todos: Vec<TodoItem>,
+    tool_call_names: HashMap<String, String>,
 }
 
 impl App {
@@ -235,6 +270,7 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             todos: Vec::new(),
+            tool_call_names: HashMap::new(),
         }
     }
 
@@ -397,6 +433,20 @@ impl App {
                 } else {
                     prefix.to_string()
                 };
+
+                if let Some(tool_output) = &msg.tool_output {
+                    let body = if tool_output.collapsed {
+                        format!(
+                            "▶ {}: {} [Tab/Enter to expand]",
+                            tool_output.tool_name, tool_output.summary
+                        )
+                    } else {
+                        format!("▼ {}:\n{}", tool_output.tool_name, msg.content)
+                    };
+
+                    let lines = wrap_message(&role_prefix, &body, inner_width, style);
+                    return ListItem::new(Text::from(lines));
+                }
 
                 let lines = wrap_message(&role_prefix, &msg.content, inner_width, style);
                 ListItem::new(Text::from(lines))
@@ -614,11 +664,86 @@ impl App {
         count
     }
 
+    fn selected_message_index(&self) -> Option<usize> {
+        self.list_state
+            .selected()
+            .filter(|&index| index < self.messages.len())
+    }
+
+    fn toggle_selected_tool_output(&mut self) -> bool {
+        let Some(index) = self.selected_message_index() else {
+            return false;
+        };
+
+        let Some(tool_output) = self
+            .messages
+            .get_mut(index)
+            .and_then(|msg| msg.tool_output.as_mut())
+        else {
+            return false;
+        };
+
+        tool_output.collapsed = !tool_output.collapsed;
+        let action = if tool_output.collapsed {
+            "Collapsed"
+        } else {
+            "Expanded"
+        };
+        self.status = format!("{} {} output", action, tool_output.tool_name);
+        true
+    }
+
+    fn set_all_tool_outputs_collapsed(&mut self, collapsed: bool) -> usize {
+        let mut updated = 0;
+        for message in &mut self.messages {
+            if let Some(tool_output) = message.tool_output.as_mut() {
+                if tool_output.collapsed != collapsed {
+                    tool_output.collapsed = collapsed;
+                    updated += 1;
+                }
+            }
+        }
+        updated
+    }
+
+    fn collapse_all_tool_outputs(&mut self) {
+        let updated = self.set_all_tool_outputs_collapsed(true);
+        if updated == 0 {
+            self.status = "No expanded tool output to collapse".to_string();
+        } else {
+            self.status = format!("Collapsed {} tool output item(s)", updated);
+        }
+    }
+
+    fn expand_all_tool_outputs(&mut self) {
+        let updated = self.set_all_tool_outputs_collapsed(false);
+        if updated == 0 {
+            self.status = "No collapsed tool output to expand".to_string();
+        } else {
+            self.status = format!("Expanded {} tool output item(s)", updated);
+        }
+    }
+
     fn push_message(&mut self, role: &str, content: String) {
-        self.messages.push(ChatMessage {
-            role: role.to_string(),
+        self.messages.push(ChatMessage::new(role, content));
+        self.scroll_to_bottom();
+    }
+
+    fn push_tool_message(
+        &mut self,
+        role: &str,
+        tool_name: String,
+        content: String,
+        is_collapsed: bool,
+    ) {
+        let summary = summarize_tool_output(&content);
+        self.messages.push(ChatMessage::tool(
+            role,
             content,
-        });
+            tool_name,
+            summary,
+            is_collapsed,
+        ));
         self.scroll_to_bottom();
     }
 
@@ -648,6 +773,14 @@ impl App {
                 KeyCode::Char('l') => {
                     // Clear screen
                     self.messages.clear();
+                    return;
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        self.expand_all_tool_outputs();
+                    } else {
+                        self.collapse_all_tool_outputs();
+                    }
                     return;
                 }
                 _ => {}
@@ -708,11 +841,18 @@ impl App {
                     self.cursor_pos = char_count;
                 }
                 KeyCode::Enter => {
+                    if self.input.is_empty() && self.toggle_selected_tool_output() {
+                        return;
+                    }
+
                     if !self.input.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
                         self.submit_input(input);
                     }
+                }
+                KeyCode::Tab => {
+                    let _ = self.toggle_selected_tool_output();
                 }
                 KeyCode::Esc => {
                     self.should_quit = true;
@@ -759,10 +899,10 @@ impl App {
                 self.should_quit = true;
             }
             "/help" | "/h" | "/?" => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /fork [count]     - Fork session (optional: keep only first N messages)\n  /clear            - Clear chat history".to_string(),
-                });
+                self.push_message(
+                    "system",
+                    "Available commands:\n  /help, /h, /?     - Show this help\n  /exit, /quit, /q  - Exit the application\n  /auth, /status    - Show current status\n  /models           - List available models\n  /model <name>     - Switch to a different model\n  /fork [count]     - Fork session (optional: keep only first N messages)\n  /clear            - Clear chat history".to_string(),
+                );
             }
             "/auth" | "/status" => {
                 let status_msg = if self.agent_input_tx.is_some() {
@@ -770,10 +910,10 @@ impl App {
                 } else {
                     "No agent connected"
                 };
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
-                });
+                self.push_message(
+                    "system",
+                    format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
+                );
             }
             "/clear" => {
                 self.messages.clear();
@@ -805,33 +945,33 @@ impl App {
                     if is_known || model_name.contains('/') {
                         self.switch_model(&full_model);
                     } else {
-                        self.messages.push(ChatMessage {
-                            role: "system".to_string(),
-                            content: format!(
+                        self.push_message(
+                            "system",
+                            format!(
                                 "Unknown model: {}. Use /models to see available options.",
                                 model_name
                             ),
-                        });
+                        );
                     }
                 } else {
                     let current = self
                         .current_model
                         .as_deref()
                         .unwrap_or("(default from config)");
-                    self.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!("Current model: {}\nUsage: /model <name>", current),
-                    });
+                    self.push_message(
+                        "system",
+                        format!("Current model: {}\nUsage: /model <name>", current),
+                    );
                 }
             }
             _ => {
-                self.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: format!(
+                self.push_message(
+                    "system",
+                    format!(
                         "Unknown command: {}. Type /help for available commands.",
                         command
                     ),
-                });
+                );
             }
         }
     }
@@ -895,7 +1035,8 @@ impl App {
                 self.scroll_to_bottom();
             }
             ThreadEvent::ItemStarted { item } => match item {
-                Item::ToolCall { name, .. } => {
+                Item::ToolCall { id, name, .. } => {
+                    self.tool_call_names.insert(id, name.clone());
                     self.agent_state = AgentState::ExecutingTool;
                     self.status = format!("Executing: {}", name);
                 }
@@ -924,10 +1065,16 @@ impl App {
             },
             ThreadEvent::ItemCompleted { item } => match item {
                 Item::ToolResult {
-                    output, is_error, ..
+                    tool_call_id,
+                    output,
+                    is_error,
                 } => {
+                    let tool_name = self
+                        .tool_call_names
+                        .remove(&tool_call_id)
+                        .unwrap_or_else(|| "tool".to_string());
                     let role = if is_error { "error" } else { "tool" };
-                    self.push_message(role, output);
+                    self.push_tool_message(role, tool_name, output, false);
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
@@ -1123,21 +1270,21 @@ impl App {
                         }
                     });
                 } else {
-                    self.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!(
+                    self.push_message(
+                        "system",
+                        format!(
                             "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
                             model_str
                         ),
-                    });
+                    );
                 }
             }
             Err(e) => {
                 self.status = "Model switch failed".to_string();
-                self.messages.push(ChatMessage {
-                    role: "error".to_string(),
-                    content: format!("Failed to create client for {}: {}", model_str, e),
-                });
+                self.push_message(
+                    "error",
+                    format!("Failed to create client for {}: {}", model_str, e),
+                );
             }
         }
     }
@@ -1187,10 +1334,10 @@ impl App {
                 }
             });
         } else {
-            self.messages.push(ChatMessage {
-                role: "error".to_string(),
-                content: "No agent connected. Cannot fork session.".to_string(),
-            });
+            self.push_message(
+                "error",
+                "No agent connected. Cannot fork session.".to_string(),
+            );
         }
     }
 }
