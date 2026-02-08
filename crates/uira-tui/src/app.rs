@@ -14,8 +14,10 @@ use std::fs;
 use std::io::Stdout;
 use std::io::Write;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, io, process::Command, thread, time::Duration};
 use tempfile::Builder;
+use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
@@ -187,6 +189,216 @@ Diff/context:\n\
         target.description(),
         content
     )
+}
+
+#[derive(Debug, Clone)]
+struct ShareCommandOptions {
+    public: bool,
+    description: Option<String>,
+}
+
+fn parse_share_command(parts: &[&str]) -> Result<ShareCommandOptions, String> {
+    let mut options = ShareCommandOptions {
+        public: false,
+        description: None,
+    };
+
+    let mut i = 1;
+    while i < parts.len() {
+        match parts[i] {
+            "--public" => {
+                options.public = true;
+                i += 1;
+            }
+            "--description" | "-d" => {
+                if i + 1 >= parts.len() {
+                    return Err("Missing value for --description".to_string());
+                }
+                let raw_description = parts[i + 1..].join(" ");
+                let description = raw_description
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
+                if description.is_empty() {
+                    return Err("Description cannot be empty".to_string());
+                }
+                options.description = Some(description);
+                break;
+            }
+            unknown => {
+                return Err(format!(
+                    "Unknown option: {}. Usage: /share [--public] [--description <text>]",
+                    unknown
+                ));
+            }
+        }
+    }
+
+    Ok(options)
+}
+
+fn sanitize_filename_part(input: &str) -> String {
+    input
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect::<String>()
+}
+
+fn role_title(role: &str) -> &str {
+    match role {
+        "user" => "User",
+        "assistant" => "Assistant",
+        "system" => "System",
+        "tool" => "Tool",
+        "error" => "Error",
+        "thinking" => "Thinking",
+        _ => "Message",
+    }
+}
+
+fn render_session_markdown(
+    messages: &[ChatMessage],
+    session_id: Option<&str>,
+    model: Option<&str>,
+) -> String {
+    let generated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let mut markdown = String::new();
+    markdown.push_str("# Uira Session\n\n");
+    if let Some(session_id) = session_id {
+        markdown.push_str(&format!("- Session ID: `{}`\n", session_id));
+    }
+    if let Some(model) = model {
+        markdown.push_str(&format!("- Model: `{}`\n", model));
+    }
+    markdown.push_str(&format!("- Messages: {}\n", messages.len()));
+    markdown.push_str(&format!("- Generated (unix): `{}`\n\n", generated_at));
+    markdown.push_str("---\n\n");
+    markdown.push_str("## Conversation\n\n");
+
+    if messages.is_empty() {
+        markdown.push_str("_(No messages in this session yet.)_\n");
+        return markdown;
+    }
+
+    for (idx, message) in messages.iter().enumerate() {
+        markdown.push_str(&format!(
+            "### {}. {}\n\n",
+            idx + 1,
+            role_title(&message.role)
+        ));
+        markdown.push_str("```text\n");
+        if message.content.trim().is_empty() {
+            markdown.push_str("(empty)\n");
+        } else {
+            markdown.push_str(&message.content);
+            if !message.content.ends_with('\n') {
+                markdown.push('\n');
+            }
+        }
+        markdown.push_str("```\n\n");
+    }
+
+    markdown.push_str("---\n\n");
+    markdown.push_str("Shared via [Uira](https://github.com/junhoyeo/uira)\n");
+    markdown
+}
+
+fn format_gh_error(stderr: &str) -> String {
+    let lowered = stderr.to_lowercase();
+    if lowered.contains("gh: command not found") || lowered.contains("not found") {
+        return "GitHub CLI (`gh`) is not installed. Install it from https://cli.github.com/"
+            .to_string();
+    }
+
+    if lowered.contains("not logged into")
+        || lowered.contains("authentication")
+        || lowered.contains("gh auth login")
+    {
+        return "GitHub authentication required. Run `gh auth login` and try `/share` again."
+            .to_string();
+    }
+
+    if lowered.contains("api rate limit") || lowered.contains("rate limit") {
+        return "GitHub API rate limit reached. Please wait and retry.".to_string();
+    }
+
+    if stderr.trim().is_empty() {
+        "Failed to create GitHub Gist.".to_string()
+    } else {
+        format!("Failed to create GitHub Gist: {}", stderr.trim())
+    }
+}
+
+async fn create_gist_from_markdown(
+    markdown: String,
+    options: ShareCommandOptions,
+    session_id: Option<String>,
+) -> Result<String, String> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let session_slug = session_id
+        .as_deref()
+        .map(sanitize_filename_part)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "session".to_string());
+
+    let file_name = format!("uira-{}-{}.md", session_slug, timestamp);
+    let file_path = std::env::temp_dir().join(file_name);
+
+    tokio::fs::write(&file_path, markdown)
+        .await
+        .map_err(|e| format!("Failed to write temporary gist file: {}", e))?;
+
+    let default_desc = format!("Uira session {}", session_slug);
+    let description = options.description.unwrap_or(default_desc);
+    let file_path_str = file_path.to_string_lossy().to_string();
+
+    let mut cmd = Command::new("gh");
+    cmd.arg("gist")
+        .arg("create")
+        .arg(&file_path_str)
+        .arg("--desc")
+        .arg(description);
+
+    if options.public {
+        cmd.arg("--public");
+    }
+
+    let output = cmd.output().await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "GitHub CLI (`gh`) is not installed. Install it from https://cli.github.com/"
+                .to_string()
+        } else {
+            format!("Failed to run `gh gist create`: {}", e)
+        }
+    })?;
+
+    let _ = tokio::fs::remove_file(&file_path).await;
+
+    if !output.status.success() {
+        return Err(format_gh_error(&String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let url = stdout
+        .split_whitespace()
+        .find(|part| part.starts_with("https://"))
+        .or_else(|| {
+            stdout
+                .lines()
+                .find(|line| line.trim().starts_with("https://"))
+        })
+        .map(|s| s.trim().to_string())
+        .ok_or_else(|| "Gist created, but no URL was returned by gh CLI.".to_string())?;
+
+    Ok(url)
 }
 
 fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> Vec<Line<'static>> {
@@ -394,6 +606,7 @@ pub struct App {
     agent_input_tx: Option<mpsc::Sender<String>>,
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
+    session_id: Option<String>,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
@@ -421,6 +634,7 @@ impl App {
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
+            session_id: None,
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
@@ -1309,7 +1523,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.messages.push(ChatMessage {
                     role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /clear              - Clear chat history"
+                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /fork [count]       - Fork session (optional: keep only first N messages)\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history"
                         .to_string(),
                 });
             }
@@ -1332,6 +1546,18 @@ impl App {
                 let message_count = parts.get(1).and_then(|s| s.parse::<usize>().ok());
                 self.fork_session(message_count);
             }
+            "/share" => match parse_share_command(&parts) {
+                Ok(options) => self.share_session(options),
+                Err(err) => {
+                    self.messages.push(ChatMessage {
+                        role: "error".to_string(),
+                        content: format!(
+                            "{}\nUsage: /share [--public] [--description <text>]",
+                            err
+                        ),
+                    });
+                }
+            },
             "/models" => {
                 self.model_selector.open(self.current_model.clone());
             }
@@ -1404,6 +1630,9 @@ impl App {
                 self.todos = todos;
                 self.ensure_todo_selection();
             }
+            AppEvent::SystemMessage(msg) => {
+                self.push_message("system", msg);
+            }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
@@ -1414,7 +1643,8 @@ impl App {
 
     fn handle_agent_event(&mut self, event: ThreadEvent) {
         match event {
-            ThreadEvent::ThreadStarted { .. } => {
+            ThreadEvent::ThreadStarted { thread_id } => {
+                self.session_id = Some(thread_id);
                 self.agent_state = AgentState::Thinking;
                 self.status = "Agent started".to_string();
             }
@@ -1696,6 +1926,43 @@ impl App {
         }
     }
 
+    fn share_session(&mut self, options: ShareCommandOptions) {
+        if self.messages.is_empty() {
+            self.messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: "No messages to share yet. Start a conversation first.".to_string(),
+            });
+            return;
+        }
+
+        let messages = self.messages.clone();
+        let session_id = self.session_id.clone();
+        let model = self.current_model.clone();
+        let event_tx = self.event_tx.clone();
+        self.status = "Sharing session to GitHub Gist...".to_string();
+
+        tokio::spawn(async move {
+            let markdown =
+                render_session_markdown(&messages, session_id.as_deref(), model.as_deref());
+            match create_gist_from_markdown(markdown, options.clone(), session_id).await {
+                Ok(url) => {
+                    let visibility = if options.public { "public" } else { "secret" };
+                    let _ = event_tx
+                        .send(AppEvent::SystemMessage(format!(
+                            "Session shared to GitHub Gist ({})\nURL: {}",
+                            visibility, url
+                        )))
+                        .await;
+                }
+                Err(err) => {
+                    let _ = event_tx
+                        .send(AppEvent::Error(format!("Share failed: {}", err)))
+                        .await;
+                }
+            }
+        });
+    }
+
     fn fork_session(&mut self, message_count: Option<usize>) {
         let msg_desc = message_count
             .map(|c| format!("at message {}", c))
@@ -1757,7 +2024,7 @@ impl Default for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_review_prompt, parse_review_target, ReviewTarget, App, KeyAction};
+    use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -1828,5 +2095,49 @@ mod tests {
 
         let err = App::run_editor_command("false", file.path()).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn parse_share_command_handles_public_and_description() {
+        let parts = vec![
+            "/share",
+            "--public",
+            "--description",
+            "Auth",
+            "debug",
+            "session",
+        ];
+        let options = parse_share_command(&parts).unwrap();
+
+        assert!(options.public);
+        assert_eq!(options.description.as_deref(), Some("Auth debug session"));
+    }
+
+    #[test]
+    fn parse_share_command_rejects_unknown_flags() {
+        let parts = vec!["/share", "--unknown"];
+        let err = parse_share_command(&parts).unwrap_err();
+        assert!(err.contains("Unknown option"));
+    }
+
+    #[test]
+    fn render_session_markdown_includes_metadata_and_messages() {
+        let messages = vec![
+            ChatMessage {
+                role: "user".to_string(),
+                content: "Fix auth bug".to_string(),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: "I'll help".to_string(),
+            },
+        ];
+
+        let markdown = render_session_markdown(&messages, Some("sess-123"), Some("anthropic/test"));
+        assert!(markdown.contains("# Uira Session"));
+        assert!(markdown.contains("Session ID: `sess-123`"));
+        assert!(markdown.contains("Model: `anthropic/test`"));
+        assert!(markdown.contains("### 1. User"));
+        assert!(markdown.contains("### 2. Assistant"));
     }
 }

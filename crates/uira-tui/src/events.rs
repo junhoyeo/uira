@@ -8,6 +8,7 @@ pub enum AppEvent {
     UserInput(String),
     ApprovalRequest(crate::views::ApprovalRequest),
     TodoUpdated(Vec<TodoItem>),
+    SystemMessage(String),
     Redraw,
     Quit,
     Error(String),
