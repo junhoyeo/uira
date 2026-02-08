@@ -548,16 +548,16 @@ impl App {
                 };
 
                 let prefix = format!("[{}] {}", indicator, priority_marker);
-                let content = if prefix.len() + todo.content.len() > max_width
-                    && max_width > prefix.len() + 3
-                {
-                    format!(
-                        "{}...",
-                        &todo.content[..max_width.saturating_sub(prefix.len() + 3)]
-                    )
-                } else {
-                    todo.content.clone()
-                };
+                let prefix_chars = prefix.chars().count();
+                let content_chars = todo.content.chars().count();
+                let content =
+                    if prefix_chars + content_chars > max_width && max_width > prefix_chars + 3 {
+                        let truncate_len = max_width.saturating_sub(prefix_chars + 3);
+                        let truncated: String = todo.content.chars().take(truncate_len).collect();
+                        format!("{}...", truncated)
+                    } else {
+                        todo.content.clone()
+                    };
 
                 ListItem::new(Line::from(vec![
                     Span::styled(prefix, Style::default().fg(color)),
