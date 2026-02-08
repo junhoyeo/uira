@@ -27,6 +27,7 @@ uira-auth = { workspace = true, features = ["oauth-server"] }
 secrecy = "0.10"
 webbrowser = "1.0"
 clap = { workspace = true }
+clap_complete = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
