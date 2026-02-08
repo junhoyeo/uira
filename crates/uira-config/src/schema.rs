@@ -683,7 +683,7 @@ fn default_protected_tokens() -> usize {
 }
 
 fn default_compaction_strategy() -> String {
-    "prune".to_string()
+    "summarize".to_string()
 }
 
 // ============================================================================
