@@ -393,8 +393,21 @@ pub struct PluginSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpSettings {
     /// Enabled MCP servers
-    #[serde(default)]
-    pub servers: HashMap<String, McpServerConfig>,
+    #[serde(default, deserialize_with = "deserialize_mcp_servers")]
+    pub servers: Vec<NamedMcpServerConfig>,
+}
+
+impl McpSettings {
+    pub fn get(&self, name: &str) -> Option<&McpServerConfig> {
+        self.servers
+            .iter()
+            .find(|server| server.name == name)
+            .map(|server| &server.config)
+    }
+
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
 }
 
 /// Individual MCP server configuration
@@ -410,6 +423,37 @@ pub struct McpServerConfig {
     /// Environment variables
     #[serde(default)]
     pub env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NamedMcpServerConfig {
+    pub name: String,
+    #[serde(flatten)]
+    pub config: McpServerConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum McpServersRepr {
+    List(Vec<NamedMcpServerConfig>),
+    Map(HashMap<String, McpServerConfig>),
+}
+
+fn deserialize_mcp_servers<'de, D>(deserializer: D) -> Result<Vec<NamedMcpServerConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let repr = McpServersRepr::deserialize(deserializer)?;
+    let mut servers = match repr {
+        McpServersRepr::List(list) => list,
+        McpServersRepr::Map(map) => map
+            .into_iter()
+            .map(|(name, config)| NamedMcpServerConfig { name, config })
+            .collect(),
+    };
+
+    servers.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(servers)
 }
 
 /// Agent settings - a map of agent names to their configurations
@@ -996,6 +1040,52 @@ permissions:
         assert_eq!(
             config.permissions.rules[0].action,
             PermissionActionConfig::Deny
+        );
+    }
+
+    #[test]
+    fn test_mcp_servers_deserialize_from_list() {
+        let yaml = r#"
+mcp:
+  servers:
+    - name: filesystem
+      command: npx -y @anthropic/mcp-server-filesystem /tmp
+    - name: github
+      command: npx -y @anthropic/mcp-server-github
+      env:
+        GITHUB_TOKEN: ${GITHUB_TOKEN}
+"#;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.mcp.servers.len(), 2);
+        assert!(config.mcp.contains_key("filesystem"));
+        assert!(config.mcp.contains_key("github"));
+        assert_eq!(
+            config.mcp.get("filesystem").unwrap().command,
+            "npx -y @anthropic/mcp-server-filesystem /tmp"
+        );
+    }
+
+    #[test]
+    fn test_mcp_servers_deserialize_from_map_legacy_format() {
+        let yaml = r#"
+mcp:
+  servers:
+    context7:
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+    exa:
+      command: npx
+      args: ["-y", "exa-mcp-server"]
+"#;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(config.mcp.servers.len(), 2);
+        assert!(config.mcp.contains_key("context7"));
+        assert!(config.mcp.contains_key("exa"));
+        assert_eq!(
+            config.mcp.get("context7").unwrap().args,
+            vec!["-y".to_string(), "@upstash/context7-mcp".to_string()]
         );
     }
 }

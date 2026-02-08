@@ -295,14 +295,14 @@ continue working until everything is done."#
             let mut config = McpServersConfig::default();
 
             // Check for specific known servers
-            if let Some(exa) = uira.mcp.servers.get("exa") {
+            if let Some(exa) = uira.mcp.get("exa") {
                 config.exa = Some(ExaConfig {
                     enabled: Some(true),
                     api_key: exa.env.get("EXA_API_KEY").cloned(),
                 });
             }
 
-            if uira.mcp.servers.contains_key("context7") {
+            if uira.mcp.contains_key("context7") {
                 config.context7 = Some(Context7Config {
                     enabled: Some(true),
                 });

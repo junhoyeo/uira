@@ -18,6 +18,7 @@ uira-agents = { workspace = true }
 uira-config = { workspace = true }
 uira-core = { workspace = true }
 uira-providers = { workspace = true }
+uira-mcp-client = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-features = { workspace = true }
 uira-goals = { workspace = true }

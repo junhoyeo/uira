@@ -24,7 +24,9 @@ pub use lsp::{LspClient, LspClientImpl, LspServerConfig};
 pub use orchestrator::{PendingApproval, RunOptions, ToolOrchestrator};
 pub use parallel::ToolCallRuntime;
 pub use provider::ToolProvider;
-pub use providers::{AgentExecutor, AstToolProvider, DelegationToolProvider, LspToolProvider};
+pub use providers::{
+    AgentExecutor, AstToolProvider, DelegationToolProvider, LspToolProvider, McpToolProvider,
+};
 pub use registry::ToolRegistry;
 pub use router::ToolRouter;
 pub use traits::{BoxedTool, FunctionTool, Tool, ToolContext, ToolFuture, ToolHandler};

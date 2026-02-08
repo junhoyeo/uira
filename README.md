@@ -369,6 +369,14 @@ comments:
     model: anthropic/claude-sonnet-4-20250514
     pragma_format: "@uira-allow"       # Pragma format for preserved comments
     include_docstrings: false          # Whether to review docstrings
+
+# External MCP servers (discovered and exposed as tools)
+mcp:
+  servers:
+    - name: filesystem
+      command: npx -y @anthropic/mcp-server-filesystem /path/to/workspace
+    - name: github
+      command: npx -y @anthropic/mcp-server-github
 ```
 
 ### AI Workflow Configuration
