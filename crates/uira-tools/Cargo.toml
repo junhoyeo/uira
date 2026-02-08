@@ -10,10 +10,12 @@ repository.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
 thiserror = { workspace = true }
 tower-lsp = { version = "0.20", features = ["proposed"] }
 lsp-types = "0.95"
 tokio = { workspace = true, features = ["sync", "process", "fs"] }
+reqwest = { workspace = true }
 futures = { workspace = true }
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
