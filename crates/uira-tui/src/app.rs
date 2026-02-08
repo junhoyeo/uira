@@ -10,7 +10,14 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::{io::Stdout, process::Command, sync::Arc};
+use std::{
+    fs,
+    io::{Read, Stdout},
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, CommandSender};
 use uira_protocol::Provider;
@@ -355,12 +362,15 @@ pub struct App {
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
+    workspace_root: PathBuf,
+    workspace_files: Vec<String>,
+    last_file_index_refresh: Instant,
+    file_picker: Option<FilePickerState>,
 }
 
 impl App {
     pub fn new() -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
-        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self {
             should_quit: false,
             event_tx,
@@ -382,6 +392,10 @@ impl App {
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
+            workspace_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            workspace_files: Vec::new(),
+            last_file_index_refresh: Instant::now() - FILE_INDEX_REFRESH_INTERVAL,
+            file_picker: None,
         }
     }
 
@@ -665,6 +679,45 @@ impl App {
 
         frame.render_widget(block, area);
         frame.render_widget(input_paragraph, inner);
+    }
+
+    fn render_file_picker(&self, frame: &mut ratatui::Frame, chat_area: Rect, input_area: Rect) {
+        let Some(picker) = self.file_picker.as_ref() else {
+            return;
+        };
+        if picker.matches.is_empty() || chat_area.height <= 4 {
+            return;
+        }
+
+        let list_height = (picker.matches.len() as u16 + 2).min(10);
+        let popup_width = chat_area.width.saturating_sub(4).max(24);
+        let popup_x = chat_area.x + 2;
+        let max_y = input_area.y.saturating_sub(1);
+        let popup_y = max_y.saturating_sub(list_height);
+        let popup_area = Rect::new(popup_x, popup_y, popup_width, list_height);
+
+        let items: Vec<ListItem> = picker
+            .matches
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let style = if index == picker.selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(Line::from(Span::styled(path.clone(), style)))
+            })
+            .collect();
+
+        let block = Block::default()
+            .title(format!(" Files for @{} ", picker.query))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Blue));
+        let list = List::new(items).block(block);
+
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(list, popup_area);
     }
 
     fn render_todo_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1037,6 +1090,11 @@ impl App {
     }
 
     fn send_agent_input(&mut self, input: String) {
+        let (prepared_input, warnings) = self.prepare_input_with_file_references(&input);
+        for warning in warnings {
+            self.push_message("system", warning);
+        }
+
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -1049,6 +1107,184 @@ impl App {
         } else {
             self.status = "No agent connected".to_string();
         }
+    }
+
+    fn refresh_file_index(&mut self) {
+        self.workspace_files = collect_workspace_files(&self.workspace_root, MAX_WORKSPACE_FILES);
+        self.last_file_index_refresh = Instant::now();
+    }
+
+    fn ensure_file_index_fresh(&mut self) {
+        if self.workspace_files.is_empty()
+            || self.last_file_index_refresh.elapsed() >= FILE_INDEX_REFRESH_INTERVAL
+        {
+            self.refresh_file_index();
+        }
+    }
+
+    fn update_file_picker_state(&mut self) {
+        self.ensure_file_index_fresh();
+
+        if let Some(token) = detect_active_file_token(&self.input, self.cursor_pos) {
+            let matches = find_file_matches(
+                &token.pattern,
+                &self.workspace_files,
+                MAX_FILE_PICKER_RESULTS,
+            );
+            if !matches.is_empty() {
+                self.file_picker = Some(FilePickerState {
+                    query: token.pattern,
+                    start_char: token.start_char,
+                    end_char: token.end_char,
+                    matches,
+                    selected: 0,
+                });
+                return;
+            }
+        }
+
+        self.file_picker = None;
+    }
+
+    fn move_file_picker_selection(&mut self, delta: isize) {
+        let Some(picker) = self.file_picker.as_mut() else {
+            return;
+        };
+        if picker.matches.is_empty() {
+            return;
+        }
+
+        let len = picker.matches.len() as isize;
+        let mut next = picker.selected as isize + delta;
+        if next < 0 {
+            next = len - 1;
+        } else if next >= len {
+            next = 0;
+        }
+        picker.selected = next as usize;
+    }
+
+    fn apply_file_picker_selection(&mut self) {
+        let Some(picker) = self.file_picker.clone() else {
+            return;
+        };
+        let Some(selected_path) = picker.matches.get(picker.selected) else {
+            self.file_picker = None;
+            return;
+        };
+
+        let start_byte = char_to_byte_index(&self.input, picker.start_char).unwrap_or(0);
+        let end_byte = char_to_byte_index(&self.input, picker.end_char).unwrap_or(self.input.len());
+        let replacement = format!("@{}", selected_path);
+        self.input.replace_range(start_byte..end_byte, &replacement);
+
+        self.cursor_pos = picker.start_char + replacement.chars().count();
+        self.update_file_picker_state();
+        self.file_picker = None;
+    }
+
+    fn prepare_input_with_file_references(&mut self, input: &str) -> (String, Vec<String>) {
+        self.ensure_file_index_fresh();
+
+        let references = extract_file_references(input);
+        if references.is_empty() {
+            return (input.to_string(), Vec::new());
+        }
+
+        let mut warnings = Vec::new();
+        let mut resolved = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut remaining_total = MAX_REFERENCED_TOTAL_BYTES;
+
+        for token in references {
+            if seen.len() >= MAX_REFERENCED_FILES {
+                warnings.push(
+                    "Referenced file count limit reached; remaining files were skipped."
+                        .to_string(),
+                );
+                break;
+            }
+
+            let remaining_slots = MAX_REFERENCED_FILES.saturating_sub(seen.len());
+            let match_limit = if token.pattern.contains('*') || token.pattern.contains('?') {
+                remaining_slots
+            } else {
+                1
+            };
+            let matches = find_file_matches(&token.pattern, &self.workspace_files, match_limit);
+
+            if matches.is_empty() {
+                warnings.push(format!("No file matched @{}", token.pattern));
+                continue;
+            }
+
+            for path in matches {
+                if !seen.insert(path.clone()) {
+                    continue;
+                }
+
+                let absolute_path = self.workspace_root.join(&path);
+                match read_file_with_limit(
+                    &absolute_path,
+                    MAX_REFERENCED_FILE_BYTES.min(remaining_total),
+                ) {
+                    Ok((content, truncated)) => {
+                        if content.is_empty() {
+                            warnings.push(format!("Referenced file is empty: {}", path));
+                        } else {
+                            remaining_total = remaining_total.saturating_sub(content.len());
+                            resolved.push(ResolvedFileReference {
+                                path: path.clone(),
+                                content,
+                                truncated,
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        warnings.push(format!("Failed to read {}: {}", path, err));
+                    }
+                }
+
+                if remaining_total == 0 {
+                    warnings.push(
+                        "Referenced file context reached size limit; remaining files were skipped."
+                            .to_string(),
+                    );
+                    break;
+                }
+
+                if seen.len() >= MAX_REFERENCED_FILES {
+                    warnings.push(
+                        "Referenced file count limit reached; remaining matches were skipped."
+                            .to_string(),
+                    );
+                    break;
+                }
+            }
+
+            if remaining_total == 0 {
+                break;
+            }
+        }
+
+        if resolved.is_empty() {
+            return (input.to_string(), warnings);
+        }
+
+        let mut enriched = input.to_string();
+        enriched.push_str("\n\n[Referenced files]\n");
+        for item in resolved {
+            enriched.push_str(&format!("\n--- {} ---\n", item.path));
+            enriched.push_str(&item.content);
+            if !item.content.ends_with('\n') {
+                enriched.push('\n');
+            }
+            if item.truncated {
+                enriched.push_str("[Truncated]\n");
+            }
+        }
+
+        (enriched, warnings)
     }
 
     fn run_review_command(&mut self, args: &[&str], raw_command: &str) {
@@ -1541,9 +1777,286 @@ impl Default for App {
     }
 }
 
+fn collect_workspace_files(root: &Path, limit: usize) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+
+            if should_skip_path(&name) {
+                continue;
+            }
+
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    files.push(rel.to_string_lossy().replace('\\', "/"));
+                    if files.len() >= limit {
+                        return files;
+                    }
+                }
+            }
+        }
+    }
+
+    files.sort();
+    files
+}
+
+fn should_skip_path(name: &str) -> bool {
+    matches!(
+        name,
+        ".git" | "target" | "node_modules" | "dist" | "build" | ".next" | ".turbo"
+    )
+}
+
+fn is_boundary_char(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | ','
+        )
+}
+
+fn is_token_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | '*' | '?' | '#')
+}
+
+fn detect_active_file_token(input: &str, cursor_pos: usize) -> Option<FileReferenceToken> {
+    let chars: Vec<char> = input.chars().collect();
+    if cursor_pos > chars.len() {
+        return None;
+    }
+
+    let mut i = cursor_pos;
+    while i > 0 {
+        i -= 1;
+        let c = chars[i];
+        if c == '@' {
+            if i > 0 && !is_boundary_char(chars[i - 1]) {
+                continue;
+            }
+            if chars.get(i + 1).is_some_and(|ch| *ch == '@') {
+                return None;
+            }
+            if chars[i + 1..cursor_pos].iter().all(|ch| is_token_char(*ch)) {
+                let mut end = i + 1;
+                while end < chars.len() && is_token_char(chars[end]) {
+                    end += 1;
+                }
+                let pattern: String = chars[i + 1..cursor_pos].iter().collect();
+                return Some(FileReferenceToken {
+                    pattern,
+                    start_char: i,
+                    end_char: end,
+                });
+            }
+            return None;
+        }
+
+        if !is_token_char(c) {
+            break;
+        }
+    }
+
+    None
+}
+
+fn extract_file_references(input: &str) -> Vec<FileReferenceToken> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] != '@' {
+            i += 1;
+            continue;
+        }
+        if i > 0 && !is_boundary_char(chars[i - 1]) {
+            i += 1;
+            continue;
+        }
+        if chars.get(i + 1).is_some_and(|ch| *ch == '@') {
+            i += 2;
+            continue;
+        }
+
+        let start = i + 1;
+        let mut end = start;
+        while end < chars.len() && is_token_char(chars[end]) {
+            end += 1;
+        }
+
+        if end > start {
+            let pattern: String = chars[start..end].iter().collect();
+            tokens.push(FileReferenceToken {
+                pattern,
+                start_char: i,
+                end_char: end,
+            });
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+
+    tokens
+}
+
+fn char_to_byte_index(input: &str, char_pos: usize) -> Option<usize> {
+    if char_pos == input.chars().count() {
+        return Some(input.len());
+    }
+    input.char_indices().nth(char_pos).map(|(idx, _)| idx)
+}
+
+fn read_file_with_limit(path: &Path, max_bytes: usize) -> std::io::Result<(String, bool)> {
+    if max_bytes == 0 {
+        return Ok((String::new(), true));
+    }
+
+    let mut file = fs::File::open(path)?;
+    let mut buffer = Vec::new();
+    file.by_ref()
+        .take((max_bytes + 1) as u64)
+        .read_to_end(&mut buffer)?;
+
+    let truncated = buffer.len() > max_bytes;
+    if truncated {
+        buffer.truncate(max_bytes);
+    }
+
+    Ok((String::from_utf8_lossy(&buffer).to_string(), truncated))
+}
+
+fn find_file_matches(pattern: &str, files: &[String], limit: usize) -> Vec<String> {
+    let query = pattern.trim().to_lowercase();
+    if query.is_empty() {
+        return files.iter().take(limit).cloned().collect();
+    }
+
+    let has_glob = query.contains('*') || query.contains('?');
+    let mut scored: Vec<(i32, &String)> = files
+        .iter()
+        .filter_map(|path| {
+            let value = path.to_lowercase();
+            let score = if has_glob {
+                if wildcard_match(&query, &value) {
+                    10_000 - value.len() as i32
+                } else {
+                    return None;
+                }
+            } else if value == query {
+                20_000
+            } else if value.ends_with(&query) {
+                15_000 - value.len() as i32
+            } else if let Some(idx) = value.find(&query) {
+                12_000 - idx as i32
+            } else if let Some(subsequence_score) = fuzzy_subsequence_score(&query, &value) {
+                8_000 + subsequence_score
+            } else {
+                return None;
+            };
+            Some((score, path))
+        })
+        .collect();
+
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.len().cmp(&b.1.len()))
+            .then_with(|| a.1.cmp(b.1))
+    });
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, path)| path.clone())
+        .collect()
+}
+
+fn fuzzy_subsequence_score(needle: &str, haystack: &str) -> Option<i32> {
+    let mut score = 0;
+    let mut pos = 0usize;
+    for ch in needle.chars() {
+        let found = haystack[pos..].find(ch)?;
+        score += 100 - found as i32;
+        pos += found + ch.len_utf8();
+    }
+    Some(score)
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star_pi, mut star_ti) = (None, 0usize);
+
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star_pi = Some(pi);
+            pi += 1;
+            star_ti = ti;
+        } else if let Some(star) = star_pi {
+            pi = star + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+
+    pi == p.len()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_review_prompt, parse_review_target, ReviewTarget};
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempWorkspace {
+        root: PathBuf,
+    }
+
+    impl TempWorkspace {
+        fn new(name: &str) -> Self {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time before UNIX_EPOCH")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("uira-tui-{name}-{nanos}"));
+            fs::create_dir_all(&root).expect("failed to create temp workspace");
+            Self { root }
+        }
+
+        fn write_file(&self, relative: &str, content: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("failed to create parent dirs");
+            }
+            fs::write(path, content).expect("failed to write temp file");
+        }
+    }
+
+    impl Drop for TempWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn parse_review_target_defaults_to_staged() {
@@ -1574,5 +2087,58 @@ mod tests {
         assert!(prompt.contains("## Suggestions"));
         assert!(prompt.contains("## Praise"));
         assert!(prompt.contains("```diff"));
+    }
+
+    #[test]
+    fn extracts_multiple_file_references_with_commas() {
+        let refs =
+            extract_file_references("Use @Cargo.toml, @README.md, and @crates/uira-tui/src/app.rs");
+        assert_eq!(refs.len(), 3);
+        assert_eq!(refs[0].pattern, "Cargo.toml");
+        assert_eq!(refs[1].pattern, "README.md");
+        assert_eq!(refs[2].pattern, "crates/uira-tui/src/app.rs");
+    }
+
+    #[test]
+    fn detect_active_token_after_plain_at() {
+        let input = "Check @";
+        let token = detect_active_file_token(input, input.chars().count()).unwrap();
+        assert_eq!(token.pattern, "");
+    }
+
+    #[test]
+    fn prepare_input_appends_referenced_file_contents() {
+        let workspace = TempWorkspace::new("single-ref");
+        workspace.write_file("src/auth.rs", "pub fn validate() -> bool { true }\n");
+
+        let mut app = App::new();
+        app.workspace_root = workspace.root.clone();
+        app.refresh_file_index();
+
+        let (prepared, warnings) = app.prepare_input_with_file_references("Review @auth.rs");
+
+        assert!(warnings.is_empty());
+        assert!(prepared.contains("[Referenced files]"));
+        assert!(prepared.contains("--- src/auth.rs ---"));
+        assert!(prepared.contains("pub fn validate() -> bool { true }"));
+    }
+
+    #[test]
+    fn prepare_input_expands_glob_to_multiple_files() {
+        let workspace = TempWorkspace::new("glob-ref");
+        workspace.write_file("src/auth.rs", "pub fn auth() {}\n");
+        workspace.write_file("src/main.rs", "fn main() {}\n");
+        workspace.write_file("README.md", "docs\n");
+
+        let mut app = App::new();
+        app.workspace_root = workspace.root.clone();
+        app.refresh_file_index();
+
+        let (prepared, warnings) = app.prepare_input_with_file_references("Review @src/*.rs");
+
+        assert!(warnings.is_empty());
+        assert!(prepared.contains("--- src/auth.rs ---"));
+        assert!(prepared.contains("--- src/main.rs ---"));
+        assert!(!prepared.contains("--- README.md ---"));
     }
 }
