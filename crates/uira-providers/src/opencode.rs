@@ -16,7 +16,8 @@ use uira_protocol::{
 };
 
 use crate::{
-    traits::ModelResult, traits::ResponseStream, ModelClient, ProviderConfig, ProviderError,
+    image::image_source_to_data_url, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const OPENCODE_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
@@ -120,23 +121,32 @@ impl OpenCodeClient {
         };
 
         let content = match &msg.content {
-            MessageContent::Text(text) => Some(text.clone()),
+            MessageContent::Text(text) => Some(OpenCodeMessageContent::Text(text.clone())),
             MessageContent::Blocks(blocks) => {
-                let text: String = blocks
-                    .iter()
-                    .filter_map(|b| {
-                        if let ContentBlock::Text { text } = b {
-                            Some(text.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                if text.is_empty() {
-                    None
+                if msg.role == Role::User {
+                    let parts = Self::convert_user_blocks_to_parts(blocks);
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(OpenCodeMessageContent::Parts(parts))
+                    }
                 } else {
-                    Some(text)
+                    let text: String = blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some(OpenCodeMessageContent::Text(text))
+                    }
                 }
             }
             MessageContent::ToolCalls(_) => None,
@@ -165,6 +175,36 @@ impl OpenCodeClient {
             tool_calls,
             tool_call_id: msg.tool_call_id.clone(),
         }
+    }
+
+    fn convert_user_blocks_to_parts(blocks: &[ContentBlock]) -> Vec<OpenCodeContentPart> {
+        let mut parts = Vec::new();
+
+        for block in blocks {
+            match block {
+                ContentBlock::Text { text } => {
+                    parts.push(OpenCodeContentPart::Text { text: text.clone() });
+                }
+                ContentBlock::Image { source } => match image_source_to_data_url(source) {
+                    Ok(url) => {
+                        parts.push(OpenCodeContentPart::ImageUrl {
+                            image_url: OpenCodeImageUrl { url },
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!("Skipping image attachment for OpenCode request: {}", error);
+                    }
+                },
+                ContentBlock::ToolResult { content, .. } => {
+                    parts.push(OpenCodeContentPart::Text {
+                        text: content.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        parts
     }
 
     fn base_url(&self) -> &str {
@@ -456,10 +496,29 @@ struct OpenCodeRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum OpenCodeMessageContent {
+    Text(String),
+    Parts(Vec<OpenCodeContentPart>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenCodeContentPart {
+    Text { text: String },
+    ImageUrl { image_url: OpenCodeImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct OpenCodeImageUrl {
+    url: String,
+}
+
+#[derive(Debug, Serialize)]
 struct OpenCodeMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<OpenCodeMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenCodeToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]

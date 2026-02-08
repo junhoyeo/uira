@@ -11,6 +11,7 @@ mod client;
 mod config;
 mod error;
 mod gemini;
+mod image;
 mod ollama;
 mod openai;
 mod opencode;

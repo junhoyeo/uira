@@ -6,12 +6,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uira_protocol::{
-    ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
-    StopReason, StreamChunk, TokenUsage, ToolSpec,
+    ContentBlock, ContentDelta, ImageSource, Message, MessageContent, MessageDelta, ModelResponse,
+    Role, StopReason, StreamChunk, TokenUsage, ToolSpec,
 };
 
 use crate::{
-    traits::ModelResult, traits::ResponseStream, ModelClient, ProviderConfig, ProviderError,
+    image::normalize_image_source, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const DEFAULT_MAX_TOKENS: usize = 4096;
@@ -55,21 +56,42 @@ impl OllamaClient {
             Role::Assistant => "assistant",
         };
 
+        let mut images = Vec::new();
+
         let content = match &msg.content {
             MessageContent::Text(text) => text.clone(),
-            MessageContent::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| {
-                    if let ContentBlock::Text { text } = b {
-                        Some(text.as_str())
-                    } else if let ContentBlock::ToolResult { content, .. } = b {
-                        Some(content.as_str())
-                    } else {
-                        None
+            MessageContent::Blocks(blocks) => {
+                let mut text_chunks = Vec::new();
+
+                for block in blocks {
+                    match block {
+                        ContentBlock::Text { text } => text_chunks.push(text.clone()),
+                        ContentBlock::ToolResult { content, .. } => {
+                            text_chunks.push(content.clone())
+                        }
+                        ContentBlock::Image { source } => match normalize_image_source(source) {
+                            Ok(ImageSource::Base64 { data, .. }) => images.push(data),
+                            Ok(ImageSource::Url { url }) => {
+                                text_chunks.push(format!("Image URL: {}", url));
+                            }
+                            Ok(ImageSource::FilePath { .. }) => {
+                                tracing::warn!(
+                                    "Skipping unresolved file path image for Ollama request"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    "Skipping image attachment for Ollama request: {}",
+                                    error
+                                );
+                            }
+                        },
+                        _ => {}
                     }
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
+                }
+
+                text_chunks.join("\n")
+            }
             MessageContent::ToolCalls(calls) => calls
                 .iter()
                 .map(|c| format!("Tool call: {} with {}", c.name, c.input))
@@ -80,6 +102,11 @@ impl OllamaClient {
         OllamaMessage {
             role: role.to_string(),
             content,
+            images: if images.is_empty() {
+                None
+            } else {
+                Some(images)
+            },
         }
     }
 
@@ -250,6 +277,8 @@ struct OllamaRequest {
 struct OllamaMessage {
     role: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    images: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]

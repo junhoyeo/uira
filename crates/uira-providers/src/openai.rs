@@ -16,7 +16,8 @@ use uira_protocol::{
 };
 
 use crate::{
-    traits::ModelResult, traits::ResponseStream, ModelClient, ProviderConfig, ProviderError,
+    image::image_source_to_data_url, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const DEFAULT_MAX_TOKENS: usize = 4096;
@@ -363,23 +364,32 @@ impl OpenAIClient {
         };
 
         let content = match &msg.content {
-            MessageContent::Text(text) => Some(text.clone()),
+            MessageContent::Text(text) => Some(OpenAIMessageContent::Text(text.clone())),
             MessageContent::Blocks(blocks) => {
-                let text: String = blocks
-                    .iter()
-                    .filter_map(|b| {
-                        if let ContentBlock::Text { text } = b {
-                            Some(text.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                if text.is_empty() {
-                    None
+                if msg.role == Role::User {
+                    let parts = Self::convert_user_blocks_to_parts(blocks);
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(OpenAIMessageContent::Parts(parts))
+                    }
                 } else {
-                    Some(text)
+                    let text: String = blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let ContentBlock::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some(OpenAIMessageContent::Text(text))
+                    }
                 }
             }
             MessageContent::ToolCalls(_) => None,
@@ -408,6 +418,36 @@ impl OpenAIClient {
             tool_calls,
             tool_call_id: msg.tool_call_id.clone(),
         }
+    }
+
+    fn convert_user_blocks_to_parts(blocks: &[ContentBlock]) -> Vec<OpenAIContentPart> {
+        let mut parts = Vec::new();
+
+        for block in blocks {
+            match block {
+                ContentBlock::Text { text } => {
+                    parts.push(OpenAIContentPart::Text { text: text.clone() });
+                }
+                ContentBlock::Image { source } => match image_source_to_data_url(source) {
+                    Ok(url) => {
+                        parts.push(OpenAIContentPart::ImageUrl {
+                            image_url: OpenAIImageUrl { url },
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!("Skipping image attachment for OpenAI request: {}", error);
+                    }
+                },
+                ContentBlock::ToolResult { content, .. } => {
+                    parts.push(OpenAIContentPart::Text {
+                        text: content.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        parts
     }
 
     fn base_url(&self) -> &str {
@@ -666,10 +706,29 @@ struct OpenAIRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum OpenAIMessageContent {
+    Text(String),
+    Parts(Vec<OpenAIContentPart>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenAIContentPart {
+    Text { text: String },
+    ImageUrl { image_url: OpenAIImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIImageUrl {
+    url: String,
+}
+
+#[derive(Debug, Serialize)]
 struct OpenAIMessage {
     role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<OpenAIMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
