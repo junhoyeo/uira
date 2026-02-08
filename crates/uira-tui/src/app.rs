@@ -775,8 +775,17 @@ impl App {
                     self.messages.clear();
                     return;
                 }
+                _ => {}
+            }
+        }
+
+        if !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && self.input.is_empty()
+        {
+            match key.code {
                 KeyCode::Char('o') | KeyCode::Char('O') => {
-                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) || key.code == KeyCode::Char('O') {
                         self.expand_all_tool_outputs();
                     } else {
                         self.collapse_all_tool_outputs();
