@@ -450,11 +450,28 @@ fn typos_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyho
     } else {
         println!("🔍 Checking for typos...\n");
         let mut cmd = std::process::Command::new("typos");
-        if files.is_empty() {
-            cmd.arg(".");
-        } else {
+
+        if !files.is_empty() {
             cmd.args(files);
+        } else if staged {
+            let output = std::process::Command::new("git")
+                .args(["diff", "--cached", "--name-only", "--diff-filter=ACM"])
+                .output()
+                .map_err(|_| anyhow::anyhow!("Failed to get staged files"))?;
+            let staged_files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect();
+            if staged_files.is_empty() {
+                println!("✓ No staged files to check");
+                return Ok(());
+            }
+            cmd.args(&staged_files);
+        } else {
+            cmd.arg(".");
         }
+
         let status = cmd.status().map_err(|_| {
             anyhow::anyhow!("Failed to run typos. Is it installed? Run: cargo install typos-cli")
         })?;

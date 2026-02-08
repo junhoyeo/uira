@@ -66,7 +66,8 @@ impl AgentWorkflow {
 
         let git_tracker = GitTracker::new(&config.working_directory);
 
-        let (agent, state) = if detector.is_some() {
+        let has_detector = detector.is_some() && scope.is_some();
+        let (agent, state) = if has_detector {
             let state = existing_state.unwrap_or_else(|| {
                 WorkflowState::new(task, "pending".to_string(), config.max_iterations)
             });

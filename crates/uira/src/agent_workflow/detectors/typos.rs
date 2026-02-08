@@ -102,7 +102,8 @@ fn byte_offset_to_line_col(content: &str, offset: usize) -> (usize, usize) {
     let before = &content[..offset.min(content.len())];
     let line = before.chars().filter(|&c| c == '\n').count() + 1;
     let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let col = offset - last_newline + 1;
+    let line_slice = &content[last_newline..offset.min(content.len())];
+    let col = line_slice.chars().count() + 1;
     (line, col)
 }
 
@@ -238,6 +239,14 @@ mod tests {
         assert_eq!(byte_offset_to_line_col(content, 6), (2, 1));
         assert_eq!(byte_offset_to_line_col(content, 7), (2, 2));
         assert_eq!(byte_offset_to_line_col(content, 12), (3, 1));
+
+        // Non-ASCII: multibyte UTF-8 characters
+        // "cafe" at byte 7 (after 2-byte char)
+        let utf8_content = "caf\u{00E9}\ncafe";
+        // Line 1: "cafe" (4 chars, 5 bytes due to e-acute)
+        // Line 2: "cafe" starts at byte 6
+        assert_eq!(byte_offset_to_line_col(utf8_content, 6), (2, 1));
+        assert_eq!(byte_offset_to_line_col(utf8_content, 7), (2, 2));
     }
 
     #[test]
