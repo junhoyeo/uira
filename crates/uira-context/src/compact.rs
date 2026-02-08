@@ -132,7 +132,7 @@ impl Default for CompactionConfig {
             enabled: true,
             threshold: 0.8,
             protected_tokens: 40_000,
-            strategy: CompactionStrategy::Prune,
+            strategy: CompactionStrategy::summarize(1_024),
             summarization_model: None,
         }
     }

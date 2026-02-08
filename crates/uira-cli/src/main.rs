@@ -1061,6 +1061,8 @@ fn create_agent_config(
     }
 
     if let Some(uira_cfg) = uira_config {
+        config = config.with_compaction_settings(&uira_cfg.compaction);
+
         if !uira_cfg.permissions.rules.is_empty() {
             config = config.with_permission_rules(uira_cfg.permissions.rules.clone());
         }

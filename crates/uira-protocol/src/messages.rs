@@ -86,7 +86,7 @@ impl Message {
             MessageContent::Blocks(blocks) => blocks.iter().map(|b| b.estimate_chars()).sum(),
             MessageContent::ToolCalls(calls) => calls.iter().map(|c| c.estimate_chars()).sum(),
         };
-        content_len / 4
+        content_len.div_ceil(4)
     }
 }
 
