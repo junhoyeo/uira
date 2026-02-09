@@ -837,7 +837,7 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if !self.todos.is_empty() {
+        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -1024,17 +1024,21 @@ impl App {
             format!(" | {} image(s) attached", self.pending_images.len())
         };
 
+        let model_label = self.current_model.as_deref().unwrap_or("default");
         let title = if self.approval_overlay.is_active() {
-            format!(" Input (approval overlay active{}) ", pending_label)
+            format!(
+                " Input (model: {} | approval overlay active{}) ",
+                model_label, pending_label
+            )
         } else if self.is_agent_busy() {
             format!(
-                " Input (Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                pending_label
+                " Input (model: {} | Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_label, pending_label
             )
         } else {
             format!(
-                " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                pending_label
+                " Input (model: {} | Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_label, pending_label
             )
         };
 
@@ -1435,8 +1439,7 @@ impl App {
                     self.should_quit = true;
                 }
                 KeyCode::Char('l') => {
-                    // Clear screen
-                    self.messages.clear();
+                    self.status = "Screen refresh requested".to_string();
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -2003,6 +2006,7 @@ impl App {
                         content: "Usage: /image <path>".to_string(),
                         tool_output: None,
                     });
+                    self.scroll_to_bottom();
                     return;
                 }
 
@@ -2180,6 +2184,8 @@ impl App {
                 );
             }
         }
+
+        self.scroll_to_bottom();
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
@@ -2812,6 +2818,23 @@ mod tests {
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
 
         assert_eq!(action, KeyAction::OpenExternalEditor);
+    }
+
+    #[test]
+    fn ctrl_l_keeps_chat_history() {
+        let mut app = App::new();
+        app.add_message("assistant", "first");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, KeyAction::None);
+        assert_eq!(app.messages.len(), 1);
+    }
+
+    #[test]
+    fn todo_sidebar_is_enabled_by_default() {
+        let app = App::new();
+        assert!(app.show_todo_sidebar);
     }
 
     #[test]
