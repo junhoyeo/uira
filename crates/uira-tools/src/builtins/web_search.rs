@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use futures::StreamExt;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -438,21 +437,20 @@ impl Tool for FetchUrlTool {
             }
         }
 
-        let mut stream = response.bytes_stream();
-        let mut body_bytes = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| ToolError::ExecutionFailed {
+        let body_bytes = response
+            .bytes()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Failed to read response body: {e}"),
             })?;
-            body_bytes.extend_from_slice(&chunk);
-            if body_bytes.len() > FETCH_MAX_RESPONSE_BYTES {
-                return Err(ToolError::ExecutionFailed {
-                    message: format!(
-                        "Response too large: exceeded limit of {} bytes",
-                        FETCH_MAX_RESPONSE_BYTES
-                    ),
-                });
-            }
+
+        if body_bytes.len() > FETCH_MAX_RESPONSE_BYTES {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "Response too large: exceeded limit of {} bytes",
+                    FETCH_MAX_RESPONSE_BYTES
+                ),
+            });
         }
 
         let body = String::from_utf8_lossy(&body_bytes).to_string();

@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use lsp_types::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, RwLock};
 
@@ -70,10 +71,12 @@ impl LspClientImpl {
     }
 
     async fn send_initialize(&self, process: &Arc<Mutex<ServerProcess>>) -> Result<(), ToolError> {
+        let root_uri = resolve_root_uri(&self.root_path)?;
+
         #[allow(deprecated)]
         let init_params = InitializeParams {
             process_id: Some(std::process::id()),
-            root_uri: Some(Url::from_file_path(&self.root_path).unwrap()),
+            root_uri: Some(root_uri),
             capabilities: ClientCapabilities::default(),
             ..Default::default()
         };
@@ -106,7 +109,9 @@ impl LspClientImpl {
     ) -> Result<Value, ToolError> {
         let mut proc = process.lock().await;
 
-        let content = serde_json::to_string(&request).unwrap();
+        let content = serde_json::to_string(&request).map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to serialize LSP request: {}", e),
+        })?;
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         if let Some(stdin) = proc.child.stdin.as_mut() {
@@ -121,31 +126,12 @@ impl LspClientImpl {
         // Read response
         if let Some(stdout) = proc.child.stdout.as_mut() {
             let mut reader = BufReader::new(stdout);
-            let mut header = String::new();
-
-            // Read Content-Length header
-            reader
-                .read_line(&mut header)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to read LSP response: {}", e),
-                })?;
-
-            let content_length = header
-                .trim()
-                .strip_prefix("Content-Length: ")
-                .and_then(|s| s.parse::<usize>().ok())
-                .ok_or_else(|| ToolError::ExecutionFailed {
-                    message: "Invalid Content-Length header".to_string(),
-                })?;
-
-            // Skip empty line
-            let mut empty = String::new();
-            reader.read_line(&mut empty).await.ok();
+            let content_length = read_lsp_content_length(&mut reader).await?;
 
             // Read content
             let mut buffer = vec![0; content_length];
-            tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buffer)
+            reader
+                .read_exact(&mut buffer)
                 .await
                 .map_err(|e| ToolError::ExecutionFailed {
                     message: format!("Failed to read LSP content: {}", e),
@@ -171,7 +157,10 @@ impl LspClientImpl {
     ) -> Result<(), ToolError> {
         let mut proc = process.lock().await;
 
-        let content = serde_json::to_string(&notification).unwrap();
+        let content =
+            serde_json::to_string(&notification).map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize LSP notification: {}", e),
+            })?;
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         if let Some(stdin) = proc.child.stdin.as_mut() {
@@ -199,6 +188,105 @@ impl LspClientImpl {
             "java" => Some("java".to_string()),
             _ => None,
         }
+    }
+}
+
+fn resolve_root_uri(root_path: &Path) -> Result<Url, ToolError> {
+    let absolute = if root_path.is_absolute() {
+        root_path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to resolve current directory for LSP root: {}", e),
+            })?
+            .join(root_path)
+    };
+
+    Url::from_file_path(&absolute).map_err(|_| ToolError::ExecutionFailed {
+        message: format!("Invalid LSP workspace root path: {}", absolute.display()),
+    })
+}
+
+async fn read_lsp_content_length<R>(reader: &mut R) -> Result<usize, ToolError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut content_length: Option<usize> = None;
+
+    loop {
+        let mut header_line = String::new();
+        let bytes_read =
+            reader
+                .read_line(&mut header_line)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to read LSP response header: {}", e),
+                })?;
+
+        if bytes_read == 0 {
+            return Err(ToolError::ExecutionFailed {
+                message: "Unexpected EOF while reading LSP response headers".to_string(),
+            });
+        }
+
+        let header = header_line.trim();
+        if header.is_empty() {
+            break;
+        }
+
+        if let Some(length) = header.strip_prefix("Content-Length:") {
+            content_length =
+                Some(
+                    length
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| ToolError::ExecutionFailed {
+                            message: format!("Invalid Content-Length header: {}", header),
+                        })?,
+                );
+        }
+    }
+
+    content_length.ok_or_else(|| ToolError::ExecutionFailed {
+        message: "Missing Content-Length header".to_string(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_lsp_content_length, resolve_root_uri};
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn parses_content_length_with_additional_headers() {
+        let payload = b"Content-Type: application/vscode-jsonrpc; charset=utf-8\r\nContent-Length: 42\r\n\r\n";
+        let mut reader = BufReader::new(&payload[..]);
+
+        let len = read_lsp_content_length(&mut reader)
+            .await
+            .expect("should parse content length");
+
+        assert_eq!(len, 42);
+    }
+
+    #[tokio::test]
+    async fn returns_error_when_content_length_missing() {
+        let payload = b"Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n";
+        let mut reader = BufReader::new(&payload[..]);
+
+        let err = read_lsp_content_length(&mut reader)
+            .await
+            .expect_err("missing content length should fail");
+
+        assert!(err.to_string().contains("Missing Content-Length"));
+    }
+
+    #[test]
+    fn resolves_relative_root_path_to_file_url() {
+        let url =
+            resolve_root_uri(std::path::Path::new(".")).expect("relative root path should resolve");
+
+        assert_eq!(url.scheme(), "file");
     }
 }
 
