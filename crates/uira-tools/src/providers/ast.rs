@@ -41,9 +41,20 @@ impl AstToolProvider {
         Self
     }
 
+    fn is_path_within_root(path: &std::path::Path, root: &std::path::Path) -> bool {
+        match (path.canonicalize(), root.canonicalize()) {
+            (Ok(canonical_path), Ok(canonical_root)) => canonical_path.starts_with(&canonical_root),
+            _ => false,
+        }
+    }
+
+    fn validate_path_input(p: &str) -> bool {
+        !p.starts_with('/') && !p.starts_with('\\') && !p.contains("..")
+    }
+
     fn collect_files(
         &self,
-        root_path: &PathBuf,
+        root_path: &std::path::Path,
         args: &Value,
         lang: &str,
     ) -> Result<Vec<PathBuf>, ToolError> {
@@ -54,11 +65,17 @@ impl AstToolProvider {
         if let Some(paths) = args["paths"].as_array() {
             for path in paths {
                 if let Some(p) = path.as_str() {
+                    if !Self::validate_path_input(p) {
+                        continue;
+                    }
                     let full_path = root_path.join(p);
+                    if !Self::is_path_within_root(&full_path, root_path) {
+                        continue;
+                    }
                     if full_path.is_file() && seen.insert(full_path.clone()) {
                         files.push(full_path);
                     } else if full_path.is_dir() {
-                        Self::walk_dir(&full_path, extensions, &mut files, &mut seen);
+                        Self::walk_dir(&full_path, root_path, extensions, &mut files, &mut seen);
                     }
                 }
             }
@@ -67,9 +84,15 @@ impl AstToolProvider {
         if let Some(globs) = args["globs"].as_array() {
             for g in globs {
                 if let Some(pattern) = g.as_str() {
+                    if !Self::validate_path_input(pattern) {
+                        continue;
+                    }
                     let full_pattern = root_path.join(pattern);
                     if let Ok(entries) = glob(full_pattern.to_string_lossy().as_ref()) {
                         for entry in entries.flatten() {
+                            if !Self::is_path_within_root(&entry, root_path) {
+                                continue;
+                            }
                             if entry.is_file() && seen.insert(entry.clone()) {
                                 files.push(entry);
                             }
@@ -80,19 +103,21 @@ impl AstToolProvider {
         }
 
         if files.is_empty() {
-            Self::walk_dir(root_path, extensions, &mut files, &mut seen);
+            Self::walk_dir(root_path, root_path, extensions, &mut files, &mut seen);
         }
 
         Ok(files)
     }
 
     fn walk_dir(
-        dir: &PathBuf,
+        dir: &std::path::Path,
+        root_path: &std::path::Path,
         extensions: &[&str],
         files: &mut Vec<PathBuf>,
         seen: &mut HashSet<PathBuf>,
     ) {
         for entry in WalkDir::new(dir)
+            .follow_links(false)
             .into_iter()
             .filter_entry(|e| {
                 let name = e.file_name().to_string_lossy();
@@ -102,16 +127,24 @@ impl AstToolProvider {
         {
             let path = entry.path();
             if path.is_file() {
+                let path_buf = path.to_path_buf();
+                if !Self::is_path_within_root(&path_buf, root_path) {
+                    continue;
+                }
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if extensions.contains(&ext) && seen.insert(path.to_path_buf()) {
-                        files.push(path.to_path_buf());
+                    if extensions.contains(&ext) && seen.insert(path_buf.clone()) {
+                        files.push(path_buf);
                     }
                 }
             }
         }
     }
 
-    fn ast_search(&self, root_path: &PathBuf, input: &Value) -> Result<ToolOutput, ToolError> {
+    fn ast_search(
+        &self,
+        root_path: &std::path::Path,
+        input: &Value,
+    ) -> Result<ToolOutput, ToolError> {
         let pattern = input["pattern"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidInput {
@@ -182,7 +215,11 @@ impl AstToolProvider {
         }
     }
 
-    fn ast_replace(&self, root_path: &PathBuf, input: &Value) -> Result<ToolOutput, ToolError> {
+    fn ast_replace(
+        &self,
+        root_path: &std::path::Path,
+        input: &Value,
+    ) -> Result<ToolOutput, ToolError> {
         let pattern = input["pattern"]
             .as_str()
             .ok_or_else(|| ToolError::InvalidInput {
@@ -225,30 +262,58 @@ impl AstToolProvider {
                 continue;
             }
 
-            let mut new_content = content.clone();
-            let mut offset: i64 = 0;
-
+            let mut edits: Vec<(usize, usize, Vec<u8>, String, usize)> = Vec::new();
             for m in &matches {
                 let node = m.get_node();
                 let edit = m.replace_by(rewrite);
-                let inserted = String::from_utf8_lossy(&edit.inserted_text);
-                let start_byte = (edit.position as i64 + offset) as usize;
-                let end_byte = start_byte + edit.deleted_length;
+                let start = edit.position;
+                let end = start + edit.deleted_length;
+                let line = node.start_pos().line() + 1;
+                let original = node.text().to_string();
+                edits.push((start, end, edit.inserted_text, original, line));
+            }
 
-                let before = &new_content[..start_byte];
-                let after = &new_content[end_byte..];
-                new_content = format!("{}{}{}", before, inserted, after);
+            edits.sort_by(|a, b| b.0.cmp(&a.0));
 
-                offset += edit.inserted_text.len() as i64 - edit.deleted_length as i64;
+            let mut buf = content.clone().into_bytes();
+            let mut last_start = usize::MAX;
+            let mut skipped_overlaps = 0;
 
-                let pos = node.start_pos();
+            for (start, end, inserted, original, line) in edits {
+                if end > last_start {
+                    skipped_overlaps += 1;
+                    continue;
+                }
+                if end > buf.len() {
+                    continue;
+                }
+
+                let replacement = String::from_utf8_lossy(&inserted).to_string();
                 results.push(json!({
                     "file": file_path.to_string_lossy(),
-                    "line": pos.line() + 1,
-                    "original": node.text(),
-                    "replacement": inserted,
+                    "line": line,
+                    "original": original,
+                    "replacement": replacement,
+                }));
+
+                buf.splice(start..end, inserted);
+                last_start = start;
+            }
+
+            if skipped_overlaps > 0 {
+                results.push(json!({
+                    "file": file_path.to_string_lossy(),
+                    "warning": format!("Skipped {} overlapping matches", skipped_overlaps),
                 }));
             }
+
+            let new_content = String::from_utf8(buf).map_err(|e| ToolError::ExecutionFailed {
+                message: format!(
+                    "Invalid UTF-8 after replacement in {}: {}",
+                    file_path.display(),
+                    e
+                ),
+            })?;
 
             if !dry_run {
                 fs::write(&file_path, &new_content).map_err(|e| ToolError::ExecutionFailed {

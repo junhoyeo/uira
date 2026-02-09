@@ -7,8 +7,11 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, RwLock};
+
+/// Maximum Content-Length we'll accept (32MB) to prevent OOM
+const MAX_CONTENT_LENGTH: usize = 32 * 1024 * 1024;
 
 /// LSP client that communicates with language servers
 pub struct LspClientImpl {
@@ -17,7 +20,10 @@ pub struct LspClientImpl {
 }
 
 struct ServerProcess {
+    #[allow(dead_code)]
     child: Child,
+    stdin: ChildStdin,
+    reader: BufReader<ChildStdout>,
     _next_id: i64,
 }
 
@@ -51,14 +57,33 @@ impl LspClientImpl {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
 
-        let child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
+        let mut child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
             message: format!(
                 "Failed to start LSP server: {}. {}",
                 e, server_config.install_hint
             ),
         })?;
 
-        let process = Arc::new(Mutex::new(ServerProcess { child, _next_id: 1 }));
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: "Failed to capture LSP server stdin".to_string(),
+            })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: "Failed to capture LSP server stdout".to_string(),
+            })?;
+        let reader = BufReader::new(stdout);
+
+        let process = Arc::new(Mutex::new(ServerProcess {
+            child,
+            stdin,
+            reader,
+            _next_id: 1,
+        }));
 
         // Send initialize request
         self.send_initialize(&process).await?;
@@ -109,69 +134,69 @@ impl LspClientImpl {
         let content = serde_json::to_string(&request).unwrap();
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
-        if let Some(stdin) = proc.child.stdin.as_mut() {
-            stdin
-                .write_all(message.as_bytes())
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to write to LSP server: {}", e),
-                })?;
-        }
+        proc.stdin
+            .write_all(message.as_bytes())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to write to LSP server: {}", e),
+            })?;
 
-        // Read response
-        if let Some(stdout) = proc.child.stdout.as_mut() {
-            let mut reader = BufReader::new(stdout);
-            let mut content_length: Option<usize> = None;
+        let mut content_length: Option<usize> = None;
 
-            // Read headers until empty line (LSP uses HTTP-like headers)
-            loop {
-                let mut header = String::new();
-                reader
-                    .read_line(&mut header)
+        loop {
+            let mut line = String::new();
+            let n =
+                proc.reader
+                    .read_line(&mut line)
                     .await
                     .map_err(|e| ToolError::ExecutionFailed {
                         message: format!("Failed to read LSP response header: {}", e),
                     })?;
 
-                let trimmed = header.trim();
-
-                // Empty line signals end of headers
-                if trimmed.is_empty() {
-                    break;
-                }
-
-                // Parse Content-Length header (case-insensitive)
-                if let Some(len_str) = trimmed
-                    .strip_prefix("Content-Length:")
-                    .or_else(|| trimmed.strip_prefix("content-length:"))
-                {
-                    content_length = len_str.trim().parse().ok();
-                }
+            if n == 0 {
+                return Err(ToolError::ExecutionFailed {
+                    message: "EOF while reading LSP headers".to_string(),
+                });
             }
 
-            let content_length = content_length.ok_or_else(|| ToolError::ExecutionFailed {
-                message: "Missing Content-Length header in LSP response".to_string(),
+            let line = line.trim_end_matches(&['\r', '\n'][..]);
+            if line.is_empty() {
+                break;
+            }
+
+            if let Some((name, value)) = line.split_once(':') {
+                if name.trim().eq_ignore_ascii_case("Content-Length") {
+                    content_length = value.trim().parse::<usize>().ok();
+                }
+            }
+        }
+
+        let content_length = content_length.ok_or_else(|| ToolError::ExecutionFailed {
+            message: "Missing Content-Length header in LSP response".to_string(),
+        })?;
+
+        if content_length > MAX_CONTENT_LENGTH {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "Content-Length {} exceeds maximum allowed {}",
+                    content_length, MAX_CONTENT_LENGTH
+                ),
+            });
+        }
+
+        let mut buffer = vec![0; content_length];
+        tokio::io::AsyncReadExt::read_exact(&mut proc.reader, &mut buffer)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read LSP content: {}", e),
             })?;
 
-            // Read content
-            let mut buffer = vec![0; content_length];
-            tokio::io::AsyncReadExt::read_exact(&mut reader, &mut buffer)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to read LSP content: {}", e),
-                })?;
+        let response: Value =
+            serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to parse LSP response: {}", e),
+            })?;
 
-            let response: Value =
-                serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to parse LSP response: {}", e),
-                })?;
-
-            Ok(response)
-        } else {
-            Err(ToolError::ExecutionFailed {
-                message: "LSP server stdout not available".to_string(),
-            })
-        }
+        Ok(response)
     }
 
     async fn send_notification(
@@ -184,14 +209,12 @@ impl LspClientImpl {
         let content = serde_json::to_string(&notification).unwrap();
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
-        if let Some(stdin) = proc.child.stdin.as_mut() {
-            stdin
-                .write_all(message.as_bytes())
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to write notification: {}", e),
-                })?;
-        }
+        proc.stdin
+            .write_all(message.as_bytes())
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to write notification: {}", e),
+            })?;
 
         Ok(())
     }
