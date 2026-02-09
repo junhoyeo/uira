@@ -248,7 +248,9 @@ impl OpenAIClient {
                     expires_at,
                 },
             );
-            let _ = store.save();
+            if let Err(e) = store.save() {
+                tracing::error!("Failed to save credential store after token refresh: {}", e);
+            }
         }
 
         Ok(())

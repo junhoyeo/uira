@@ -1010,7 +1010,9 @@ impl App {
         tokio::spawn(async move {
             let mut stream = event_stream;
             while let Some(event) = stream.next().await {
-                let _ = event_tx.send(AppEvent::Agent(event)).await;
+                if let Err(e) = event_tx.send(AppEvent::Agent(event)).await {
+                    tracing::warn!("Failed to send agent event to TUI: {}", e);
+                }
             }
         });
 
