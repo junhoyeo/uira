@@ -99,6 +99,9 @@ Credentials are securely stored in `~/.uira/credentials/`.
 | `/switch <branch>` | Switch to another session branch |
 | `/branches` | List available session branches |
 | `/tree` | Show session branch tree |
+| `/review` | Review staged changes |
+| `/review <file>` | Review changes for a specific file |
+| `/review HEAD~1` | Review a specific commit |
 | `/theme` | List available TUI themes |
 | `/theme <name>` | Switch TUI theme |
 | `/share [--public] [--description <text>]` | Share current session as a GitHub Gist |
