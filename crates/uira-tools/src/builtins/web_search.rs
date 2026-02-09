@@ -267,7 +267,11 @@ impl Tool for WebSearchTool {
                         provider: "duckduckgo".to_string(),
                         results: cached.results.clone(),
                     };
-                    return Ok(ToolOutput::json(serde_json::to_value(out).unwrap()));
+                    return serde_json::to_value(out)
+                        .map(ToolOutput::json)
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            message: format!("Failed to serialize output: {}", e),
+                        });
                 }
             }
 
@@ -298,7 +302,11 @@ impl Tool for WebSearchTool {
             );
         }
 
-        Ok(ToolOutput::json(serde_json::to_value(out).unwrap()))
+        serde_json::to_value(out)
+            .map(ToolOutput::json)
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize output: {}", e),
+            })
     }
 }
 
@@ -473,7 +481,11 @@ impl Tool for FetchUrlTool {
             content,
             truncated,
         };
-        Ok(ToolOutput::json(serde_json::to_value(out).unwrap()))
+        serde_json::to_value(out)
+            .map(ToolOutput::json)
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize output: {}", e),
+            })
     }
 }
 

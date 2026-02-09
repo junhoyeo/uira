@@ -214,7 +214,11 @@ impl BashTool {
                     exit_code,
                 };
 
-                Ok(ToolOutput::json(serde_json::to_value(bash_output).unwrap()))
+                serde_json::to_value(bash_output)
+                    .map(ToolOutput::json)
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        message: format!("Failed to serialize output: {}", e),
+                    })
             }
             Ok(Err(e)) => Err(ToolError::ExecutionFailed {
                 message: format!("Failed to execute command: {}", e),
@@ -262,7 +266,11 @@ impl BashTool {
                     exit_code,
                 };
 
-                Ok(ToolOutput::json(serde_json::to_value(bash_output).unwrap()))
+                serde_json::to_value(bash_output)
+                    .map(ToolOutput::json)
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        message: format!("Failed to serialize output: {}", e),
+                    })
             }
             Ok(Err(e)) => Err(ToolError::ExecutionFailed {
                 message: format!("Failed to execute sandboxed command: {}", e),

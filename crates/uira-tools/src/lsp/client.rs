@@ -137,7 +137,9 @@ impl LspClientImpl {
     ) -> Result<Value, ToolError> {
         let mut proc = process.lock().await;
 
-        let content = serde_json::to_string(&request).unwrap();
+        let content = serde_json::to_string(&request).map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to serialize LSP request: {}", e),
+        })?;
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         proc.stdin
@@ -212,7 +214,10 @@ impl LspClientImpl {
     ) -> Result<(), ToolError> {
         let mut proc = process.lock().await;
 
-        let content = serde_json::to_string(&notification).unwrap();
+        let content =
+            serde_json::to_string(&notification).map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize LSP notification: {}", e),
+            })?;
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
 
         proc.stdin

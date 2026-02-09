@@ -36,6 +36,13 @@ fn get_optional_bool(input: &Value, field: &str) -> Option<bool> {
     input.get(field).and_then(|v| v.as_bool())
 }
 
+/// Serialize a JSON Value to pretty-printed string, returning ToolError on failure.
+fn serialize_response(response: &Value) -> Result<String, ToolError> {
+    serde_json::to_string_pretty(response).map_err(|e| ToolError::ExecutionFailed {
+        message: format!("Failed to serialize response: {}", e),
+    })
+}
+
 /// Serialize a BackgroundTask to a JSON response object.
 fn task_to_json(task: &BackgroundTask) -> Value {
     json!({
