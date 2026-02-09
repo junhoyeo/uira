@@ -62,6 +62,10 @@ impl AstToolProvider {
         let mut files = Vec::new();
         let mut seen = HashSet::new();
 
+        let has_paths = args["paths"].as_array().is_some_and(|a| !a.is_empty());
+        let has_globs = args["globs"].as_array().is_some_and(|a| !a.is_empty());
+        let explicit_filters = has_paths || has_globs;
+
         if let Some(paths) = args["paths"].as_array() {
             for path in paths {
                 if let Some(p) = path.as_str() {
@@ -102,7 +106,7 @@ impl AstToolProvider {
             }
         }
 
-        if files.is_empty() {
+        if files.is_empty() && !explicit_filters {
             Self::walk_dir(root_path, root_path, extensions, &mut files, &mut seen);
         }
 
