@@ -14,6 +14,8 @@ use uira_events::{
     Event, EventCategory, EventHandler, HandlerResult, SessionEndReason, SubscriptionFilter,
 };
 
+const HANDLER_NAME: &str = "hook-event-adapter";
+
 /// Adapter that wraps the HookRegistry to work with the new EventBus
 pub struct HookEventAdapter {
     registry: Arc<HookRegistry>,
@@ -228,7 +230,7 @@ impl HookEventAdapter {
 #[async_trait]
 impl EventHandler for HookEventAdapter {
     fn name(&self) -> &str {
-        "hook-event-adapter"
+        HANDLER_NAME
     }
 
     fn filter(&self) -> SubscriptionFilter {
@@ -258,7 +260,7 @@ impl EventHandler for HookEventAdapter {
         {
             Ok(output) => Self::hook_output_to_handler_result(output),
             Err(e) => {
-                eprintln!("[hook-event-adapter] Error executing hooks: {}", e);
+                eprintln!("[{}] Error executing hooks: {}", HANDLER_NAME, e);
                 HandlerResult::pass()
             }
         }
@@ -369,5 +371,11 @@ mod tests {
         let result = HookEventAdapter::hook_output_to_handler_result(block);
         assert!(!result.should_continue);
         assert_eq!(result.message, Some("blocked reason".to_string()));
+    }
+
+    #[test]
+    fn test_handler_name_contract() {
+        let adapter = HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string());
+        assert_eq!(EventHandler::name(&adapter), HANDLER_NAME);
     }
 }
