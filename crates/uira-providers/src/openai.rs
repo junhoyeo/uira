@@ -23,6 +23,7 @@ use crate::{
 
 const DEFAULT_MAX_TOKENS: usize = 4096;
 const PROVIDER_NAME: &str = "openai";
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 const OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -186,6 +187,11 @@ impl OpenAIClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: PROVIDER_NAME.to_string(),
+                });
+            }
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::Configuration(format!(
                 "Token refresh failed ({}): {}",
@@ -612,12 +618,16 @@ impl ModelClient for OpenAIClient {
                 let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
                 buffer.push_str(&text);
 
-                // Process complete SSE events (separated by double newline)
+                if buffer.len() > MAX_SSE_BUFFER {
+                    Err(ProviderError::StreamError(
+                        "SSE buffer exceeded maximum size".to_string(),
+                    ))?;
+                }
+
                 while let Some(pos) = buffer.find("\n\n") {
                     let event_text = buffer[..pos].to_string();
                     buffer = buffer[pos + 2..].to_string();
 
-                    // Parse each line in the event
                     for line in event_text.lines() {
                         let trimmed = line.trim_end_matches('\r');
                         if let Some(data) = trimmed

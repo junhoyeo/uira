@@ -17,6 +17,7 @@ use crate::{
 };
 
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 
 /// Google Gemini API client
 pub struct GeminiClient {
@@ -297,13 +298,18 @@ impl ModelClient for GeminiClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
         let request = self.build_request(messages, tools);
         let url = format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
+            "{}/v1beta/models/{}:generateContent",
             self.base_url(),
             self.config.model,
-            self.api_key()
         );
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -344,13 +350,18 @@ impl ModelClient for GeminiClient {
     ) -> ModelResult<ResponseStream> {
         let request = self.build_request(messages, tools);
         let url = format!(
-            "{}/v1beta/models/{}:streamGenerateContent?key={}",
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse",
             self.base_url(),
             self.config.model,
-            self.api_key()
         );
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -398,6 +409,12 @@ impl ModelClient for GeminiClient {
                 let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
                 buffer.push_str(&text);
+
+                if buffer.len() > MAX_SSE_BUFFER {
+                    Err(ProviderError::StreamError(
+                        "SSE buffer exceeded maximum size".to_string(),
+                    ))?;
+                }
 
                 while let Some(pos) = buffer.find('\n') {
                     let line = buffer[..pos].trim().to_string();

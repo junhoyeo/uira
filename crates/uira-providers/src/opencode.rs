@@ -22,6 +22,7 @@ use crate::{
 
 const OPENCODE_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 const PROVIDER_NAME: &str = "opencode";
 
 /// OpenCode Zen API client
@@ -352,14 +353,34 @@ impl ModelClient for OpenCodeClient {
                         let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
                         buffer.push_str(&text);
 
+                        if buffer.len() > MAX_SSE_BUFFER {
+                            yield Err(ProviderError::StreamError(
+                                "SSE buffer exceeded maximum size".to_string(),
+                            ));
+                            return;
+                        }
+
                         while let Some(pos) = buffer.find("\n\n") {
                             let event = buffer[..pos].to_string();
                             buffer = buffer[pos + 2..].to_string();
 
                             if let Some(chunk) = Self::parse_sse_line(&event) {
                                 let is_stop = matches!(&chunk, StreamChunk::MessageStop);
+                                let has_stop_reason = matches!(
+                                    &chunk,
+                                    StreamChunk::MessageDelta {
+                                        delta: MessageDelta {
+                                            stop_reason: Some(_)
+                                        },
+                                        ..
+                                    }
+                                );
                                 yield Ok(chunk);
                                 if is_stop {
+                                    return;
+                                }
+                                if has_stop_reason {
+                                    yield Ok(StreamChunk::MessageStop);
                                     return;
                                 }
                             }

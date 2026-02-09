@@ -10,6 +10,24 @@ use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 
 use crate::{Tool, ToolContext, ToolError};
 
+const MAX_OUTPUT_BYTES: usize = 5 * 1024 * 1024;
+
+fn truncate_output(s: &str) -> String {
+    if s.len() <= MAX_OUTPUT_BYTES {
+        return s.to_string();
+    }
+    let half = MAX_OUTPUT_BYTES / 2;
+    let prefix_end = s.ceil_char_boundary(half);
+    let suffix_start = s.floor_char_boundary(s.len() - half);
+    let omitted = s.len() - prefix_end - (s.len() - suffix_start);
+    format!(
+        "{}\n\n[...truncated {} bytes...]\n\n{}",
+        &s[..prefix_end],
+        omitted,
+        &s[suffix_start..]
+    )
+}
+
 /// Input for bash tool
 #[derive(Debug, Deserialize)]
 struct BashInput {
@@ -216,8 +234,8 @@ impl BashTool {
 
         match result {
             Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
+                let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
                 let exit_code = output.status.code().unwrap_or(-1);
 
                 let bash_output = BashOutput {
@@ -271,8 +289,8 @@ impl BashTool {
 
         match result {
             Ok(Ok(Ok(output))) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
+                let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
                 let exit_code = output.status.code().unwrap_or(-1);
 
                 let bash_output = BashOutput {

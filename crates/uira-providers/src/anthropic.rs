@@ -22,6 +22,7 @@ use crate::{
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024; // 10MB SSE buffer cap
 const PROVIDER_NAME: &str = "anthropic";
 /// Buffer time before token expiration to trigger refresh (5 minutes)
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
@@ -214,6 +215,11 @@ impl AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
+                });
+            }
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::Configuration(format!(
                 "Token refresh failed ({}): {}",
@@ -639,8 +645,13 @@ impl ModelClient for AnthropicClient {
                 let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
                 let text = text.replace("\r\n", "\n");
-                tracing::debug!("SSE raw chunk: {:?}", text);
                 buffer.push_str(&text);
+
+                if buffer.len() > MAX_SSE_BUFFER {
+                    Err(ProviderError::StreamError(
+                        "SSE buffer exceeded maximum size".to_string(),
+                    ))?;
+                }
 
                 // Process complete SSE events (separated by double newline)
                 while let Some(pos) = buffer.find("\n\n") {

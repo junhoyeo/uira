@@ -347,11 +347,14 @@ impl LspClientImpl {
 
             let mut proc = process.lock().await;
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            let message = tokio::time::timeout(remaining, Self::read_framed_message(&mut proc))
-                .await
-                .map_err(|_| ToolError::ExecutionFailed {
-                    message: "Timed out waiting for diagnostics notification".to_string(),
-                })??;
+            let message =
+                match tokio::time::timeout(remaining, Self::read_framed_message(&mut proc)).await {
+                    Ok(Ok(msg)) => msg,
+                    // Timeout expired: no more diagnostics, return what we have (or empty)
+                    Ok(Err(_)) | Err(_) => {
+                        return Ok(proc.diagnostics.get(file_uri).cloned().unwrap_or_default());
+                    }
+                };
             if let Some(method) = message.get("method").and_then(Value::as_str) {
                 if method == "textDocument/publishDiagnostics" {
                     Self::store_diagnostics(&mut proc, &message);
