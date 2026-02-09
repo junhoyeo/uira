@@ -7,6 +7,22 @@ use mock_client::MockModelClient;
 use std::sync::Arc;
 use uira_agent::{Agent, AgentConfig, AgentLoopError};
 use uira_protocol::{AgentState, ContentBlock, Message, ThreadEvent};
+use uira_tools::AgentExecutor;
+
+struct MockSubagentExecutor;
+
+#[async_trait::async_trait]
+impl AgentExecutor for MockSubagentExecutor {
+    async fn execute(
+        &self,
+        _prompt: &str,
+        _model: &str,
+        _allowed_tools: Option<Vec<String>>,
+        _max_turns: Option<usize>,
+    ) -> Result<String, String> {
+        Ok("mock subagent result".to_string())
+    }
+}
 
 fn make_config() -> AgentConfig {
     AgentConfig::default().full_auto()
@@ -110,6 +126,97 @@ async fn test_events() {
     assert!(events
         .iter()
         .any(|e| matches!(e, ThreadEvent::ThreadCompleted { .. })));
+}
+
+#[tokio::test]
+async fn test_todo_write_emits_todo_updated_event() {
+    let client = Arc::new(MockModelClient::new());
+    client.queue_tool_call(
+        "tc_1",
+        "TodoWrite",
+        serde_json::json!({
+            "todos": [
+                {
+                    "id": "1",
+                    "content": "Write regression test",
+                    "status": "in_progress",
+                    "priority": "high"
+                }
+            ]
+        }),
+    );
+    client.queue_text("Updated");
+
+    let (mut agent, event_stream) = Agent::new(make_config(), client).with_event_stream();
+
+    let events_handle = tokio::spawn(async move {
+        let mut events = Vec::new();
+        let mut stream = std::pin::pin!(event_stream);
+        while let Some(event) = stream.next().await {
+            events.push(event);
+        }
+        events
+    });
+
+    let _ = agent.run("update todo list").await.unwrap();
+    drop(agent);
+
+    let events = events_handle.await.unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ThreadEvent::TodoUpdated { todos }
+                if todos.len() == 1
+                    && todos[0].id == "1"
+                    && todos[0].content == "Write regression test"
+        )
+    }));
+}
+
+#[tokio::test]
+async fn test_delegate_task_emits_background_spawned_event() {
+    let client = Arc::new(MockModelClient::new());
+    client.queue_tool_call(
+        "tc_1",
+        "delegate_task",
+        serde_json::json!({
+            "agent": "explore",
+            "prompt": "scan rust files",
+            "description": "Scan Rust files",
+            "runInBackground": true
+        }),
+    );
+    client.queue_text("Started");
+
+    let executor = Arc::new(MockSubagentExecutor);
+    let (mut agent, event_stream) =
+        Agent::new_with_executor(make_config(), client, Some(executor)).with_event_stream();
+
+    let events_handle = tokio::spawn(async move {
+        let mut events = Vec::new();
+        let mut stream = std::pin::pin!(event_stream);
+        while let Some(event) = stream.next().await {
+            events.push(event);
+        }
+        events
+    });
+
+    let _ = agent.run("start background task").await.unwrap();
+    drop(agent);
+
+    let events = events_handle.await.unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            ThreadEvent::BackgroundTaskSpawned {
+                task_id,
+                description,
+                agent,
+            } if task_id.starts_with("bg_")
+                && description == "Scan Rust files"
+                && agent == "explore"
+        )
+    }));
 }
 
 #[tokio::test]
