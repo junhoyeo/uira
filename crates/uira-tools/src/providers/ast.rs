@@ -1,17 +1,293 @@
-//! AST tool provider - stub implementation for future tree-sitter integration
+//! AST tool provider - ast-grep based code search and replace
 
 use crate::provider::ToolProvider;
 use crate::{ToolContext, ToolError};
+use ast_grep_language::{LanguageExt, SupportLang};
 use async_trait::async_trait;
-use serde_json::Value;
+use glob::glob;
+use serde_json::{json, Value};
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
 use uira_protocol::{JsonSchema, ToolOutput, ToolSpec};
+use walkdir::WalkDir;
 
-/// Provider for AST-based code manipulation tools
+fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "typescript" | "tsx" => &["ts", "tsx", "mts", "cts"],
+        "javascript" | "jsx" => &["js", "jsx", "mjs", "cjs"],
+        "python" => &["py", "pyi"],
+        "rust" => &["rs"],
+        "go" => &["go"],
+        "java" => &["java"],
+        "c" => &["c", "h"],
+        "cpp" => &["cpp", "hpp", "cc", "cxx", "c++", "h++"],
+        "ruby" => &["rb", "rake"],
+        "swift" => &["swift"],
+        "kotlin" => &["kt", "kts"],
+        "css" => &["css"],
+        "html" => &["html", "htm"],
+        "json" => &["json"],
+        "yaml" => &["yaml", "yml"],
+        "bash" => &["sh", "bash"],
+        _ => &[],
+    }
+}
+
 pub struct AstToolProvider;
 
 impl AstToolProvider {
     pub fn new() -> Self {
         Self
+    }
+
+    fn collect_files(
+        &self,
+        root_path: &PathBuf,
+        args: &Value,
+        lang: &str,
+    ) -> Result<Vec<PathBuf>, ToolError> {
+        let extensions = get_extensions_for_lang(lang);
+        let mut files = Vec::new();
+        let mut seen = HashSet::new();
+
+        if let Some(paths) = args["paths"].as_array() {
+            for path in paths {
+                if let Some(p) = path.as_str() {
+                    let full_path = root_path.join(p);
+                    if full_path.is_file() && seen.insert(full_path.clone()) {
+                        files.push(full_path);
+                    } else if full_path.is_dir() {
+                        Self::walk_dir(&full_path, extensions, &mut files, &mut seen);
+                    }
+                }
+            }
+        }
+
+        if let Some(globs) = args["globs"].as_array() {
+            for g in globs {
+                if let Some(pattern) = g.as_str() {
+                    let full_pattern = root_path.join(pattern);
+                    if let Ok(entries) = glob(full_pattern.to_string_lossy().as_ref()) {
+                        for entry in entries.flatten() {
+                            if entry.is_file() && seen.insert(entry.clone()) {
+                                files.push(entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if files.is_empty() {
+            Self::walk_dir(root_path, extensions, &mut files, &mut seen);
+        }
+
+        Ok(files)
+    }
+
+    fn walk_dir(
+        dir: &PathBuf,
+        extensions: &[&str],
+        files: &mut Vec<PathBuf>,
+        seen: &mut HashSet<PathBuf>,
+    ) {
+        for entry in WalkDir::new(dir)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                !name.starts_with('.') && name != "node_modules" && name != "target"
+            })
+            .flatten()
+        {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if extensions.contains(&ext) && seen.insert(path.to_path_buf()) {
+                        files.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+
+    fn ast_search(&self, root_path: &PathBuf, input: &Value) -> Result<ToolOutput, ToolError> {
+        let pattern = input["pattern"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'pattern' parameter".to_string(),
+            })?;
+
+        let lang_str = input["lang"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'lang' parameter".to_string(),
+            })?;
+
+        let context_lines = input["context"].as_u64().unwrap_or(0) as usize;
+
+        let lang: SupportLang = lang_str.parse().map_err(|_| ToolError::ExecutionFailed {
+            message: format!("Unsupported language: {}", lang_str),
+        })?;
+
+        let files = self.collect_files(root_path, input, lang_str)?;
+        let mut results = Vec::new();
+
+        for file_path in files {
+            let content = match fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let grep = lang.ast_grep(&content);
+            let root = grep.root();
+
+            for m in root.find_all(pattern) {
+                let node = m.get_node();
+                let start = node.start_pos();
+                let end = node.end_pos();
+                let matched_text = node.text().to_string();
+                let start_line = start.line();
+                let end_line = end.line();
+
+                let mut result = json!({
+                    "file": file_path.to_string_lossy(),
+                    "start": { "line": start_line + 1, "column": start.column(node) + 1 },
+                    "end": { "line": end_line + 1, "column": end.column(node) + 1 },
+                    "text": matched_text,
+                });
+
+                if context_lines > 0 {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let ctx_start = start_line.saturating_sub(context_lines);
+                    let ctx_end = (end_line + context_lines + 1).min(lines.len());
+                    let context: Vec<String> = lines[ctx_start..ctx_end]
+                        .iter()
+                        .enumerate()
+                        .map(|(i, line)| format!("{:4}| {}", ctx_start + i + 1, line))
+                        .collect();
+                    result["context"] = json!(context.join("\n"));
+                }
+
+                results.push(result);
+            }
+        }
+
+        if results.is_empty() {
+            Ok(ToolOutput::text("No matches found"))
+        } else {
+            Ok(ToolOutput::text(
+                serde_json::to_string_pretty(&results).unwrap_or_default(),
+            ))
+        }
+    }
+
+    fn ast_replace(&self, root_path: &PathBuf, input: &Value) -> Result<ToolOutput, ToolError> {
+        let pattern = input["pattern"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'pattern' parameter".to_string(),
+            })?;
+
+        let rewrite = input["rewrite"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'rewrite' parameter".to_string(),
+            })?;
+
+        let lang_str = input["lang"]
+            .as_str()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'lang' parameter".to_string(),
+            })?;
+
+        let dry_run = input["dryRun"].as_bool().unwrap_or(true);
+
+        let lang: SupportLang = lang_str.parse().map_err(|_| ToolError::ExecutionFailed {
+            message: format!("Unsupported language: {}", lang_str),
+        })?;
+
+        let files = self.collect_files(root_path, input, lang_str)?;
+        let mut results = Vec::new();
+        let mut files_modified = 0;
+
+        for file_path in files {
+            let content = match fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let grep = lang.ast_grep(&content);
+            let root = grep.root();
+            let matches: Vec<_> = root.find_all(pattern).collect();
+
+            if matches.is_empty() {
+                continue;
+            }
+
+            let mut new_content = content.clone();
+            let mut offset: i64 = 0;
+
+            for m in &matches {
+                let node = m.get_node();
+                let edit = m.replace_by(rewrite);
+                let inserted = String::from_utf8_lossy(&edit.inserted_text);
+                let start_byte = (edit.position as i64 + offset) as usize;
+                let end_byte = start_byte + edit.deleted_length;
+
+                let before = &new_content[..start_byte];
+                let after = &new_content[end_byte..];
+                new_content = format!("{}{}{}", before, inserted, after);
+
+                offset += edit.inserted_text.len() as i64 - edit.deleted_length as i64;
+
+                let pos = node.start_pos();
+                results.push(json!({
+                    "file": file_path.to_string_lossy(),
+                    "line": pos.line() + 1,
+                    "original": node.text(),
+                    "replacement": inserted,
+                }));
+            }
+
+            if !dry_run {
+                fs::write(&file_path, &new_content).map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to write {}: {}", file_path.display(), e),
+                })?;
+                files_modified += 1;
+            }
+        }
+
+        if results.is_empty() {
+            return Ok(ToolOutput::text("No matches found for replacement"));
+        }
+
+        let summary = if dry_run {
+            format!(
+                "[DRY RUN] {} replacements in {} files",
+                results.len(),
+                results
+                    .iter()
+                    .map(|r| r["file"].as_str().unwrap_or(""))
+                    .collect::<HashSet<_>>()
+                    .len()
+            )
+        } else {
+            format!(
+                "Applied {} replacements in {} files",
+                results.len(),
+                files_modified
+            )
+        };
+
+        let output = json!({
+            "summary": summary,
+            "replacements": results,
+        });
+
+        Ok(ToolOutput::text(
+            serde_json::to_string_pretty(&output).unwrap_or_default(),
+        ))
     }
 }
 
@@ -27,44 +303,66 @@ impl ToolProvider for AstToolProvider {
         vec![
             ToolSpec::new(
                 "ast_search",
-                "Search code using AST patterns (tree-sitter)",
+                "Search code using AST patterns with ast-grep",
                 JsonSchema::object()
                     .property(
                         "pattern",
-                        JsonSchema::string().description("Tree-sitter query pattern"),
+                        JsonSchema::string().description("AST pattern to search for"),
                     )
                     .property(
-                        "filePath",
-                        JsonSchema::string().description("Optional file path to search in"),
+                        "lang",
+                        JsonSchema::string().description(
+                            "Programming language (rust, typescript, javascript, python, go, etc.)",
+                        ),
                     )
                     .property(
-                        "language",
-                        JsonSchema::string()
-                            .description("Programming language (rust, typescript, etc.)"),
+                        "paths",
+                        JsonSchema::array(JsonSchema::string())
+                            .description("Optional paths to search in"),
                     )
-                    .required(&["pattern", "language"]),
+                    .property(
+                        "globs",
+                        JsonSchema::array(JsonSchema::string())
+                            .description("Optional glob patterns"),
+                    )
+                    .property(
+                        "context",
+                        JsonSchema::number().description("Number of context lines to include"),
+                    )
+                    .required(&["pattern", "lang"]),
             ),
             ToolSpec::new(
                 "ast_replace",
-                "Replace code using AST transformations",
+                "Replace code using AST patterns with ast-grep",
                 JsonSchema::object()
                     .property(
-                        "filePath",
-                        JsonSchema::string().description("Path to the file"),
-                    )
-                    .property(
                         "pattern",
-                        JsonSchema::string().description("Tree-sitter query pattern to match"),
+                        JsonSchema::string().description("AST pattern to match"),
                     )
                     .property(
-                        "replacement",
-                        JsonSchema::string().description("Replacement code"),
+                        "rewrite",
+                        JsonSchema::string().description("Replacement pattern"),
                     )
                     .property(
-                        "language",
+                        "lang",
                         JsonSchema::string().description("Programming language"),
                     )
-                    .required(&["filePath", "pattern", "replacement", "language"]),
+                    .property(
+                        "paths",
+                        JsonSchema::array(JsonSchema::string())
+                            .description("Optional paths to search in"),
+                    )
+                    .property(
+                        "globs",
+                        JsonSchema::array(JsonSchema::string())
+                            .description("Optional glob patterns"),
+                    )
+                    .property(
+                        "dryRun",
+                        JsonSchema::boolean()
+                            .description("If true (default), only show what would change"),
+                    )
+                    .required(&["pattern", "rewrite", "lang"]),
             ),
         ]
     }
@@ -76,13 +374,18 @@ impl ToolProvider for AstToolProvider {
     async fn execute(
         &self,
         name: &str,
-        _input: Value,
-        _ctx: &ToolContext,
+        input: Value,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
-        // Stub implementation - will be implemented with tree-sitter integration
-        Err(ToolError::NotImplemented {
-            name: name.to_string(),
-        })
+        let root_path = ctx.cwd.clone();
+
+        match name {
+            "ast_search" => self.ast_search(&root_path, &input),
+            "ast_replace" => self.ast_replace(&root_path, &input),
+            _ => Err(ToolError::NotFound {
+                name: name.to_string(),
+            }),
+        }
     }
 }
 
@@ -108,13 +411,13 @@ mod tests {
         assert!(specs.iter().any(|s| s.name == "ast_replace"));
     }
 
-    #[tokio::test]
-    async fn test_ast_provider_not_implemented() {
-        let provider = AstToolProvider::new();
-        let ctx = ToolContext::default();
-        let result = provider
-            .execute("ast_search", serde_json::json!({}), &ctx)
-            .await;
-        assert!(matches!(result, Err(ToolError::NotImplemented { .. })));
+    #[test]
+    fn test_get_extensions() {
+        assert_eq!(get_extensions_for_lang("rust"), &["rs"]);
+        assert_eq!(
+            get_extensions_for_lang("typescript"),
+            &["ts", "tsx", "mts", "cts"]
+        );
+        assert_eq!(get_extensions_for_lang("unknown"), &[] as &[&str]);
     }
 }

@@ -121,27 +121,37 @@ impl LspClientImpl {
         // Read response
         if let Some(stdout) = proc.child.stdout.as_mut() {
             let mut reader = BufReader::new(stdout);
-            let mut header = String::new();
+            let mut content_length: Option<usize> = None;
 
-            // Read Content-Length header
-            reader
-                .read_line(&mut header)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to read LSP response: {}", e),
-                })?;
+            // Read headers until empty line (LSP uses HTTP-like headers)
+            loop {
+                let mut header = String::new();
+                reader
+                    .read_line(&mut header)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        message: format!("Failed to read LSP response header: {}", e),
+                    })?;
 
-            let content_length = header
-                .trim()
-                .strip_prefix("Content-Length: ")
-                .and_then(|s| s.parse::<usize>().ok())
-                .ok_or_else(|| ToolError::ExecutionFailed {
-                    message: "Invalid Content-Length header".to_string(),
-                })?;
+                let trimmed = header.trim();
 
-            // Skip empty line
-            let mut empty = String::new();
-            reader.read_line(&mut empty).await.ok();
+                // Empty line signals end of headers
+                if trimmed.is_empty() {
+                    break;
+                }
+
+                // Parse Content-Length header (case-insensitive)
+                if let Some(len_str) = trimmed
+                    .strip_prefix("Content-Length:")
+                    .or_else(|| trimmed.strip_prefix("content-length:"))
+                {
+                    content_length = len_str.trim().parse().ok();
+                }
+            }
+
+            let content_length = content_length.ok_or_else(|| ToolError::ExecutionFailed {
+                message: "Missing Content-Length header in LSP response".to_string(),
+            })?;
 
             // Read content
             let mut buffer = vec![0; content_length];
