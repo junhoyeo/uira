@@ -4,7 +4,7 @@ pub mod hooks;
 pub mod registry;
 pub mod types;
 
-pub use adapter::{create_legacy_adapter, LegacyHookAdapter};
+pub use adapter::{create_hook_event_adapter, HookEventAdapter};
 pub use hook::{Hook, HookContext, HookResult};
 pub use hooks::{
     agent_usage_reminder::{
@@ -43,7 +43,6 @@ pub use hooks::{
     ultraqa::{UltraQAExitReason, UltraQAGoalType, UltraQAHook, UltraQAResult, UltraQAState},
     ultrawork::{UltraworkHook, UltraworkState},
 };
-#[allow(deprecated)]
 pub use registry::{default_hooks, HookRegistry};
 pub use types::{HookEvent, HookInput, HookOutput, HookType};
 

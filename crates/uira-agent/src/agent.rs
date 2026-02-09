@@ -122,7 +122,7 @@ impl Agent {
         self
     }
 
-    /// Attach an EventSystem which includes EventBus and LegacyHookAdapter
+    /// Attach an EventSystem which includes EventBus and HookEventAdapter
     ///
     /// This is the recommended way to integrate the new event system.
     /// The EventSystem must be started separately after calling this method.
