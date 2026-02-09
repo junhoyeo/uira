@@ -56,6 +56,7 @@ enum QueuedMessagePriority {
 #[derive(Debug, Clone)]
 struct QueuedMessage {
     content: String,
+    images: Vec<PendingImage>,
     priority: QueuedMessagePriority,
     queued_at: SystemTime,
 }
@@ -113,16 +114,23 @@ impl ReviewTarget {
     }
 }
 
-fn parse_review_target(arguments: &[&str]) -> ReviewTarget {
+fn parse_review_target(arguments: &[&str]) -> Result<ReviewTarget, String> {
     if arguments.is_empty() {
-        return ReviewTarget::Staged;
+        return Ok(ReviewTarget::Staged);
     }
 
     let target = arguments.join(" ");
     if is_commit_reference(&target) {
-        ReviewTarget::Revision(target)
+        if is_valid_commit_reference(&target) {
+            Ok(ReviewTarget::Revision(target))
+        } else {
+            Err(format!(
+                "Invalid revision '{}': not a valid commit in this repository",
+                target
+            ))
+        }
     } else {
-        ReviewTarget::File(target)
+        Ok(ReviewTarget::File(target))
     }
 }
 
@@ -133,6 +141,14 @@ fn is_commit_reference(target: &str) -> bool {
         || (target.len() >= 7
             && target.len() <= 40
             && target.chars().all(|ch| ch.is_ascii_hexdigit()))
+}
+
+fn is_valid_commit_reference(target: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", "--quiet", target])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn run_git_command(args: &[&str]) -> Result<String, String> {
@@ -1457,8 +1473,10 @@ impl App {
     }
 
     fn queue_message(&mut self, content: String, priority: QueuedMessagePriority) {
+        let images = std::mem::take(&mut self.pending_images);
         self.message_queue.enqueue(QueuedMessage {
             content,
+            images,
             priority,
             queued_at: SystemTime::now(),
         });
@@ -1499,6 +1517,7 @@ impl App {
             QueuedMessagePriority::Interrupt => "interrupt",
         };
         self.status = format!("Sending {} message (queued {}s ago)...", mode, age_secs);
+        self.pending_images = queued.images;
         self.submit_input(queued.content);
         true
     }
@@ -1686,12 +1705,12 @@ impl App {
     }
 
     fn resolve_external_editor() -> Option<String> {
-        std::env::var("EDITOR")
+        std::env::var("VISUAL")
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| {
-                std::env::var("VISUAL")
+                std::env::var("EDITOR")
                     .ok()
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty())
@@ -2122,7 +2141,13 @@ impl App {
     }
 
     fn run_review_command(&mut self, args: &[&str], raw_command: &str) {
-        let target = parse_review_target(args);
+        let target = match parse_review_target(args) {
+            Ok(target) => target,
+            Err(err) => {
+                self.push_message("error", err);
+                return;
+            }
+        };
         let target_description = target.description();
 
         let (content, skipped_binary) = match collect_review_content(&target) {
@@ -2992,23 +3017,33 @@ mod tests {
 
     #[test]
     fn parse_review_target_defaults_to_staged() {
-        assert_eq!(parse_review_target(&[]), ReviewTarget::Staged);
+        assert_eq!(parse_review_target(&[]).unwrap(), ReviewTarget::Staged);
     }
 
     #[test]
     fn parse_review_target_handles_file_path() {
         assert_eq!(
-            parse_review_target(&["crates/uira-tui/src/app.rs"]),
+            parse_review_target(&["crates/uira-tui/src/app.rs"]).unwrap(),
             ReviewTarget::File("crates/uira-tui/src/app.rs".to_string())
         );
     }
 
     #[test]
     fn parse_review_target_handles_revision() {
+        if !is_valid_commit_reference("HEAD") {
+            return;
+        }
         assert_eq!(
-            parse_review_target(&["HEAD~1"]),
-            ReviewTarget::Revision("HEAD~1".to_string())
+            parse_review_target(&["HEAD"]).unwrap(),
+            ReviewTarget::Revision("HEAD".to_string())
         );
+    }
+
+    #[test]
+    fn parse_review_target_rejects_invalid_revision() {
+        let result = parse_review_target(&["abc1234abc1234"]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid revision"));
     }
 
     #[test]

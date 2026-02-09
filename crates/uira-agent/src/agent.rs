@@ -717,13 +717,73 @@ impl Agent {
         })
         .await;
 
-        self.record_message(message.clone());
+        let effective_message = self.apply_keyword_detection_to_message(message).await;
+
+        self.record_message(effective_message.clone());
         self.session
             .context
-            .add_message(message)
+            .add_message(effective_message)
             .map_err(AgentLoopError::Context)?;
 
         self.run_turn_loop().await
+    }
+
+    async fn apply_keyword_detection_to_message(&mut self, message: Message) -> Message {
+        let text_content = match &message.content {
+            MessageContent::Text(text) => Some(text.clone()),
+            MessageContent::Blocks(blocks) => {
+                let texts: Vec<String> = blocks
+                    .iter()
+                    .filter_map(|block| {
+                        if let ContentBlock::Text { text } = block {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if texts.is_empty() {
+                    None
+                } else {
+                    Some(texts.join("\n"))
+                }
+            }
+            MessageContent::ToolCalls(_) => None,
+        };
+
+        let Some(text) = text_content else {
+            return message;
+        };
+
+        let Some(keyword_msg) = self.keyword_detector.detect_and_message(&text) else {
+            return message;
+        };
+
+        self.emit_event(ThreadEvent::ContentDelta {
+            delta: format!("{}\n\n", keyword_msg),
+        })
+        .await;
+
+        match message.content {
+            MessageContent::Text(original_text) => Message {
+                role: message.role,
+                content: MessageContent::Text(format!("{}\n\n{}", keyword_msg, original_text)),
+                name: message.name,
+                tool_call_id: message.tool_call_id,
+            },
+            MessageContent::Blocks(blocks) => {
+                let mut new_blocks = Vec::with_capacity(blocks.len() + 1);
+                new_blocks.push(ContentBlock::text(format!("{}\n\n", keyword_msg)));
+                new_blocks.extend(blocks);
+                Message {
+                    role: message.role,
+                    content: MessageContent::Blocks(new_blocks),
+                    name: message.name,
+                    tool_call_id: message.tool_call_id,
+                }
+            }
+            MessageContent::ToolCalls(_) => message,
+        }
     }
 
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
