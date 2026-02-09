@@ -1024,21 +1024,25 @@ impl App {
             format!(" | {} image(s) attached", self.pending_images.len())
         };
 
-        let model_label = self.current_model.as_deref().unwrap_or("default");
+        let model_prefix = self
+            .current_model
+            .as_ref()
+            .map(|model| format!("model: {} | ", model))
+            .unwrap_or_default();
         let title = if self.approval_overlay.is_active() {
             format!(
-                " Input (model: {} | approval overlay active{}) ",
-                model_label, pending_label
+                " Input ({}approval overlay active{}) ",
+                model_prefix, pending_label
             )
         } else if self.is_agent_busy() {
             format!(
-                " Input (model: {} | Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                model_label, pending_label
+                " Input ({}Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
             )
         } else {
             format!(
-                " Input (model: {} | Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                model_label, pending_label
+                " Input ({}Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
             )
         };
 

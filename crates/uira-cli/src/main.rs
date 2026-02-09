@@ -951,7 +951,7 @@ async fn run_interactive(
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, _provider_config) =
+    let (client, provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
@@ -972,7 +972,12 @@ async fn run_interactive(
     let mut terminal = Terminal::new(backend)?;
 
     // Run TUI
-    let mut app = uira_tui::App::new();
+    let active_model_id = if provider_config.model.contains('/') {
+        provider_config.model.clone()
+    } else {
+        format!("{}/{}", provider_config.provider, provider_config.model)
+    };
+    let mut app = uira_tui::App::new().with_model(&active_model_id);
     let theme_name = uira_config
         .as_ref()
         .map(|cfg| cfg.theme.as_str())
