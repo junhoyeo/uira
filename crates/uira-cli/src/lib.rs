@@ -8,5 +8,5 @@
 pub mod commands;
 pub mod config;
 
-pub use commands::{Cli, Commands};
+pub use commands::{Cli, CliMode, Commands};
 pub use config::CliConfig;

@@ -17,10 +17,12 @@ use uira_telemetry::{init_subscriber, TelemetryConfig};
 
 mod commands;
 mod config;
+mod rpc;
 mod session;
 
 use commands::{
-    AuthCommands, Cli, Commands, ConfigCommands, GoalsCommands, SessionsCommands, TasksCommands,
+    AuthCommands, Cli, CliMode, Commands, ConfigCommands, GoalsCommands, SessionsCommands,
+    TasksCommands,
 };
 use config::CliConfig;
 use session::{
@@ -35,27 +37,31 @@ async fn main() {
     let cli = Cli::parse();
     let config = CliConfig::load();
 
-    let result = match &cli.command {
-        Some(Commands::Exec { prompt, json }) => run_exec(&cli, &config, prompt, *json).await,
-        Some(Commands::Resume {
-            session_id,
-            fork,
-            fork_at,
-        }) => run_resume(session_id.as_deref(), *fork, *fork_at).await,
-        Some(Commands::Sessions { command }) => run_sessions(command).await,
-        Some(Commands::Auth { command }) => run_auth(command, &config).await,
-        Some(Commands::Config { command }) => run_config(command, &config).await,
-        Some(Commands::Goals { command }) => run_goals(command).await,
-        Some(Commands::Tasks { command }) => run_tasks(command).await,
-        Some(Commands::Completion { shell }) => {
-            generate_completions(*shell);
-            Ok(())
-        }
-        None => {
-            if let Some(prompt) = cli.get_prompt() {
-                run_exec(&cli, &config, &prompt, false).await
-            } else {
-                run_interactive(&cli, &config).await
+    let result = if cli.mode == CliMode::Rpc {
+        run_rpc(&cli, &config).await
+    } else {
+        match &cli.command {
+            Some(Commands::Exec { prompt, json }) => run_exec(&cli, &config, prompt, *json).await,
+            Some(Commands::Resume {
+                session_id,
+                fork,
+                fork_at,
+            }) => run_resume(session_id.as_deref(), *fork, *fork_at).await,
+            Some(Commands::Sessions { command }) => run_sessions(command).await,
+            Some(Commands::Auth { command }) => run_auth(command, &config).await,
+            Some(Commands::Config { command }) => run_config(command, &config).await,
+            Some(Commands::Goals { command }) => run_goals(command).await,
+            Some(Commands::Tasks { command }) => run_tasks(command).await,
+            Some(Commands::Completion { shell }) => {
+                generate_completions(*shell);
+                Ok(())
+            }
+            None => {
+                if let Some(prompt) = cli.get_prompt() {
+                    run_exec(&cli, &config, &prompt, false).await
+                } else {
+                    run_interactive(&cli, &config).await
+                }
             }
         }
     };
@@ -64,6 +70,32 @@ async fn main() {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
     }
+}
+
+async fn run_rpc(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error::Error>> {
+    if cli.command.is_some() || cli.get_prompt().is_some() {
+        return Err("RPC mode does not support subcommands or prompt arguments".into());
+    }
+
+    let uira_config = uira_config::loader::load_config(None).ok();
+    let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
+    let agent_defs = get_agent_definitions(None);
+    let registry = ModelRegistry::new();
+    let (client, _provider_config) =
+        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+
+    let (external_mcp_servers, external_mcp_specs) =
+        prepare_external_mcp(uira_config.as_ref()).await?;
+    let agent_config = create_agent_config(
+        cli,
+        config,
+        &agent_defs,
+        uira_config.as_ref(),
+        external_mcp_servers,
+        external_mcp_specs,
+    );
+
+    rpc::run_rpc_mode(agent_config, client).await
 }
 
 async fn run_exec(
