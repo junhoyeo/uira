@@ -6,14 +6,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, RwLock};
+use tokio::time::timeout;
 
 /// Maximum Content-Length we'll accept (32MB) to prevent OOM
 const MAX_CONTENT_LENGTH: usize = 32 * 1024 * 1024;
 
 /// LSP client that communicates with language servers
+#[derive(Clone)]
 pub struct LspClientImpl {
     servers: Arc<RwLock<HashMap<String, Arc<Mutex<ServerProcess>>>>>,
     root_path: PathBuf,
@@ -25,6 +28,8 @@ struct ServerProcess {
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     _next_id: i64,
+    /// Stored diagnostics from textDocument/publishDiagnostics notifications
+    diagnostics: HashMap<String, Vec<Diagnostic>>,
 }
 
 impl LspClientImpl {
@@ -83,6 +88,7 @@ impl LspClientImpl {
             stdin,
             reader,
             _next_id: 1,
+            diagnostics: HashMap::new(),
         }));
 
         // Send initialize request
@@ -217,6 +223,130 @@ impl LspClientImpl {
             })?;
 
         Ok(())
+    }
+
+    /// Try to receive a notification from the LSP server with a timeout.
+    /// Returns Ok(Some(notification)) if a message was received,
+    /// Ok(None) if timeout expired, or Err if read failed.
+    async fn try_receive_notification(
+        &self,
+        process: &Arc<Mutex<ServerProcess>>,
+        timeout_duration: Duration,
+    ) -> Result<Option<Value>, ToolError> {
+        let result = timeout(timeout_duration, async {
+            let mut proc = process.lock().await;
+
+            let mut content_length: Option<usize> = None;
+
+            // Read headers
+            loop {
+                let mut line = String::new();
+                let n = proc.reader.read_line(&mut line).await.map_err(|e| {
+                    ToolError::ExecutionFailed {
+                        message: format!("Failed to read LSP header: {}", e),
+                    }
+                })?;
+
+                if n == 0 {
+                    return Ok(None); // EOF
+                }
+
+                let line = line.trim_end_matches(&['\r', '\n'][..]);
+                if line.is_empty() {
+                    break;
+                }
+
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.trim().eq_ignore_ascii_case("Content-Length") {
+                        content_length = value.trim().parse::<usize>().ok();
+                    }
+                }
+            }
+
+            let content_length = content_length.ok_or_else(|| ToolError::ExecutionFailed {
+                message: "Missing Content-Length in notification".to_string(),
+            })?;
+
+            if content_length > MAX_CONTENT_LENGTH {
+                return Err(ToolError::ExecutionFailed {
+                    message: format!(
+                        "Content-Length {} exceeds max {}",
+                        content_length, MAX_CONTENT_LENGTH
+                    ),
+                });
+            }
+
+            let mut buffer = vec![0; content_length];
+            tokio::io::AsyncReadExt::read_exact(&mut proc.reader, &mut buffer)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to read LSP notification content: {}", e),
+                })?;
+
+            let message: Value =
+                serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to parse LSP notification: {}", e),
+                })?;
+
+            Ok(Some(message))
+        })
+        .await;
+
+        match result {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(None), // Timeout
+        }
+    }
+
+    /// Poll for diagnostics notifications after sending didOpen
+    async fn poll_for_diagnostics(
+        &self,
+        process: &Arc<Mutex<ServerProcess>>,
+        file_uri: &str,
+        max_wait: Duration,
+    ) -> Result<Vec<Diagnostic>, ToolError> {
+        let start = tokio::time::Instant::now();
+        let mut all_diagnostics = Vec::new();
+
+        while start.elapsed() < max_wait {
+            let remaining = max_wait - start.elapsed();
+            if let Some(notification) = self.try_receive_notification(process, remaining).await? {
+                // Check if this is a publishDiagnostics notification
+                if notification["method"] == "textDocument/publishDiagnostics" {
+                    if let Some(params) = notification["params"].as_object() {
+                        if let Some(uri) = params["uri"].as_str() {
+                            if uri == file_uri {
+                                // Extract diagnostics for our file
+                                if let Some(diagnostics) = params["diagnostics"].as_array() {
+                                    for d in diagnostics {
+                                        if let Ok(diag) =
+                                            serde_json::from_value::<Diagnostic>(d.clone())
+                                        {
+                                            all_diagnostics.push(diag);
+                                        }
+                                    }
+                                }
+                            }
+                            // Store in server's diagnostics map
+                            let mut proc = process.lock().await;
+                            let diags: Vec<Diagnostic> = params["diagnostics"]
+                                .as_array()
+                                .unwrap_or(&Vec::new())
+                                .iter()
+                                .filter_map(|d| serde_json::from_value(d.clone()).ok())
+                                .collect();
+                            proc.diagnostics.insert(uri.to_string(), diags);
+                        }
+                    }
+                }
+            } else {
+                // No more messages or timeout
+                break;
+            }
+        }
+
+        Ok(all_diagnostics)
     }
 
     fn detect_language(&self, file_path: &str) -> Option<String> {
@@ -434,11 +564,37 @@ impl LspClient for LspClientImpl {
 
         self.send_notification(&server, notification).await?;
 
-        // Note: In a real implementation, we'd wait for publishDiagnostics notifications
-        // For now, returning a placeholder
-        Ok(ToolOutput::text(
-            "Diagnostics requested. Language server will publish diagnostics asynchronously.",
-        ))
+        // Wait for publishDiagnostics notifications from the server
+        let file_uri = format!("file://{}", file_path);
+        let diagnostics = self
+            .poll_for_diagnostics(&server, &file_uri, Duration::from_secs(2))
+            .await?;
+
+        if diagnostics.is_empty() {
+            Ok(ToolOutput::text("No diagnostics found for this file."))
+        } else {
+            let diagnostic_text: Vec<String> = diagnostics
+                .iter()
+                .map(|d| {
+                    let line = d.range.start.line + 1;
+                    let character = d.range.start.character;
+                    let severity = match d.severity {
+                        Some(DiagnosticSeverity::ERROR) => "ERROR",
+                        Some(DiagnosticSeverity::WARNING) => "WARNING",
+                        Some(DiagnosticSeverity::INFORMATION) => "INFO",
+                        Some(DiagnosticSeverity::HINT) => "HINT",
+                        _ => "UNKNOWN",
+                    };
+                    let message = d.message.replace('\n', " ");
+                    format!(
+                        "[{}] Line {}, Col {}: {}",
+                        severity, line, character, message
+                    )
+                })
+                .collect();
+
+            Ok(ToolOutput::text(diagnostic_text.join("\n")))
+        }
     }
 
     async fn prepare_rename(&self, params: Value) -> Result<ToolOutput, ToolError> {

@@ -39,9 +39,9 @@ impl LspToolProvider {
     /// Get or initialize the LSP client
     async fn get_client(&self, ctx: &ToolContext) -> Result<LspClientImpl, ToolError> {
         let read_lock = self.client.read().await;
-        if read_lock.is_some() {
-            // Clone the client (it's cheap since it uses Arc internally)
-            return Ok(LspClientImpl::new(ctx.cwd.clone()));
+        if let Some(client) = read_lock.as_ref() {
+            // Clone the cached client (it's cheap since it uses Arc internally)
+            return Ok(client.clone());
         }
         drop(read_lock);
 
@@ -52,7 +52,7 @@ impl LspToolProvider {
             *write_lock = Some(client);
         }
 
-        Ok(LspClientImpl::new(ctx.cwd.clone()))
+        Ok(write_lock.as_ref().unwrap().clone())
     }
 }
 
