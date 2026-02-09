@@ -1673,7 +1673,40 @@ impl App {
         KeyAction::None
     }
 
+    fn command_exists(command: &str) -> bool {
+        if command.contains(std::path::MAIN_SEPARATOR) {
+            return Path::new(command).is_file();
+        }
+
+        let Some(paths) = std::env::var_os("PATH") else {
+            return false;
+        };
+
+        std::env::split_paths(&paths).any(|path| path.join(command).is_file())
+    }
+
+    fn resolve_external_editor() -> Option<String> {
+        std::env::var("EDITOR")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                std::env::var("VISUAL")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .or_else(|| {
+                ["vim", "nano"]
+                    .into_iter()
+                    .find(|command| Self::command_exists(command))
+                    .map(str::to_string)
+            })
+    }
+
     fn open_external_editor(&mut self) {
+        let original_input = self.input.clone();
+
         let mut temp_file = match tempfile::NamedTempFile::new() {
             Ok(file) => file,
             Err(error) => {
@@ -1687,26 +1720,79 @@ impl App {
             return;
         }
 
-        let editor = std::env::var("UIRA_EDITOR")
-            .or_else(|_| std::env::var("VISUAL"))
-            .or_else(|_| std::env::var("EDITOR"))
-            .unwrap_or_else(|_| "vi".to_string());
+        let temp_path = temp_file.into_temp_path();
 
-        if let Err(error) = Self::run_editor_command(&editor, temp_file.path()) {
-            self.status = format!("External editor failed: {}", error);
+        let editor = match Self::resolve_external_editor() {
+            Some(editor) => editor,
+            None => {
+                self.status =
+                    "No external editor found. Set $EDITOR/$VISUAL or install vim/nano".to_string();
+                return;
+            }
+        };
+
+        if let Err(error) = Self::suspend_terminal_for_external_editor() {
+            self.status = format!("Failed to suspend terminal for editor: {}", error);
             return;
         }
 
-        match std::fs::read_to_string(temp_file.path()) {
+        let editor_result = Self::run_editor_command(&editor, &temp_path);
+        let restore_result = Self::restore_terminal_after_external_editor();
+
+        if let Err(error) = restore_result {
+            self.status = format!("Failed to restore terminal after editor: {}", error);
+            self.should_quit = true;
+            return;
+        }
+
+        if let Err(error) = editor_result {
+            self.input = original_input;
+            self.cursor_pos = self.input.chars().count();
+            self.status = match error.kind() {
+                std::io::ErrorKind::Interrupted => "External editor cancelled".to_string(),
+                _ => format!("External editor failed: {}", error),
+            };
+            return;
+        }
+
+        match std::fs::read_to_string(&temp_path) {
             Ok(content) => {
-                self.input = content.trim_end_matches('\n').to_string();
+                self.input = content;
                 self.cursor_pos = self.input.chars().count();
                 self.status = "Input updated from external editor".to_string();
             }
             Err(error) => {
+                self.input = original_input;
+                self.cursor_pos = self.input.chars().count();
                 self.status = format!("Failed to read editor output: {}", error);
             }
         }
+    }
+
+    fn suspend_terminal_for_external_editor() -> std::io::Result<()> {
+        crossterm::terminal::disable_raw_mode()?;
+
+        let mut stdout = std::io::stdout();
+        if let Err(error) = crossterm::execute!(stdout, crossterm::terminal::LeaveAlternateScreen) {
+            let _ = crossterm::terminal::enable_raw_mode();
+            return Err(error);
+        }
+
+        stdout.flush()?;
+        Ok(())
+    }
+
+    fn restore_terminal_after_external_editor() -> std::io::Result<()> {
+        crossterm::terminal::enable_raw_mode()?;
+
+        let mut stdout = std::io::stdout();
+        if let Err(error) = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen) {
+            let _ = crossterm::terminal::disable_raw_mode();
+            return Err(error);
+        }
+
+        stdout.flush()?;
+        Ok(())
     }
 
     fn run_editor_command(editor: &str, path: &Path) -> std::io::Result<()> {
@@ -1725,6 +1811,11 @@ impl App {
 
         if status.success() {
             Ok(())
+        } else if status.code() == Some(130) {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "Editor cancelled",
+            ))
         } else {
             Err(std::io::Error::other(format!(
                 "Editor command exited with status {}",
