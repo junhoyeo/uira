@@ -79,6 +79,13 @@ This document provides context for AI agents working on the Uira codebase.
 
 ## Coding Conventions
 
+## Runtime Defaults
+
+- Permissions should be allow-by-default when no explicit rule matches.
+- TUI input footer should show the active model so users always see current routing.
+- TUI todo sidebar should be visible by default when todo items exist.
+- TUI chat/tool output should append chronologically and keep newest entries at the bottom.
+
 ### Rust Style
 
 - Follow standard Rust conventions (rustfmt)
@@ -162,4 +169,7 @@ cargo fmt --all -- --check
 
 # Run linter
 cargo clippy --workspace -- -D warnings
+
+# Run tmux-based TUI smoke checks
+scripts/tui_smoke_tmux.sh
 ```

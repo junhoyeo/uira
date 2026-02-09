@@ -1,8 +1,9 @@
 //! Main agent implementation
 
 use futures::StreamExt;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -143,6 +144,43 @@ impl Agent {
         (self, input_tx, approval_rx, command_tx)
     }
 
+    async fn handle_interactive_command(&mut self, command: AgentCommand) {
+        match command {
+            AgentCommand::Interrupt => {
+                tracing::debug!("Interrupt command ignored while waiting for input");
+            }
+            AgentCommand::SwitchClient(new_client) => {
+                let model = new_client.model().to_string();
+                let provider = new_client.provider().to_string();
+                self.session.set_client(new_client);
+                tracing::info!("Switched to {} ({})", model, provider);
+                self.emit_event(ThreadEvent::ModelSwitched { model, provider })
+                    .await;
+            }
+            AgentCommand::Fork {
+                branch_name,
+                message_count,
+                response_tx,
+            } => {
+                let result = self.handle_fork(branch_name, message_count).await;
+                let _ = response_tx.send(result);
+            }
+            AgentCommand::SwitchBranch {
+                branch_name,
+                response_tx,
+            } => {
+                let result = self.handle_switch_branch(branch_name);
+                let _ = response_tx.send(result);
+            }
+            AgentCommand::ListBranches { response_tx } => {
+                let _ = response_tx.send(Ok(self.list_branches()));
+            }
+            AgentCommand::BranchTree { response_tx } => {
+                let _ = response_tx.send(Ok(self.render_branch_tree()));
+            }
+        }
+    }
+
     pub async fn run_interactive(&mut self) -> Result<(), AgentLoopError> {
         let mut input_rx = self
             .input_rx
@@ -150,6 +188,7 @@ impl Agent {
             .ok_or_else(|| AgentLoopError::Io("No input channel configured".to_string()))?;
 
         let mut command_rx = self.command_rx.take();
+        let mut deferred_commands = VecDeque::new();
 
         self.state = AgentState::WaitingForUser;
         self.emit_event(ThreadEvent::WaitingForInput {
@@ -163,38 +202,21 @@ impl Agent {
         }
 
         loop {
+            if let Some(command) = deferred_commands.pop_front() {
+                self.handle_interactive_command(command).await;
+                continue;
+            }
+
             let input_message = tokio::select! {
-                Some(cmd) = async {
+                command = async {
                     match &mut command_rx {
                         Some(rx) => rx.recv().await,
                         None => std::future::pending().await,
                     }
                 } => {
-                    match cmd {
-                        AgentCommand::SwitchClient(new_client) => {
-                            let model = new_client.model().to_string();
-                            let provider = new_client.provider().to_string();
-                            self.session.set_client(new_client);
-                            tracing::info!("Switched to {} ({})", model, provider);
-                            self.emit_event(ThreadEvent::ModelSwitched { model, provider }).await;
-                        }
-                        AgentCommand::Fork { branch_name, message_count, response_tx } => {
-                            let result = self.handle_fork(branch_name, message_count).await;
-                            let _ = response_tx.send(result);
-                        }
-                        AgentCommand::SwitchBranch {
-                            branch_name,
-                            response_tx,
-                        } => {
-                            let result = self.handle_switch_branch(branch_name);
-                            let _ = response_tx.send(result);
-                        }
-                        AgentCommand::ListBranches { response_tx } => {
-                            let _ = response_tx.send(Ok(self.list_branches()));
-                        }
-                        AgentCommand::BranchTree { response_tx } => {
-                            let _ = response_tx.send(Ok(self.render_branch_tree()));
-                        }
+                    match command {
+                        Some(command) => self.handle_interactive_command(command).await,
+                        None => command_rx = None,
                     }
                     continue;
                 }
@@ -221,13 +243,64 @@ impl Agent {
             let mut current_input = InteractiveInput::Message(input_message);
             let mut continuation_attempts: usize = 0;
             loop {
-                let run_result = match current_input {
-                    InteractiveInput::Message(message) => match &message.content {
-                        MessageContent::Text(text) => self.run(text).await,
-                        _ => self.run_message(message).await,
-                    },
-                    InteractiveInput::Prompt(prompt) => self.run(&prompt).await,
+                self.control.clear_cancelled();
+                let cancel_signal = self.control.cancel_signal();
+                let mut pending_commands = VecDeque::new();
+
+                let run_result = {
+                    let run_future: std::pin::Pin<
+                        Box<
+                            dyn std::future::Future<
+                                    Output = Result<ExecutionResult, AgentLoopError>,
+                                > + Send
+                                + '_,
+                        >,
+                    > = match current_input {
+                        InteractiveInput::Message(message) => {
+                            if let MessageContent::Text(text) = &message.content {
+                                Box::pin(self.run_prompt_owned(text.clone()))
+                            } else {
+                                Box::pin(self.run_message(message))
+                            }
+                        }
+                        InteractiveInput::Prompt(prompt) => Box::pin(self.run_prompt_owned(prompt)),
+                    };
+                    tokio::pin!(run_future);
+
+                    loop {
+                        if let Some(command) = deferred_commands.pop_front() {
+                            match command {
+                                AgentCommand::Interrupt => {
+                                    cancel_signal.store(true, Ordering::SeqCst);
+                                }
+                                other => pending_commands.push_back(other),
+                            }
+                            continue;
+                        }
+
+                        tokio::select! {
+                            result = &mut run_future => break result,
+                            command = async {
+                                match &mut command_rx {
+                                    Some(rx) => rx.recv().await,
+                                    None => std::future::pending().await,
+                                }
+                            } => {
+                                match command {
+                                    Some(AgentCommand::Interrupt) => {
+                                        cancel_signal.store(true, Ordering::SeqCst);
+                                    }
+                                    Some(other) => pending_commands.push_back(other),
+                                    None => {
+                                        command_rx = None;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 };
+
+                deferred_commands.extend(pending_commands);
 
                 let (was_error, was_cancel) = match run_result {
                     Ok(result) => {
@@ -241,6 +314,7 @@ impl Agent {
                     Err(AgentLoopError::Cancelled) => {
                         tracing::info!("Agent cancelled");
                         self.emit_event(ThreadEvent::ThreadCancelled).await;
+                        self.control.clear_cancelled();
                         (false, true)
                     }
                     Err(e) => {
@@ -685,6 +759,13 @@ impl Agent {
         self.run_turn_loop().await
     }
 
+    async fn run_prompt_owned(
+        &mut self,
+        prompt: String,
+    ) -> Result<ExecutionResult, AgentLoopError> {
+        self.run(&prompt).await
+    }
+
     async fn run_turn_loop(&mut self) -> Result<ExecutionResult, AgentLoopError> {
         loop {
             // Check for cancellation
@@ -804,7 +885,20 @@ impl Agent {
         let mut controller = StreamController::new();
         let mut stream = std::pin::pin!(stream);
 
-        while let Some(result) = stream.next().await {
+        loop {
+            if self.control.is_cancelled() {
+                return Err(AgentLoopError::Cancelled);
+            }
+
+            let next_chunk = tokio::select! {
+                result = stream.next() => result,
+                _ = tokio::time::sleep(Duration::from_millis(50)) => continue,
+            };
+
+            let Some(result) = next_chunk else {
+                break;
+            };
+
             let chunk = result.map_err(AgentLoopError::Provider)?;
             let outputs = controller.push(chunk);
 

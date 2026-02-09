@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,6 +45,55 @@ struct PendingImage {
     media_type: String,
     data: String,
     size_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueuedMessagePriority {
+    Normal,
+    Interrupt,
+}
+
+#[derive(Debug, Clone)]
+struct QueuedMessage {
+    content: String,
+    priority: QueuedMessagePriority,
+    queued_at: SystemTime,
+}
+
+#[derive(Debug, Default)]
+struct MessageQueue {
+    messages: VecDeque<QueuedMessage>,
+}
+
+impl MessageQueue {
+    fn enqueue(&mut self, message: QueuedMessage) {
+        match message.priority {
+            QueuedMessagePriority::Normal => self.messages.push_back(message),
+            QueuedMessagePriority::Interrupt => self.messages.push_front(message),
+        }
+    }
+
+    fn dequeue(&mut self) -> Option<QueuedMessage> {
+        self.messages.pop_front()
+    }
+
+    fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.messages.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyAction {
+    None,
+    OpenExternalEditor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -594,6 +643,19 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
+fn spawn_tracing_log_handler(
+    mut tracing_rx: mpsc::UnboundedReceiver<String>,
+    event_tx: mpsc::Sender<AppEvent>,
+) {
+    tokio::spawn(async move {
+        while let Some(message) = tracing_rx.recv().await {
+            if event_tx.send(AppEvent::TracingLog(message)).await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
 pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
@@ -621,6 +683,7 @@ pub struct App {
     theme_overrides: ThemeOverrides,
     tool_call_names: HashMap<String, String>,
     pending_images: Vec<PendingImage>,
+    message_queue: MessageQueue,
 }
 
 impl App {
@@ -658,6 +721,7 @@ impl App {
             theme_overrides: ThemeOverrides::default(),
             tool_call_names: HashMap::new(),
             pending_images: Vec::new(),
+            message_queue: MessageQueue::default(),
         }
     }
 
@@ -697,7 +761,9 @@ impl App {
             // Handle events
             if event::poll(std::time::Duration::from_millis(50))? {
                 if let Event::Key(key) = event::read()? {
-                    self.handle_key_event(key);
+                    if self.handle_key_event(key) == KeyAction::OpenExternalEditor {
+                        self.open_external_editor();
+                    }
                 }
             }
 
@@ -721,6 +787,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
+        tracing_rx: Option<mpsc::UnboundedReceiver<String>>,
     ) -> std::io::Result<()> {
         let working_directory = config
             .working_directory
@@ -754,6 +821,10 @@ impl App {
 
         spawn_approval_handler(approval_rx, self.event_tx.clone());
 
+        if let Some(rx) = tracing_rx {
+            spawn_tracing_log_handler(rx, self.event_tx.clone());
+        }
+
         tokio::spawn(async move {
             if let Err(e) = agent.run_interactive().await {
                 tracing::error!("Agent error: {}", e);
@@ -766,7 +837,7 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if !self.todos.is_empty() {
+        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -931,6 +1002,15 @@ impl App {
             ));
         }
 
+        let queued = self.message_queue.len();
+        if queued > 0 {
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                format!("({} queued)", queued),
+                Style::default().fg(self.theme.warning),
+            ));
+        }
+
         let status = Paragraph::new(Line::from(spans))
             .style(Style::default().bg(self.theme.bg).fg(self.theme.fg));
 
@@ -944,12 +1024,25 @@ impl App {
             format!(" | {} image(s) attached", self.pending_images.len())
         };
 
+        let model_prefix = self
+            .current_model
+            .as_ref()
+            .map(|model| format!("model: {} | ", model))
+            .unwrap_or_default();
         let title = if self.approval_overlay.is_active() {
-            format!(" Input (approval overlay active{}) ", pending_label)
+            format!(
+                " Input ({}approval overlay active{}) ",
+                model_prefix, pending_label
+            )
+        } else if self.is_agent_busy() {
+            format!(
+                " Input ({}Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
+            )
         } else {
             format!(
-                " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                pending_label
+                " Input ({}Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
             )
         };
 
@@ -1258,12 +1351,81 @@ impl App {
         self.scroll_to_bottom();
     }
 
-    fn handle_key_event(&mut self, key: KeyEvent) {
+    fn is_agent_busy(&self) -> bool {
+        matches!(
+            self.agent_state,
+            AgentState::Thinking | AgentState::ExecutingTool | AgentState::WaitingForApproval
+        )
+    }
+
+    fn queue_message(&mut self, content: String, priority: QueuedMessagePriority) {
+        self.message_queue.enqueue(QueuedMessage {
+            content,
+            priority,
+            queued_at: SystemTime::now(),
+        });
+
+        let mode = match priority {
+            QueuedMessagePriority::Normal => "Queued message",
+            QueuedMessagePriority::Interrupt => "Queued interrupt message",
+        };
+        self.status = format!("{} ({} pending)", mode, self.message_queue.len());
+    }
+
+    fn request_interrupt(&mut self) {
+        if let Some(ref tx) = self.agent_command_tx {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if tx.send(AgentCommand::Interrupt).await.is_err() {
+                    tracing::warn!("Failed to send interrupt command");
+                }
+            });
+            self.status = "Interrupt requested...".to_string();
+        } else {
+            self.status = "Unable to interrupt: no agent command channel".to_string();
+        }
+    }
+
+    fn send_next_queued_message(&mut self) -> bool {
+        let Some(queued) = self.message_queue.dequeue() else {
+            return false;
+        };
+
+        let age_secs = queued
+            .queued_at
+            .elapsed()
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let mode = match queued.priority {
+            QueuedMessagePriority::Normal => "queued",
+            QueuedMessagePriority::Interrupt => "interrupt",
+        };
+        self.status = format!("Sending {} message (queued {}s ago)...", mode, age_secs);
+        self.submit_input(queued.content);
+        true
+    }
+
+    fn process_queued_messages(&mut self) {
+        if self.message_queue.is_empty() || self.is_agent_busy() {
+            return;
+        }
+
+        while !self.is_agent_busy() {
+            if !self.send_next_queued_message() {
+                break;
+            }
+            if self.message_queue.is_empty() {
+                break;
+            }
+        }
+    }
+
+    fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
         if self.model_selector.is_active() {
             if let Some(selected_model) = self.model_selector.handle_key(key.code) {
                 self.switch_model(&selected_model);
             }
-            return;
+            return KeyAction::None;
         }
 
         // Approval overlay takes priority for key handling
@@ -1271,7 +1433,7 @@ impl App {
             if !self.approval_overlay.is_active() {
                 self.agent_state = AgentState::Thinking;
             }
-            return;
+            return KeyAction::None;
         }
 
         // Global shortcuts
@@ -1279,12 +1441,9 @@ impl App {
             match key.code {
                 KeyCode::Char('c') | KeyCode::Char('q') => {
                     self.should_quit = true;
-                    return;
                 }
                 KeyCode::Char('l') => {
-                    // Clear screen
-                    self.messages.clear();
-                    return;
+                    self.status = "Screen refresh requested".to_string();
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -1292,21 +1451,22 @@ impl App {
                     } else {
                         self.collapse_all_tool_outputs();
                     }
-                    return;
                 }
+                KeyCode::Char('g') => return KeyAction::OpenExternalEditor,
                 _ => {}
             }
+            return KeyAction::None;
         }
 
         if key.modifiers.is_empty() && self.input.is_empty() {
             match key.code {
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
                     self.toggle_todo_sidebar();
-                    return;
+                    return KeyAction::None;
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
-                    return;
+                    return KeyAction::None;
                 }
                 _ => {}
             }
@@ -1370,13 +1530,24 @@ impl App {
                         && self.pending_images.is_empty()
                         && self.toggle_selected_tool_output()
                     {
-                        return;
+                        return KeyAction::None;
                     }
 
                     if !self.input.trim().is_empty() || !self.pending_images.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
-                        self.submit_input(input);
+
+                        if self.is_agent_busy() {
+                            if key.modifiers.contains(KeyModifiers::ALT) {
+                                self.queue_message(input, QueuedMessagePriority::Interrupt);
+                                self.request_interrupt();
+                                let _ = self.send_next_queued_message();
+                            } else {
+                                self.queue_message(input, QueuedMessagePriority::Normal);
+                            }
+                        } else {
+                            self.submit_input(input);
+                        }
                     }
                 }
                 KeyCode::Tab => {
@@ -1393,6 +1564,67 @@ impl App {
                 }
                 _ => {}
             }
+        }
+
+        KeyAction::None
+    }
+
+    fn open_external_editor(&mut self) {
+        let mut temp_file = match tempfile::NamedTempFile::new() {
+            Ok(file) => file,
+            Err(error) => {
+                self.status = format!("Failed to create temp file: {}", error);
+                return;
+            }
+        };
+
+        if let Err(error) = temp_file.write_all(self.input.as_bytes()) {
+            self.status = format!("Failed to prepare editor content: {}", error);
+            return;
+        }
+
+        let editor = std::env::var("UIRA_EDITOR")
+            .or_else(|_| std::env::var("VISUAL"))
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+
+        if let Err(error) = Self::run_editor_command(&editor, temp_file.path()) {
+            self.status = format!("External editor failed: {}", error);
+            return;
+        }
+
+        match std::fs::read_to_string(temp_file.path()) {
+            Ok(content) => {
+                self.input = content.trim_end_matches('\n').to_string();
+                self.cursor_pos = self.input.chars().count();
+                self.status = "Input updated from external editor".to_string();
+            }
+            Err(error) => {
+                self.status = format!("Failed to read editor output: {}", error);
+            }
+        }
+    }
+
+    fn run_editor_command(editor: &str, path: &Path) -> std::io::Result<()> {
+        let mut parts = editor.split_whitespace();
+        let Some(program) = parts.next() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Editor command is empty",
+            ));
+        };
+
+        let mut command = Command::new(program);
+        command.args(parts).arg(path);
+        let status = command.status()?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!(
+                "Editor command exited with status {}",
+                status
+            )))
         }
     }
 
@@ -1767,6 +1999,7 @@ impl App {
             "/clear" => {
                 self.messages.clear();
                 self.pending_images.clear();
+                self.message_queue.clear();
                 self.status = "Chat cleared".to_string();
             }
             "/image" => {
@@ -1777,6 +2010,7 @@ impl App {
                         content: "Usage: /image <path>".to_string(),
                         tool_output: None,
                     });
+                    self.scroll_to_bottom();
                     return;
                 }
 
@@ -1954,12 +2188,17 @@ impl App {
                 );
             }
         }
+
+        self.scroll_to_bottom();
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Quit => self.should_quit = true,
             AppEvent::Agent(thread_event) => self.handle_agent_event(thread_event),
+            AppEvent::TracingLog(msg) => {
+                self.push_message("error", format!("log: {}", msg));
+            }
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
             }
@@ -2001,6 +2240,11 @@ impl App {
                     "Turn {} complete ({} in / {} out tokens)",
                     turn_number, usage.input_tokens, usage.output_tokens
                 );
+            }
+            ThreadEvent::WaitingForInput { prompt } => {
+                self.agent_state = AgentState::WaitingForUser;
+                self.status = prompt;
+                self.process_queued_messages();
             }
             ThreadEvent::ContentDelta { delta } => {
                 if let Some(ref mut buffer) = self.streaming_buffer {
@@ -2578,6 +2822,23 @@ mod tests {
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
 
         assert_eq!(action, KeyAction::OpenExternalEditor);
+    }
+
+    #[test]
+    fn ctrl_l_keeps_chat_history() {
+        let mut app = App::new();
+        app.add_message("assistant", "first");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, KeyAction::None);
+        assert_eq!(app.messages.len(), 1);
+    }
+
+    #[test]
+    fn todo_sidebar_is_enabled_by_default() {
+        let app = App::new();
+        assert!(app.show_todo_sidebar);
     }
 
     #[test]

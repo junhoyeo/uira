@@ -5,6 +5,7 @@ use clap_complete::{generate, Shell};
 use colored::Colorize;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedReceiver;
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
 use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_protocol::ExecutionResult;
@@ -13,7 +14,7 @@ use uira_providers::{
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
-use uira_telemetry::{init_subscriber, TelemetryConfig};
+use uira_telemetry::{init_subscriber, init_tui_subscriber, TelemetryConfig};
 
 mod commands;
 mod config;
@@ -32,35 +33,59 @@ use session::{
 #[tokio::main]
 async fn main() {
     let telemetry_config = TelemetryConfig::default();
-    init_subscriber(&telemetry_config);
 
     let cli = Cli::parse();
     let config = CliConfig::load();
 
     let result = if cli.mode == CliMode::Rpc {
+        init_subscriber(&telemetry_config);
         run_rpc(&cli, &config).await
     } else {
         match &cli.command {
-            Some(Commands::Exec { prompt, json }) => run_exec(&cli, &config, prompt, *json).await,
+            Some(Commands::Exec { prompt, json }) => {
+                init_subscriber(&telemetry_config);
+                run_exec(&cli, &config, prompt, *json).await
+            }
             Some(Commands::Resume {
                 session_id,
                 fork,
                 fork_at,
-            }) => run_resume(session_id.as_deref(), *fork, *fork_at).await,
-            Some(Commands::Sessions { command }) => run_sessions(command).await,
-            Some(Commands::Auth { command }) => run_auth(command, &config).await,
-            Some(Commands::Config { command }) => run_config(command, &config).await,
-            Some(Commands::Goals { command }) => run_goals(command).await,
-            Some(Commands::Tasks { command }) => run_tasks(command).await,
+            }) => {
+                init_subscriber(&telemetry_config);
+                run_resume(session_id.as_deref(), *fork, *fork_at).await
+            }
+            Some(Commands::Sessions { command }) => {
+                init_subscriber(&telemetry_config);
+                run_sessions(command).await
+            }
+            Some(Commands::Auth { command }) => {
+                init_subscriber(&telemetry_config);
+                run_auth(command, &config).await
+            }
+            Some(Commands::Config { command }) => {
+                init_subscriber(&telemetry_config);
+                run_config(command, &config).await
+            }
+            Some(Commands::Goals { command }) => {
+                init_subscriber(&telemetry_config);
+                run_goals(command).await
+            }
+            Some(Commands::Tasks { command }) => {
+                init_subscriber(&telemetry_config);
+                run_tasks(command).await
+            }
             Some(Commands::Completion { shell }) => {
+                init_subscriber(&telemetry_config);
                 generate_completions(*shell);
                 Ok(())
             }
             None => {
                 if let Some(prompt) = cli.get_prompt() {
+                    init_subscriber(&telemetry_config);
                     run_exec(&cli, &config, &prompt, false).await
                 } else {
-                    run_interactive(&cli, &config).await
+                    let tracing_rx = init_tui_subscriber(&telemetry_config);
+                    run_interactive(&cli, &config, Some(tracing_rx)).await
                 }
             }
         }
@@ -909,7 +934,11 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_interactive(
+    cli: &Cli,
+    config: &CliConfig,
+    tracing_rx: Option<UnboundedReceiver<String>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::{
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -922,7 +951,7 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, _provider_config) =
+    let (client, provider_config) =
         create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
@@ -943,7 +972,12 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     let mut terminal = Terminal::new(backend)?;
 
     // Run TUI
-    let mut app = uira_tui::App::new();
+    let active_model_id = if provider_config.model.contains('/') {
+        provider_config.model.clone()
+    } else {
+        format!("{}/{}", provider_config.provider, provider_config.model)
+    };
+    let mut app = uira_tui::App::new().with_model(&active_model_id);
     let theme_name = uira_config
         .as_ref()
         .map(|cfg| cfg.theme.as_str())
@@ -956,7 +990,7 @@ async fn run_interactive(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn st
     }
 
     let result = app
-        .run_with_agent(&mut terminal, agent_config, client)
+        .run_with_agent(&mut terminal, agent_config, client, tracing_rx)
         .await;
 
     // Restore terminal

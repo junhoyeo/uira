@@ -105,6 +105,11 @@ impl AgentControl {
         self.cancelled.store(true, Ordering::SeqCst);
     }
 
+    /// Clear the cancelled state
+    pub fn clear_cancelled(&self) {
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
     /// Pause the agent
     pub fn pause(&self) {
         self.paused.store(true, Ordering::SeqCst);
@@ -166,6 +171,9 @@ mod tests {
 
         control.cancel();
         assert!(control.is_cancelled());
+
+        control.clear_cancelled();
+        assert!(!control.is_cancelled());
 
         control.pause();
         assert!(control.is_paused());
