@@ -522,14 +522,20 @@ impl ModelClient for OpenAIClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
 
             if status.as_u16() == 429 {
-                return Err(ProviderError::RateLimited {
-                    retry_after_ms: 60000,
-                });
+                // Parse Retry-After header if present, otherwise default to 60s
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
                 status, body
@@ -565,13 +571,58 @@ impl ModelClient for OpenAIClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| match result {
-            Ok(bytes) => {
+        let byte_stream = response.bytes_stream();
+        let stream = async_stream::try_stream! {
+            let mut buffer = String::new();
+            futures::pin_mut!(byte_stream);
+
+            while let Some(result) = byte_stream.next().await {
+                let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
-                Self::parse_sse_event(&text)
+                buffer.push_str(&text);
+
+                // Process complete SSE events (separated by double newline)
+                while let Some(pos) = buffer.find("\n\n") {
+                    let event_text = buffer[..pos].to_string();
+                    buffer = buffer[pos + 2..].to_string();
+
+                    // Parse each line in the event
+                    for line in event_text.lines() {
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if data == "[DONE]" {
+                                yield StreamChunk::MessageStop;
+                                return;
+                            }
+                            match serde_json::from_str::<OpenAIStreamChunk>(data) {
+                                Ok(chunk) => {
+                                    yield Self::convert_stream_chunk(chunk);
+                                }
+                                Err(e) => {
+                                    if !data.trim().is_empty() && !data.starts_with(':') {
+                                        tracing::debug!("OpenAI SSE parse error: {} for data: {}", e, data);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
-        });
+
+            // Process any remaining data in buffer
+            if !buffer.is_empty() {
+                for line in buffer.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" {
+                            yield StreamChunk::MessageStop;
+                            return;
+                        }
+                        if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
+                            yield Self::convert_stream_chunk(chunk);
+                        }
+                    }
+                }
+            }
+        };
 
         Ok(Box::pin(stream))
     }
@@ -594,27 +645,6 @@ impl ModelClient for OpenAIClient {
 }
 
 impl OpenAIClient {
-    fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with(':') {
-                continue;
-            }
-
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" {
-                    return Ok(StreamChunk::MessageStop);
-                }
-
-                if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
-                    return Ok(Self::convert_stream_chunk(chunk));
-                }
-            }
-        }
-
-        Ok(StreamChunk::Ping)
-    }
-
     fn convert_stream_chunk(chunk: OpenAIStreamChunk) -> StreamChunk {
         let choice = match chunk.choices.into_iter().next() {
             Some(c) => c,

@@ -44,11 +44,18 @@ impl LspClientImpl {
         &self,
         language: &str,
     ) -> Result<Arc<Mutex<ServerProcess>>, ToolError> {
+        // Fast path: check if server already exists
         let servers = self.servers.read().await;
         if let Some(server) = servers.get(language) {
             return Ok(Arc::clone(server));
         }
         drop(servers);
+
+        // Slow path: acquire write lock and check again (prevent race)
+        let mut servers = self.servers.write().await;
+        if let Some(server) = servers.get(language) {
+            return Ok(Arc::clone(server));
+        }
 
         // Start new server
         let server_config = super::servers::get_server_config(language).ok_or_else(|| {
@@ -94,7 +101,6 @@ impl LspClientImpl {
         // Send initialize request
         self.send_initialize(&process).await?;
 
-        let mut servers = self.servers.write().await;
         servers.insert(language.to_string(), Arc::clone(&process));
 
         Ok(process)

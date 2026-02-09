@@ -539,14 +539,20 @@ impl ModelClient for AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
 
             if status.as_u16() == 429 {
-                return Err(ProviderError::RateLimited {
-                    retry_after_ms: 60000,
-                });
+                // Parse Retry-After header if present, otherwise default to 60s
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
                 status, body
