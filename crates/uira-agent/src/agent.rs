@@ -1435,8 +1435,11 @@ impl Agent {
             approved_calls.push((call.id.clone(), call.name.clone(), call.input.clone()));
         }
 
-        // Phase 2: Emit tool start events (must be sequential for proper ordering)
+        // Phase 2: Emit tool start events and build call_id->name mapping
+        let mut call_id_to_name: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for (id, name, input) in &approved_calls {
+            call_id_to_name.insert(id.clone(), name.clone());
             self.record_tool_call(id, name, input);
             self.emit_event(ThreadEvent::ItemStarted {
                 item: Item::ToolCall {
@@ -1459,7 +1462,9 @@ impl Agent {
             .await;
 
         // Phase 4: Process results and emit events (must be sequential)
+        let mut todo_updated = false;
         for (call_id, result) in execution_results {
+            let tool_name = call_id_to_name.get(&call_id).map(|s| s.as_str());
             match result {
                 Ok(output) => {
                     let content = output.as_text().unwrap_or("").to_string();
@@ -1478,6 +1483,10 @@ impl Agent {
                         },
                     })
                     .await;
+
+                    if tool_name == Some("TodoWrite") {
+                        todo_updated = true;
+                    }
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -1494,6 +1503,16 @@ impl Agent {
                     .await;
                 }
             }
+        }
+
+        // Phase 5: Emit TodoUpdated event for TUI sidebar
+        if todo_updated {
+            let todos = self
+                .session
+                .todo_store
+                .get(&self.session.id.to_string())
+                .await;
+            self.emit_event(ThreadEvent::TodoUpdated { todos }).await;
         }
 
         Ok(results)
