@@ -99,6 +99,9 @@ Credentials are securely stored in `~/.uira/credentials/`.
 | `/switch <branch>` | Switch to another session branch |
 | `/branches` | List available session branches |
 | `/tree` | Show session branch tree |
+| `/review` | Review staged changes |
+| `/review <file>` | Review changes for a specific file |
+| `/review HEAD~1` | Review a specific commit |
 | `/theme` | List available TUI themes |
 | `/theme <name>` | Switch TUI theme |
 | `/share [--public] [--description <text>]` | Share current session as a GitHub Gist |
@@ -113,6 +116,7 @@ Credentials are securely stored in `~/.uira/credentials/`.
 | `Enter` | Send message |
 | `↑` / `↓` | Scroll through messages |
 | `←` / `→` | Move cursor in input |
+| `Ctrl+G` | Open external editor for composing input |
 | `Ctrl+C` | Quit |
 | `Ctrl+L` | Clear screen |
 | `Esc` | Quit / Close overlay |
