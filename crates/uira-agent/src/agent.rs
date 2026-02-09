@@ -1546,8 +1546,8 @@ impl Agent {
         }
 
         // Phase 2: Emit tool start events and build call_id->name mapping
-        let mut call_id_to_name: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut call_id_to_name: HashMap<String, String> =
+            HashMap::with_capacity(approved_calls.len());
         for (id, name, input) in &approved_calls {
             call_id_to_name.insert(id.clone(), name.clone());
             self.record_tool_call(id, name, input);
@@ -1622,11 +1622,7 @@ impl Agent {
 
         // Phase 5: Emit TodoUpdated event for TUI sidebar
         if todo_updated {
-            let todos = self
-                .session
-                .todo_store
-                .get(&self.session.id.to_string())
-                .await;
+            let todos = self.session.todo_store.get(&ctx.session_id).await;
             self.emit_event(ThreadEvent::TodoUpdated { todos }).await;
         }
 
