@@ -8,6 +8,8 @@ use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutp
 
 use crate::{Tool, ToolContext, ToolError};
 
+const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
 /// Input for read tool
 #[derive(Debug, Deserialize)]
 struct ReadInput {
@@ -32,8 +34,8 @@ impl ReadTool {
             .enumerate()
             .map(|(i, line)| {
                 let line_num = offset + i + 1;
-                let truncated = if line.len() > 2000 {
-                    format!("{}...", &line[..2000])
+                let truncated = if line.chars().count() > 2000 {
+                    format!("{}...", line.chars().take(2000).collect::<String>())
                 } else {
                     line.to_string()
                 };
@@ -113,6 +115,22 @@ impl Tool for ReadTool {
         if !path.is_file() {
             return Err(ToolError::ExecutionFailed {
                 message: format!("Path is not a file: {}", input.file_path),
+            });
+        }
+
+        let metadata = fs::metadata(path)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read file metadata: {}", e),
+            })?;
+        if metadata.len() > MAX_READ_FILE_BYTES {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "File too large to read safely ({} bytes > {} bytes): {}",
+                    metadata.len(),
+                    MAX_READ_FILE_BYTES,
+                    input.file_path
+                ),
             });
         }
 

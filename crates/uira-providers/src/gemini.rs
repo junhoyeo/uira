@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uira_protocol::{
     ContentBlock, ContentDelta, ImageSource, Message, MessageContent, MessageDelta, ModelResponse,
-    Role, StopReason, StreamChunk, TokenUsage, ToolSpec,
+    Role, StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
 };
 
 use crate::{
@@ -239,23 +239,6 @@ impl GeminiClient {
         }
     }
 
-    fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        // Gemini uses JSON streaming, not SSE
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // Try to parse as JSON
-            if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(line) {
-                return Ok(Self::convert_stream_response(response));
-            }
-        }
-
-        Ok(StreamChunk::Ping)
-    }
-
     fn convert_stream_response(response: GeminiStreamResponse) -> StreamChunk {
         let candidate = match response.candidates.into_iter().next() {
             Some(c) => c,
@@ -337,6 +320,12 @@ impl ModelClient for GeminiClient {
                 return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "gemini".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -365,6 +354,24 @@ impl ModelClient for GeminiClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "gemini".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -372,13 +379,77 @@ impl ModelClient for GeminiClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| match result {
-            Ok(bytes) => {
+        let byte_stream = response.bytes_stream();
+        let stream_id = format!("gemini_stream_{}", uuid::Uuid::new_v4());
+        let stream_model = self.config.model.clone();
+        let stream = async_stream::try_stream! {
+            let mut buffer = String::new();
+            futures::pin_mut!(byte_stream);
+
+            yield StreamChunk::MessageStart {
+                message: StreamMessageStart {
+                    id: stream_id,
+                    model: stream_model,
+                    usage: TokenUsage::default(),
+                },
+            };
+
+            while let Some(result) = byte_stream.next().await {
+                let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
-                Self::parse_sse_event(&text)
+                buffer.push_str(&text);
+
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim().to_string();
+                    buffer = buffer[pos + 1..].to_string();
+
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(&line) {
+                        let chunk = Self::convert_stream_response(response);
+                        let should_stop = matches!(
+                            &chunk,
+                            StreamChunk::MessageDelta {
+                                delta: MessageDelta {
+                                    stop_reason: Some(_)
+                                },
+                                ..
+                            }
+                        );
+                        yield chunk;
+                        if should_stop {
+                            yield StreamChunk::MessageStop;
+                            return;
+                        }
+                    }
+                }
             }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
-        });
+
+            let remaining = buffer.trim();
+            if !remaining.is_empty() {
+                if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(remaining) {
+                    let chunk = Self::convert_stream_response(response);
+                    let should_stop = matches!(
+                        &chunk,
+                        StreamChunk::MessageDelta {
+                            delta: MessageDelta {
+                                stop_reason: Some(_)
+                            },
+                            ..
+                        }
+                    );
+                    yield chunk;
+                    if should_stop {
+                        yield StreamChunk::MessageStop;
+                        return;
+                    }
+                }
+            }
+
+            yield StreamChunk::MessageStop;
+        };
 
         Ok(Box::pin(stream))
     }

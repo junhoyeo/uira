@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
+use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -115,7 +116,12 @@ impl OpenAIClient {
         match expires_at {
             Some(exp) => {
                 let now = Utc::now().timestamp();
-                now >= (exp - TOKEN_REFRESH_BUFFER_SECS)
+                let exp_secs = if exp > 1_000_000_000_000 {
+                    exp / 1000
+                } else {
+                    exp
+                };
+                now >= (exp_secs - TOKEN_REFRESH_BUFFER_SECS)
             }
             None => false,
         }
@@ -168,6 +174,7 @@ impl OpenAIClient {
         let response = self
             .client
             .post(OPENAI_OAUTH_TOKEN_URL)
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token.expose_secret()),
@@ -535,6 +542,12 @@ impl ModelClient for OpenAIClient {
                 return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: PROVIDER_NAME.to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -564,6 +577,24 @@ impl ModelClient for OpenAIClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: PROVIDER_NAME.to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -578,7 +609,7 @@ impl ModelClient for OpenAIClient {
 
             while let Some(result) = byte_stream.next().await {
                 let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
-                let text = String::from_utf8_lossy(&bytes);
+                let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
                 buffer.push_str(&text);
 
                 // Process complete SSE events (separated by double newline)
@@ -588,7 +619,12 @@ impl ModelClient for OpenAIClient {
 
                     // Parse each line in the event
                     for line in event_text.lines() {
-                        if let Some(data) = line.strip_prefix("data: ") {
+                        let trimmed = line.trim_end_matches('\r');
+                        if let Some(data) = trimmed
+                            .strip_prefix("data: ")
+                            .or_else(|| trimmed.strip_prefix("data:"))
+                            .map(str::trim_start)
+                        {
                             if data == "[DONE]" {
                                 yield StreamChunk::MessageStop;
                                 return;
@@ -611,7 +647,12 @@ impl ModelClient for OpenAIClient {
             // Process any remaining data in buffer
             if !buffer.is_empty() {
                 for line in buffer.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
+                    let trimmed = line.trim_end_matches('\r');
+                    if let Some(data) = trimmed
+                        .strip_prefix("data: ")
+                        .or_else(|| trimmed.strip_prefix("data:"))
+                        .map(str::trim_start)
+                    {
                         if data == "[DONE]" {
                             yield StreamChunk::MessageStop;
                             return;

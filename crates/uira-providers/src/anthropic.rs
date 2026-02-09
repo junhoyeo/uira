@@ -552,6 +552,12 @@ impl ModelClient for AnthropicClient {
                 return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -598,6 +604,24 @@ impl ModelClient for AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -614,11 +638,7 @@ impl ModelClient for AnthropicClient {
             while let Some(result) = byte_stream.next().await {
                 let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
-                let text = if is_oauth {
-                    Self::strip_tool_prefix_from_sse(&text)
-                } else {
-                    text.to_string()
-                };
+                let text = text.replace("\r\n", "\n");
                 tracing::debug!("SSE raw chunk: {:?}", text);
                 buffer.push_str(&text);
 
@@ -629,12 +649,22 @@ impl ModelClient for AnthropicClient {
 
                     // Parse each line in the event
                     for line in event_text.lines() {
-                        if let Some(data) = line.strip_prefix("data: ") {
+                        let trimmed = line.trim_end_matches('\r');
+                        if let Some(data) = trimmed
+                            .strip_prefix("data: ")
+                            .or_else(|| trimmed.strip_prefix("data:"))
+                            .map(str::trim_start)
+                        {
+                            let data = if is_oauth {
+                                Self::strip_tool_prefix_from_sse(data)
+                            } else {
+                                data.to_string()
+                            };
                             if data == "[DONE]" {
                                 yield StreamChunk::MessageStop;
                                 return;
                             }
-                            match serde_json::from_str::<AnthropicStreamEvent>(data) {
+                            match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                                 Ok(event) => {
                                     tracing::debug!("Anthropic SSE event: {:?}", event);
                                     yield event.into();
@@ -653,12 +683,22 @@ impl ModelClient for AnthropicClient {
             // Process any remaining data in buffer
             if !buffer.is_empty() {
                 for line in buffer.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
+                    let trimmed = line.trim_end_matches('\r');
+                    if let Some(data) = trimmed
+                        .strip_prefix("data: ")
+                        .or_else(|| trimmed.strip_prefix("data:"))
+                        .map(str::trim_start)
+                    {
+                        let data = if is_oauth {
+                            Self::strip_tool_prefix_from_sse(data)
+                        } else {
+                            data.to_string()
+                        };
                         if data == "[DONE]" {
                             yield StreamChunk::MessageStop;
                             return;
                         }
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(&data) {
                             yield event.into();
                         }
                     }

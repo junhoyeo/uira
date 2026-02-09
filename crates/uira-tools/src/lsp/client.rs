@@ -10,7 +10,6 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::timeout;
 
 /// Maximum Content-Length we'll accept (32MB) to prevent OOM
 const MAX_CONTENT_LENGTH: usize = 32 * 1024 * 1024;
@@ -28,6 +27,7 @@ struct ServerProcess {
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     _next_id: i64,
+    pending_responses: HashMap<i64, Value>,
     /// Stored diagnostics from textDocument/publishDiagnostics notifications
     diagnostics: HashMap<String, Vec<Diagnostic>>,
 }
@@ -95,6 +95,7 @@ impl LspClientImpl {
             stdin,
             reader,
             _next_id: 1,
+            pending_responses: HashMap::new(),
             diagnostics: HashMap::new(),
         }));
 
@@ -110,7 +111,14 @@ impl LspClientImpl {
         #[allow(deprecated)]
         let init_params = InitializeParams {
             process_id: Some(std::process::id()),
-            root_uri: Some(Url::from_file_path(&self.root_path).unwrap()),
+            root_uri: Some(Url::from_file_path(&self.root_path).map_err(|_| {
+                ToolError::ExecutionFailed {
+                    message: format!(
+                        "Failed to build root URI from path: {}",
+                        self.root_path.display()
+                    ),
+                }
+            })?),
             capabilities: ClientCapabilities::default(),
             ..Default::default()
         };
@@ -139,9 +147,13 @@ impl LspClientImpl {
     async fn send_request(
         &self,
         process: &Arc<Mutex<ServerProcess>>,
-        request: Value,
+        mut request: Value,
     ) -> Result<Value, ToolError> {
         let mut proc = process.lock().await;
+
+        let request_id = proc._next_id;
+        proc._next_id += 1;
+        request["id"] = Value::from(request_id);
 
         let content = serde_json::to_string(&request).map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to serialize LSP request: {}", e),
@@ -155,6 +167,35 @@ impl LspClientImpl {
                 message: format!("Failed to write to LSP server: {}", e),
             })?;
 
+        if let Some(response) = proc.pending_responses.remove(&request_id) {
+            return Ok(response);
+        }
+
+        loop {
+            let message = Self::read_framed_message(&mut proc).await?;
+
+            if let Some(method) = message.get("method").and_then(Value::as_str) {
+                if method == "textDocument/publishDiagnostics" {
+                    Self::store_diagnostics(&mut proc, &message);
+                }
+                continue;
+            }
+
+            if let Some(id) = message.get("id").and_then(Value::as_i64) {
+                if id == request_id {
+                    if let Some(error) = message.get("error") {
+                        return Err(ToolError::ExecutionFailed {
+                            message: format!("LSP request failed: {}", error),
+                        });
+                    }
+                    return Ok(message);
+                }
+                proc.pending_responses.insert(id, message);
+            }
+        }
+    }
+
+    async fn read_framed_message(proc: &mut ServerProcess) -> Result<Value, ToolError> {
         let mut content_length: Option<usize> = None;
 
         loop {
@@ -205,12 +246,29 @@ impl LspClientImpl {
                 message: format!("Failed to read LSP content: {}", e),
             })?;
 
-        let response: Value =
-            serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to parse LSP response: {}", e),
-            })?;
+        serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to parse LSP response: {}", e),
+        })
+    }
 
-        Ok(response)
+    fn store_diagnostics(proc: &mut ServerProcess, message: &Value) {
+        let Some(params) = message.get("params") else {
+            return;
+        };
+        let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+            return;
+        };
+        let diagnostics = params
+            .get("diagnostics")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|d| serde_json::from_value::<Diagnostic>(d.clone()).ok())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        proc.diagnostics.insert(uri.to_string(), diagnostics);
     }
 
     async fn send_notification(
@@ -236,128 +294,74 @@ impl LspClientImpl {
         Ok(())
     }
 
-    /// Try to receive a notification from the LSP server with a timeout.
-    /// Returns Ok(Some(notification)) if a message was received,
-    /// Ok(None) if timeout expired, or Err if read failed.
-    async fn try_receive_notification(
-        &self,
-        process: &Arc<Mutex<ServerProcess>>,
-        timeout_duration: Duration,
-    ) -> Result<Option<Value>, ToolError> {
-        let result = timeout(timeout_duration, async {
-            let mut proc = process.lock().await;
-
-            let mut content_length: Option<usize> = None;
-
-            // Read headers
-            loop {
-                let mut line = String::new();
-                let n = proc.reader.read_line(&mut line).await.map_err(|e| {
-                    ToolError::ExecutionFailed {
-                        message: format!("Failed to read LSP header: {}", e),
-                    }
-                })?;
-
-                if n == 0 {
-                    return Ok(None); // EOF
-                }
-
-                let line = line.trim_end_matches(&['\r', '\n'][..]);
-                if line.is_empty() {
-                    break;
-                }
-
-                if let Some((name, value)) = line.split_once(':') {
-                    if name.trim().eq_ignore_ascii_case("Content-Length") {
-                        content_length = value.trim().parse::<usize>().ok();
-                    }
-                }
-            }
-
-            let content_length = content_length.ok_or_else(|| ToolError::ExecutionFailed {
-                message: "Missing Content-Length in notification".to_string(),
-            })?;
-
-            if content_length > MAX_CONTENT_LENGTH {
-                return Err(ToolError::ExecutionFailed {
-                    message: format!(
-                        "Content-Length {} exceeds max {}",
-                        content_length, MAX_CONTENT_LENGTH
-                    ),
-                });
-            }
-
-            let mut buffer = vec![0; content_length];
-            tokio::io::AsyncReadExt::read_exact(&mut proc.reader, &mut buffer)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to read LSP notification content: {}", e),
-                })?;
-
-            let message: Value =
-                serde_json::from_slice(&buffer).map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to parse LSP notification: {}", e),
-                })?;
-
-            Ok(Some(message))
-        })
-        .await;
-
-        match result {
-            Ok(Ok(msg)) => Ok(msg),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Ok(None), // Timeout
-        }
+    fn to_file_uri(file_path: &str) -> Result<String, ToolError> {
+        let path = std::path::Path::new(file_path);
+        Url::from_file_path(path)
+            .map(|u| u.to_string())
+            .map_err(|_| ToolError::ExecutionFailed {
+                message: format!("Invalid file path for URI: {}", file_path),
+            })
     }
 
-    /// Poll for diagnostics notifications after sending didOpen
+    fn ensure_within_root(&self, file_path: &str) -> Result<PathBuf, ToolError> {
+        let canonical_root =
+            self.root_path
+                .canonicalize()
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to resolve workspace root: {}", e),
+                })?;
+        let canonical_file = std::path::Path::new(file_path)
+            .canonicalize()
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to resolve file path: {}", e),
+            })?;
+
+        if !canonical_file.starts_with(&canonical_root) {
+            return Err(ToolError::InvalidInput {
+                message: format!("File path is outside workspace root: {}", file_path),
+            });
+        }
+
+        Ok(canonical_file)
+    }
+
     async fn poll_for_diagnostics(
         &self,
         process: &Arc<Mutex<ServerProcess>>,
         file_uri: &str,
         max_wait: Duration,
     ) -> Result<Vec<Diagnostic>, ToolError> {
-        let start = tokio::time::Instant::now();
-        let mut all_diagnostics = Vec::new();
+        let deadline = tokio::time::Instant::now() + max_wait;
 
-        while start.elapsed() < max_wait {
-            let remaining = max_wait - start.elapsed();
-            if let Some(notification) = self.try_receive_notification(process, remaining).await? {
-                // Check if this is a publishDiagnostics notification
-                if notification["method"] == "textDocument/publishDiagnostics" {
-                    if let Some(params) = notification["params"].as_object() {
-                        if let Some(uri) = params["uri"].as_str() {
-                            if uri == file_uri {
-                                // Extract diagnostics for our file
-                                if let Some(diagnostics) = params["diagnostics"].as_array() {
-                                    for d in diagnostics {
-                                        if let Ok(diag) =
-                                            serde_json::from_value::<Diagnostic>(d.clone())
-                                        {
-                                            all_diagnostics.push(diag);
-                                        }
-                                    }
-                                }
-                            }
-                            // Store in server's diagnostics map
-                            let mut proc = process.lock().await;
-                            let diags: Vec<Diagnostic> = params["diagnostics"]
-                                .as_array()
-                                .unwrap_or(&Vec::new())
-                                .iter()
-                                .filter_map(|d| serde_json::from_value(d.clone()).ok())
-                                .collect();
-                            proc.diagnostics.insert(uri.to_string(), diags);
-                        }
-                    }
+        loop {
+            {
+                let proc = process.lock().await;
+                if let Some(diags) = proc.diagnostics.get(file_uri) {
+                    return Ok(diags.clone());
                 }
-            } else {
-                // No more messages or timeout
-                break;
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(Vec::new());
+            }
+
+            let mut proc = process.lock().await;
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let message = tokio::time::timeout(remaining, Self::read_framed_message(&mut proc))
+                .await
+                .map_err(|_| ToolError::ExecutionFailed {
+                    message: "Timed out waiting for diagnostics notification".to_string(),
+                })??;
+            if let Some(method) = message.get("method").and_then(Value::as_str) {
+                if method == "textDocument/publishDiagnostics" {
+                    Self::store_diagnostics(&mut proc, &message);
+                }
+                continue;
+            }
+            if let Some(id) = message.get("id").and_then(Value::as_i64) {
+                proc.pending_responses.insert(id, message);
             }
         }
-
-        Ok(all_diagnostics)
     }
 
     fn detect_language(&self, file_path: &str) -> Option<String> {
@@ -395,6 +399,8 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let line = params["line"]
             .as_u64()
@@ -409,7 +415,7 @@ impl LspClient for LspClientImpl {
             })? as u32;
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -423,7 +429,7 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/definition",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                 },
                 "position": {
                     "line": position.0,
@@ -445,6 +451,8 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let line = params["line"]
             .as_u64()
@@ -461,7 +469,7 @@ impl LspClient for LspClientImpl {
         let include_declaration = params["includeDeclaration"].as_bool().unwrap_or(true);
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -475,7 +483,7 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/references",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                 },
                 "position": {
                     "line": position.0,
@@ -500,11 +508,13 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let scope = params["scope"].as_str().unwrap_or("document");
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -524,7 +534,7 @@ impl LspClient for LspClientImpl {
                 "textDocument/documentSymbol",
                 json!({
                     "textDocument": {
-                        "uri": format!("file://{}", file_path),
+                        "uri": Self::to_file_uri(&file_path)?,
                     },
                 }),
             )
@@ -550,9 +560,11 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -565,10 +577,14 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                     "languageId": language,
                     "version": 1,
-                    "text": tokio::fs::read_to_string(file_path).await.unwrap_or_default(),
+                    "text": tokio::fs::read_to_string(&canonical_file)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            message: format!("Failed to read file for diagnostics: {}", e),
+                        })?,
                 },
             },
         });
@@ -576,7 +592,11 @@ impl LspClient for LspClientImpl {
         self.send_notification(&server, notification).await?;
 
         // Wait for publishDiagnostics notifications from the server
-        let file_uri = format!("file://{}", file_path);
+        let file_uri = Self::to_file_uri(file_path.as_str())?;
+        {
+            let mut proc = server.lock().await;
+            proc.diagnostics.remove(&file_uri);
+        }
         let diagnostics = self
             .poll_for_diagnostics(&server, &file_uri, Duration::from_secs(2))
             .await?;
@@ -614,6 +634,8 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let line = params["line"]
             .as_u64()
@@ -628,7 +650,7 @@ impl LspClient for LspClientImpl {
             })? as u32;
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -642,7 +664,7 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/prepareRename",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                 },
                 "position": {
                     "line": position.0,
@@ -664,6 +686,8 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let line = params["line"]
             .as_u64()
@@ -684,7 +708,7 @@ impl LspClient for LspClientImpl {
             })?;
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -698,7 +722,7 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/rename",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                 },
                 "position": {
                     "line": position.0,
@@ -721,6 +745,8 @@ impl LspClient for LspClientImpl {
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing filePath parameter".to_string(),
             })?;
+        let canonical_file = self.ensure_within_root(file_path)?;
+        let file_path = canonical_file.to_string_lossy().to_string();
 
         let line = params["line"]
             .as_u64()
@@ -735,7 +761,7 @@ impl LspClient for LspClientImpl {
             })? as u32;
 
         let language =
-            self.detect_language(file_path)
+            self.detect_language(&file_path)
                 .ok_or_else(|| ToolError::ExecutionFailed {
                     message: "Could not detect language from file extension".to_string(),
                 })?;
@@ -749,7 +775,7 @@ impl LspClient for LspClientImpl {
             "method": "textDocument/hover",
             "params": {
                 "textDocument": {
-                    "uri": format!("file://{}", file_path),
+                    "uri": Self::to_file_uri(&file_path)?,
                 },
                 "position": {
                     "line": position.0,

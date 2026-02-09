@@ -52,6 +52,14 @@ impl BashTool {
     }
 
     fn is_safe_command(cmd: &str) -> bool {
+        if cmd.contains('\n')
+            || ['|', '&', ';', '>', '<', '$', '`', '(', ')']
+                .iter()
+                .any(|c| cmd.contains(*c))
+        {
+            return false;
+        }
+
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let base_cmd = parts.first().copied().unwrap_or("");
 
@@ -197,10 +205,14 @@ impl BashTool {
         cmd.arg("-c")
             .arg(command)
             .current_dir(working_dir)
+            .kill_on_drop(true)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let result = timeout(timeout_duration, cmd.output()).await;
+        let child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to start command: {}", e),
+        })?;
+        let result = timeout(timeout_duration, child.wait_with_output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -246,16 +258,19 @@ impl BashTool {
             .stderr(Stdio::piped());
 
         if let Err(e) = sandbox_manager.wrap_command(&mut cmd, SandboxType::Native) {
-            tracing::warn!(error = %e, "sandbox_wrap_failed, falling back to direct execution");
-            return self
-                .execute_direct(command, working_dir, timeout_duration)
-                .await;
+            return Err(ToolError::ExecutionFailed {
+                message: format!("Failed to apply sandbox wrapper: {}", e),
+            });
         }
 
-        let result = tokio::task::spawn_blocking(move || cmd.output()).await;
+        let result = tokio::time::timeout(
+            timeout_duration,
+            tokio::task::spawn_blocking(move || cmd.output()),
+        )
+        .await;
 
         match result {
-            Ok(Ok(output)) => {
+            Ok(Ok(Ok(output))) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 let exit_code = output.status.code().unwrap_or(-1);
@@ -272,11 +287,17 @@ impl BashTool {
                         message: format!("Failed to serialize output: {}", e),
                     })
             }
-            Ok(Err(e)) => Err(ToolError::ExecutionFailed {
+            Ok(Ok(Err(e))) => Err(ToolError::ExecutionFailed {
                 message: format!("Failed to execute sandboxed command: {}", e),
             }),
-            Err(e) => Err(ToolError::ExecutionFailed {
+            Ok(Err(e)) => Err(ToolError::ExecutionFailed {
                 message: format!("Sandbox task panicked: {}", e),
+            }),
+            Err(_) => Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "Sandboxed command timed out after {}ms",
+                    timeout_duration.as_millis()
+                ),
             }),
         }
     }

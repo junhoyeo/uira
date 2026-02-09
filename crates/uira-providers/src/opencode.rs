@@ -284,6 +284,12 @@ impl ModelClient for OpenCodeClient {
                 return Err(ProviderError::RateLimited { retry_after_ms });
             }
 
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "opencode".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "OpenCode Zen API error {}: {}",
@@ -310,6 +316,24 @@ impl ModelClient for OpenCodeClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "opencode".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "OpenCode Zen API error {}: {}",
@@ -325,14 +349,19 @@ impl ModelClient for OpenCodeClient {
             while let Some(result) = byte_stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                        let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+                        buffer.push_str(&text);
 
                         while let Some(pos) = buffer.find("\n\n") {
                             let event = buffer[..pos].to_string();
                             buffer = buffer[pos + 2..].to_string();
 
                             if let Some(chunk) = Self::parse_sse_line(&event) {
+                                let is_stop = matches!(&chunk, StreamChunk::MessageStop);
                                 yield Ok(chunk);
+                                if is_stop {
+                                    return;
+                                }
                             }
                         }
                     }
@@ -372,12 +401,16 @@ impl ModelClient for OpenCodeClient {
 impl OpenCodeClient {
     fn parse_sse_line(event: &str) -> Option<StreamChunk> {
         for line in event.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with(':') {
+            let trimmed = line.trim_end_matches('\r');
+            if trimmed.is_empty() || trimmed.starts_with(':') {
                 continue;
             }
 
-            if let Some(data) = line.strip_prefix("data: ") {
+            if let Some(data) = trimmed
+                .strip_prefix("data: ")
+                .or_else(|| trimmed.strip_prefix("data:"))
+                .map(str::trim_start)
+            {
                 if data == "[DONE]" {
                     return Some(StreamChunk::MessageStop);
                 }

@@ -1898,7 +1898,34 @@ impl App {
     }
 
     fn run_editor_command(editor: &str, path: &Path) -> std::io::Result<()> {
-        let parts: Vec<&str> = editor.split_whitespace().collect();
+        let mut parts = Vec::new();
+        let mut current = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut escaped = false;
+
+        for ch in editor.chars() {
+            if escaped {
+                current.push(ch);
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' if !in_single => escaped = true,
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
+                c if c.is_whitespace() && !in_single && !in_double => {
+                    if !current.is_empty() {
+                        parts.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(ch),
+            }
+        }
+        if !current.is_empty() {
+            parts.push(current);
+        }
 
         let Some(program) = parts.first() else {
             return Err(std::io::Error::new(
