@@ -230,7 +230,20 @@ impl ContextManager {
             by_tokens += 1;
         }
 
-        by_tokens.max(by_count).min(messages.len())
+        let protected = by_tokens.max(by_count).min(messages.len());
+
+        // If we're already over the compaction threshold, ensure that at least
+        // one message is eligible for pruning/summarization.
+        //
+        // This prevents large `protected_tokens` defaults from fully shielding
+        // short histories, which would otherwise make compaction a no-op.
+        let current_tokens: usize = messages.iter().map(|m| m.estimate_tokens()).sum();
+        let needs_compaction = self.token_monitor.needs_compaction(current_tokens);
+        if needs_compaction && protected == messages.len() && by_count < messages.len() {
+            return by_count;
+        }
+
+        protected
     }
 
     fn build_summary_message(&self, messages: &[Message], target_tokens: usize) -> Option<Message> {

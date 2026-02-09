@@ -1,12 +1,22 @@
 //! CLI commands
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum CliMode {
+    Interactive,
+    Rpc,
+}
 
 /// Uira - Native AI Coding Agent
 #[derive(Parser, Debug)]
 #[command(name = "uira-agent")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
+    /// Runtime mode (interactive, rpc)
+    #[arg(long, value_enum, default_value_t = CliMode::Interactive)]
+    pub mode: CliMode,
+
     /// Prompt to execute (interactive mode if omitted)
     #[arg(trailing_var_arg = true)]
     pub prompt: Vec<String>,
@@ -205,5 +215,23 @@ impl Cli {
         } else {
             Some(self.prompt.join(" "))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn defaults_to_interactive_mode() {
+        let cli = Cli::parse_from(["uira-agent"]);
+        assert_eq!(cli.mode, CliMode::Interactive);
+    }
+
+    #[test]
+    fn parses_rpc_mode_flag() {
+        let cli = Cli::parse_from(["uira-agent", "--mode", "rpc"]);
+        assert_eq!(cli.mode, CliMode::Rpc);
     }
 }

@@ -152,8 +152,8 @@ impl Default for AgentConfig {
             sandbox_policy: SandboxPolicy::default(),
             sandbox_preference: SandboxPreference::default(),
             working_directory: None,
-            require_approval_for_writes: true,
-            require_approval_for_commands: true,
+            require_approval_for_writes: false,
+            require_approval_for_commands: false,
             ralph_mode: false,
             todo_continuation: true,
             max_continuation_attempts: default_max_continuation_attempts(),
@@ -355,6 +355,13 @@ impl AgentGoalsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_default_config_is_full_auto_permissions() {
+        let config = AgentConfig::default();
+        assert!(!config.require_approval_for_writes);
+        assert!(!config.require_approval_for_commands);
+    }
 
     #[test]
     fn test_with_compaction_settings_summarize_strategy() {

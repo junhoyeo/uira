@@ -643,6 +643,19 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
+fn spawn_tracing_log_handler(
+    mut tracing_rx: mpsc::UnboundedReceiver<String>,
+    event_tx: mpsc::Sender<AppEvent>,
+) {
+    tokio::spawn(async move {
+        while let Some(message) = tracing_rx.recv().await {
+            if event_tx.send(AppEvent::TracingLog(message)).await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
 pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
@@ -774,6 +787,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
+        tracing_rx: Option<mpsc::UnboundedReceiver<String>>,
     ) -> std::io::Result<()> {
         let working_directory = config
             .working_directory
@@ -807,6 +821,10 @@ impl App {
 
         spawn_approval_handler(approval_rx, self.event_tx.clone());
 
+        if let Some(rx) = tracing_rx {
+            spawn_tracing_log_handler(rx, self.event_tx.clone());
+        }
+
         tokio::spawn(async move {
             if let Err(e) = agent.run_interactive().await {
                 tracing::error!("Agent error: {}", e);
@@ -819,7 +837,7 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if !self.todos.is_empty() {
+        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -1006,17 +1024,25 @@ impl App {
             format!(" | {} image(s) attached", self.pending_images.len())
         };
 
+        let model_prefix = self
+            .current_model
+            .as_ref()
+            .map(|model| format!("model: {} | ", model))
+            .unwrap_or_default();
         let title = if self.approval_overlay.is_active() {
-            format!(" Input (approval overlay active{}) ", pending_label)
+            format!(
+                " Input ({}approval overlay active{}) ",
+                model_prefix, pending_label
+            )
         } else if self.is_agent_busy() {
             format!(
-                " Input (Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                pending_label
+                " Input ({}Enter to queue, Alt+Enter to interrupt, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
             )
         } else {
             format!(
-                " Input (Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
-                pending_label
+                " Input ({}Enter to send, Ctrl+G external editor, Ctrl+C to quit{}) ",
+                model_prefix, pending_label
             )
         };
 
@@ -1417,8 +1443,7 @@ impl App {
                     self.should_quit = true;
                 }
                 KeyCode::Char('l') => {
-                    // Clear screen
-                    self.messages.clear();
+                    self.status = "Screen refresh requested".to_string();
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -1985,6 +2010,7 @@ impl App {
                         content: "Usage: /image <path>".to_string(),
                         tool_output: None,
                     });
+                    self.scroll_to_bottom();
                     return;
                 }
 
@@ -2162,12 +2188,17 @@ impl App {
                 );
             }
         }
+
+        self.scroll_to_bottom();
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Quit => self.should_quit = true,
             AppEvent::Agent(thread_event) => self.handle_agent_event(thread_event),
+            AppEvent::TracingLog(msg) => {
+                self.push_message("error", format!("log: {}", msg));
+            }
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
             }
@@ -2791,6 +2822,23 @@ mod tests {
         let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
 
         assert_eq!(action, KeyAction::OpenExternalEditor);
+    }
+
+    #[test]
+    fn ctrl_l_keeps_chat_history() {
+        let mut app = App::new();
+        app.add_message("assistant", "first");
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert_eq!(action, KeyAction::None);
+        assert_eq!(app.messages.len(), 1);
+    }
+
+    #[test]
+    fn todo_sidebar_is_enabled_by_default() {
+        let app = App::new();
+        assert!(app.show_todo_sidebar);
     }
 
     #[test]

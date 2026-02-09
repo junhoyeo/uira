@@ -397,7 +397,7 @@ impl AnthropicClient {
                         ContentBlock::ToolUse { id, name, input } => AnthropicContent::ToolUse {
                             id: id.clone(),
                             name: maybe_prefix(name),
-                            input: input.clone(),
+                            input: Self::normalize_tool_input(input),
                         },
                         ContentBlock::ToolResult {
                             tool_use_id,
@@ -428,7 +428,7 @@ impl AnthropicClient {
                 .map(|c| AnthropicContent::ToolUse {
                     id: c.id.clone(),
                     name: maybe_prefix(&c.name),
-                    input: c.input.clone(),
+                    input: Self::normalize_tool_input(&c.input),
                 })
                 .collect(),
         };
@@ -477,6 +477,23 @@ impl AnthropicClient {
         TOOL_NAME_RE
             .replace_all(text, r#""name": "$1""#)
             .to_string()
+    }
+
+    fn normalize_tool_input(input: &serde_json::Value) -> serde_json::Value {
+        match input {
+            serde_json::Value::Object(_) => input.clone(),
+            serde_json::Value::Null => serde_json::Value::Object(serde_json::Map::new()),
+            serde_json::Value::String(s) => {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                    if parsed.is_object() {
+                        return parsed;
+                    }
+                    return serde_json::json!({ "value": parsed });
+                }
+                serde_json::json!({ "value": s })
+            }
+            other => serde_json::json!({ "value": other }),
+        }
     }
 
     fn sanitize_system_for_oauth(system: &str) -> String {
@@ -958,5 +975,43 @@ impl From<AnthropicStreamEvent> for StreamChunk {
                 },
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AnthropicClient;
+
+    #[test]
+    fn normalize_tool_input_keeps_object() {
+        let value = serde_json::json!({"todos": []});
+        assert_eq!(AnthropicClient::normalize_tool_input(&value), value);
+    }
+
+    #[test]
+    fn normalize_tool_input_converts_null_to_empty_object() {
+        let value = serde_json::Value::Null;
+        assert_eq!(
+            AnthropicClient::normalize_tool_input(&value),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn normalize_tool_input_parses_stringified_object() {
+        let value = serde_json::Value::String("{\"a\":1}".to_string());
+        assert_eq!(
+            AnthropicClient::normalize_tool_input(&value),
+            serde_json::json!({"a": 1})
+        );
+    }
+
+    #[test]
+    fn normalize_tool_input_wraps_non_object_values() {
+        let value = serde_json::json!([1, 2, 3]);
+        assert_eq!(
+            AnthropicClient::normalize_tool_input(&value),
+            serde_json::json!({"value": [1, 2, 3]})
+        );
     }
 }

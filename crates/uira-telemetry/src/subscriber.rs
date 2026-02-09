@@ -1,5 +1,58 @@
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+pub struct ChannelLayer {
+    tx: UnboundedSender<String>,
+}
+
+impl ChannelLayer {
+    pub fn new(tx: UnboundedSender<String>) -> Self {
+        Self { tx }
+    }
+}
+
+#[derive(Default)]
+struct MessageVisitor {
+    message: Option<String>,
+}
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = Some(format!("{:?}", value));
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = Some(value.to_string());
+        }
+    }
+}
+
+impl<S> tracing_subscriber::Layer<S> for ChannelLayer
+where
+    S: Subscriber,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let metadata = event.metadata();
+        if !matches!(*metadata.level(), Level::WARN | Level::ERROR) {
+            return;
+        }
+
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
+        let message = visitor
+            .message
+            .unwrap_or_else(|| "(no message)".to_string());
+        let formatted = format!("{} {}: {}", metadata.level(), metadata.target(), message);
+
+        let _ = self.tx.send(formatted);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryConfig {
@@ -46,6 +99,19 @@ pub fn init_subscriber(config: &TelemetryConfig) {
             .with(fmt::layer())
             .init();
     }
+}
+
+pub fn init_tui_subscriber(config: &TelemetryConfig) -> UnboundedReceiver<String> {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
+    let (tx, rx) = unbounded_channel();
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(ChannelLayer::new(tx))
+        .init();
+
+    rx
 }
 
 #[cfg(feature = "otlp")]
