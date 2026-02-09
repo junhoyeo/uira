@@ -169,4 +169,7 @@ cargo fmt --all -- --check
 
 # Run linter
 cargo clippy --workspace -- -D warnings
+
+# Run tmux-based TUI smoke checks
+scripts/tui_smoke_tmux.sh
 ```
