@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -159,12 +159,98 @@ fn run_git_command(args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn collect_review_content(target: &ReviewTarget) -> Result<String, String> {
+fn parse_binary_paths(numstat: &str) -> HashSet<String> {
+    numstat
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let added = parts.next()?;
+            let removed = parts.next()?;
+            let path = parts.next()?;
+
+            if added == "-" || removed == "-" {
+                Some(path.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_diff_path(header: &str) -> Option<String> {
+    if !header.starts_with("diff --git ") {
+        return None;
+    }
+
+    let mut parts = header.split_whitespace();
+    let _ = parts.next();
+    let _ = parts.next();
+    let left = parts.next()?;
+    Some(left.trim_start_matches("a/").to_string())
+}
+
+fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String {
+    if binary_paths.is_empty() {
+        return diff.to_string();
+    }
+
+    let mut out = String::new();
+    let mut section = String::new();
+    let mut section_path: Option<String> = None;
+    let mut in_section = false;
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            if in_section {
+                let is_binary = section_path
+                    .as_deref()
+                    .is_some_and(|p| binary_paths.contains(p));
+                if !is_binary {
+                    out.push_str(&section);
+                }
+                section.clear();
+            }
+            in_section = true;
+            section_path = parse_diff_path(line);
+        }
+
+        if in_section {
+            section.push_str(line);
+            section.push('\n');
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    if in_section {
+        let is_binary = section_path
+            .as_deref()
+            .is_some_and(|p| binary_paths.contains(p));
+        if !is_binary {
+            out.push_str(&section);
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
+fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>), String> {
     match target {
-        ReviewTarget::Staged => run_git_command(&["diff", "--staged", "--no-color"]),
+        ReviewTarget::Staged => {
+            let diff = run_git_command(&["diff", "--staged", "--no-color"])?;
+            let numstat = run_git_command(&["diff", "--staged", "--numstat"])?;
+            let binary_paths = parse_binary_paths(&numstat);
+            let filtered = filter_binary_sections(&diff, &binary_paths);
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((filtered, skipped))
+        }
         ReviewTarget::File(path) => {
             let staged = run_git_command(&["diff", "--staged", "--no-color", "--", path])?;
             let unstaged = run_git_command(&["diff", "--no-color", "--", path])?;
+            let staged_numstat = run_git_command(&["diff", "--staged", "--numstat", "--", path])?;
+            let unstaged_numstat = run_git_command(&["diff", "--numstat", "--", path])?;
 
             let mut chunks = Vec::new();
             if !staged.is_empty() {
@@ -174,10 +260,22 @@ fn collect_review_content(target: &ReviewTarget) -> Result<String, String> {
                 chunks.push(format!("### Unstaged changes\n{}", unstaged));
             }
 
-            Ok(chunks.join("\n\n"))
+            let combined = chunks.join("\n\n");
+            let mut binary_paths = parse_binary_paths(&staged_numstat);
+            binary_paths.extend(parse_binary_paths(&unstaged_numstat));
+            let filtered = filter_binary_sections(&combined, &binary_paths);
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((filtered, skipped))
         }
         ReviewTarget::Revision(revision) => {
-            run_git_command(&["show", "--no-color", "--patch", revision])
+            let diff = run_git_command(&["show", "--no-color", "--patch", revision])?;
+            let numstat = run_git_command(&["show", "--numstat", "--format=", revision])?;
+            let binary_paths = parse_binary_paths(&numstat);
+            let filtered = filter_binary_sections(&diff, &binary_paths);
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((filtered, skipped))
         }
     }
 }
@@ -1452,7 +1550,13 @@ impl App {
                         self.collapse_all_tool_outputs();
                     }
                 }
-                KeyCode::Char('g') => return KeyAction::OpenExternalEditor,
+                KeyCode::Char('g') => {
+                    if self.approval_overlay.is_active() {
+                        self.status = "Finish approval first before opening editor".to_string();
+                        return KeyAction::None;
+                    }
+                    return KeyAction::OpenExternalEditor;
+                }
                 _ => {}
             }
             return KeyAction::None;
@@ -1606,8 +1710,9 @@ impl App {
     }
 
     fn run_editor_command(editor: &str, path: &Path) -> std::io::Result<()> {
-        let mut parts = editor.split_whitespace();
-        let Some(program) = parts.next() else {
+        let parts: Vec<&str> = editor.split_whitespace().collect();
+
+        let Some(program) = parts.first() else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Editor command is empty",
@@ -1615,7 +1720,7 @@ impl App {
         };
 
         let mut command = Command::new(program);
-        command.args(parts).arg(path);
+        command.args(parts.iter().skip(1)).arg(path);
         let status = command.status()?;
 
         if status.success() {
@@ -1929,7 +2034,7 @@ impl App {
         let target = parse_review_target(args);
         let target_description = target.description();
 
-        let content = match collect_review_content(&target) {
+        let (content, skipped_binary) = match collect_review_content(&target) {
             Ok(content) => content,
             Err(err) => {
                 self.push_message("error", format!("Failed to gather review input: {}", err));
@@ -1938,9 +2043,14 @@ impl App {
         };
 
         if content.is_empty() {
+            let suffix = if skipped_binary.is_empty() {
+                String::new()
+            } else {
+                format!(" Skipped binary files: {}.", skipped_binary.join(", "))
+            };
             self.push_message(
                 "system",
-                format!("No diff found for {}.", target_description),
+                format!("No diff found for {}.{}", target_description, suffix),
             );
             return;
         }
@@ -1954,7 +2064,12 @@ impl App {
             ),
         );
 
-        let review_prompt = build_review_prompt(&target, &content);
+        let mut review_prompt = build_review_prompt(&target, &content);
+        if !skipped_binary.is_empty() {
+            review_prompt.push_str("\n\nSkipped binary files: ");
+            review_prompt.push_str(&skipped_binary.join(", "));
+            review_prompt.push('.');
+        }
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -2813,6 +2928,25 @@ mod tests {
         assert!(prompt.contains("## Suggestions"));
         assert!(prompt.contains("## Praise"));
         assert!(prompt.contains("```diff"));
+    }
+
+    #[test]
+    fn parse_binary_paths_detects_binary_entries() {
+        let binaries = parse_binary_paths("12\t4\tsrc/lib.rs\n-\t-\tassets/logo.png\n");
+        assert!(binaries.contains("assets/logo.png"));
+        assert!(!binaries.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn filter_binary_sections_removes_binary_diff() {
+        let mut binaries = HashSet::new();
+        binaries.insert("assets/logo.png".to_string());
+
+        let input = "diff --git a/src/lib.rs b/src/lib.rs\nindex 1..2 100644\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/assets/logo.png b/assets/logo.png\nindex 3..4 100644\nBinary files a/assets/logo.png and b/assets/logo.png differ\n";
+
+        let filtered = filter_binary_sections(input, &binaries);
+        assert!(filtered.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert!(!filtered.contains("diff --git a/assets/logo.png b/assets/logo.png"));
     }
 
     #[test]
