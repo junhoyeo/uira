@@ -46,6 +46,13 @@ struct JsonRpcResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct JsonRpcNotification {
+    jsonrpc: &'static str,
+    method: String,
+    params: Value,
+}
+
+#[derive(Debug, Serialize)]
 struct JsonRpcError {
     code: i64,
     message: String,
@@ -93,6 +100,20 @@ impl RpcWriter {
             }),
         })
         .await
+    }
+
+    async fn send_notification(&self, method: impl Into<String>, params: Value) -> io::Result<()> {
+        let payload = serde_json::to_string(&JsonRpcNotification {
+            jsonrpc: JSONRPC_VERSION,
+            method: method.into(),
+            params,
+        })
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+        let mut stdout = self.stdout.lock().await;
+        stdout.write_all(payload.as_bytes()).await?;
+        stdout.write_all(b"\n").await?;
+        stdout.flush().await
     }
 
     async fn send(&self, response: JsonRpcResponse) -> io::Result<()> {
@@ -275,13 +296,14 @@ fn spawn_approval_forwarder(
             if let Some(request_id) = maybe_request_id {
                 let payload = json!({
                     "type": "approval_required",
+                    "chat_request_id": request_id,
                     "request_id": approval_id,
                     "tool": tool_name,
                     "args": input,
                     "reason": reason,
                 });
 
-                if let Err(error) = writer.send_result(request_id, payload).await {
+                if let Err(error) = writer.send_notification("chat.event", payload).await {
                     tracing::error!(error = %error, "failed to send approval request to RPC client");
                     break;
                 }
@@ -295,6 +317,7 @@ async fn handle_agent_event(
     state: &SharedState,
     writer: &RpcWriter,
 ) -> io::Result<()> {
+    let mut stream_notification: Option<Value> = None;
     let mut stream_result: Option<(Value, Value)> = None;
     let mut stream_error: Option<(Option<Value>, String)> = None;
 
@@ -314,20 +337,21 @@ async fn handle_agent_event(
             }
             ThreadEvent::ContentDelta { delta } => {
                 if let Some(request_id) = guard.active_chat_request.clone() {
-                    stream_result =
-                        Some((request_id, json!({ "type": "chunk", "content": delta })));
+                    stream_notification = Some(json!({
+                        "type": "chunk",
+                        "chat_request_id": request_id,
+                        "content": delta
+                    }));
                 }
             }
             ThreadEvent::ThinkingDelta { thinking } => {
                 if let Some(request_id) = guard.active_chat_request.clone() {
-                    stream_result = Some((
-                        request_id,
-                        json!({
-                            "type": "chunk",
-                            "content": thinking,
-                            "channel": "thinking",
-                        }),
-                    ));
+                    stream_notification = Some(json!({
+                        "type": "chunk",
+                        "chat_request_id": request_id,
+                        "content": thinking,
+                        "channel": "thinking",
+                    }));
                 }
             }
             ThreadEvent::ItemStarted {
@@ -335,14 +359,12 @@ async fn handle_agent_event(
             } => {
                 guard.agent_state = AgentState::ExecutingTool;
                 if let Some(request_id) = guard.active_chat_request.clone() {
-                    stream_result = Some((
-                        request_id,
-                        json!({
-                            "type": "tool_call",
-                            "tool": name,
-                            "args": input,
-                        }),
-                    ));
+                    stream_notification = Some(json!({
+                        "type": "tool_call",
+                        "chat_request_id": request_id,
+                        "tool": name,
+                        "args": input,
+                    }));
                 }
             }
             ThreadEvent::ItemStarted {
@@ -392,6 +414,10 @@ async fn handle_agent_event(
             }
             _ => {}
         }
+    }
+
+    if let Some(payload) = stream_notification {
+        writer.send_notification("chat.event", payload).await?;
     }
 
     if let Some((request_id, payload)) = stream_result {
