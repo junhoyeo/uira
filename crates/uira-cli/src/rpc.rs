@@ -203,9 +203,10 @@ pub async fn run_rpc_mode(
     let mut event_system = uira_agent::create_event_system(working_directory);
     event_system.start();
 
-    let (agent, event_stream) = Agent::new(agent_config, client)
+    let agent = Agent::new(agent_config, client)
         .with_event_system(&event_system)
-        .with_event_stream();
+        .with_rollout()?;
+    let (agent, event_stream) = agent.with_event_stream();
     let cancel_signal = agent.control().cancel_signal();
     let session_id = agent.session().id.to_string();
     let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();

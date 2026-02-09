@@ -151,7 +151,7 @@ async fn run_exec(
 
     let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
-    let agent = Agent::new_with_executor(agent_config, client, Some(executor));
+    let agent = Agent::new_with_executor(agent_config, client, Some(executor)).with_rollout()?;
 
     if !json_output {
         println!("{} {}", "Running:".cyan().bold(), prompt.dimmed());
