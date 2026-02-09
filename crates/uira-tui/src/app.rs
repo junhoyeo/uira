@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -113,6 +113,7 @@ impl ReviewTarget {
     }
 }
 
+#[cfg(test)]
 fn parse_review_target(arguments: &[&str]) -> ReviewTarget {
     if arguments.is_empty() {
         return ReviewTarget::Staged;
@@ -126,6 +127,36 @@ fn parse_review_target(arguments: &[&str]) -> ReviewTarget {
     }
 }
 
+fn parse_review_target_from_command(raw_command: &str) -> ReviewTarget {
+    let remainder = raw_command
+        .trim()
+        .strip_prefix("/review")
+        .unwrap_or("")
+        .trim();
+
+    if remainder.is_empty() {
+        return ReviewTarget::Staged;
+    }
+
+    let target = if (remainder.starts_with('"') && remainder.ends_with('"'))
+        || (remainder.starts_with('\'') && remainder.ends_with('\''))
+    {
+        remainder[1..remainder.len() - 1].to_string()
+    } else {
+        remainder.to_string()
+    };
+
+    if Path::new(&target).exists() {
+        return ReviewTarget::File(target);
+    }
+
+    if is_commit_reference(&target) && is_valid_commit_reference(&target) {
+        ReviewTarget::Revision(target)
+    } else {
+        ReviewTarget::File(target)
+    }
+}
+
 fn is_commit_reference(target: &str) -> bool {
     target == "HEAD"
         || target.starts_with("HEAD~")
@@ -133,6 +164,11 @@ fn is_commit_reference(target: &str) -> bool {
         || (target.len() >= 7
             && target.len() <= 40
             && target.chars().all(|ch| ch.is_ascii_hexdigit()))
+}
+
+fn is_valid_commit_reference(target: &str) -> bool {
+    let spec = format!("{}^{{commit}}", target);
+    run_git_command(&["rev-parse", "--verify", &spec]).is_ok()
 }
 
 fn run_git_command(args: &[&str]) -> Result<String, String> {
@@ -159,25 +195,124 @@ fn run_git_command(args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn collect_review_content(target: &ReviewTarget) -> Result<String, String> {
+fn parse_binary_paths(numstat: &str) -> HashSet<String> {
+    numstat
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let added = parts.next()?;
+            let removed = parts.next()?;
+            let path = parts.collect::<Vec<_>>().join("\t");
+
+            if added == "-" || removed == "-" {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_diff_path(header: &str) -> Option<String> {
+    if !header.starts_with("diff --git ") {
+        return None;
+    }
+
+    let mut parts = header.split_whitespace();
+    let _ = parts.next();
+    let _ = parts.next();
+    let left = parts.next()?;
+    Some(left.trim_start_matches("a/").to_string())
+}
+
+fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String {
+    if binary_paths.is_empty() {
+        return diff.to_string();
+    }
+
+    let mut out = String::new();
+    let mut section = String::new();
+    let mut section_path: Option<String> = None;
+    let mut in_section = false;
+
+    for line in diff.lines() {
+        if line.starts_with("diff --git ") {
+            if in_section {
+                let is_binary = section_path
+                    .as_deref()
+                    .is_some_and(|p| binary_paths.contains(p));
+                if !is_binary {
+                    out.push_str(&section);
+                }
+                section.clear();
+            }
+            in_section = true;
+            section_path = parse_diff_path(line);
+        }
+
+        if in_section {
+            section.push_str(line);
+            section.push('\n');
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    if in_section {
+        let is_binary = section_path
+            .as_deref()
+            .is_some_and(|p| binary_paths.contains(p));
+        if !is_binary {
+            out.push_str(&section);
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
+fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>), String> {
     match target {
-        ReviewTarget::Staged => run_git_command(&["diff", "--staged", "--no-color"]),
+        ReviewTarget::Staged => {
+            let diff = run_git_command(&["diff", "--staged", "--no-color"])?;
+            let numstat = run_git_command(&["diff", "--staged", "--numstat"])?;
+            let binary_paths = parse_binary_paths(&numstat);
+            let filtered = filter_binary_sections(&diff, &binary_paths);
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((filtered, skipped))
+        }
         ReviewTarget::File(path) => {
             let staged = run_git_command(&["diff", "--staged", "--no-color", "--", path])?;
             let unstaged = run_git_command(&["diff", "--no-color", "--", path])?;
+            let staged_numstat = run_git_command(&["diff", "--staged", "--numstat", "--", path])?;
+            let unstaged_numstat = run_git_command(&["diff", "--numstat", "--", path])?;
+
+            let mut binary_paths = parse_binary_paths(&staged_numstat);
+            binary_paths.extend(parse_binary_paths(&unstaged_numstat));
+            let filtered_staged = filter_binary_sections(&staged, &binary_paths);
+            let filtered_unstaged = filter_binary_sections(&unstaged, &binary_paths);
 
             let mut chunks = Vec::new();
-            if !staged.is_empty() {
-                chunks.push(format!("### Staged changes\n{}", staged));
+            if !filtered_staged.is_empty() {
+                chunks.push(format!("### Staged changes\n{}", filtered_staged));
             }
-            if !unstaged.is_empty() {
-                chunks.push(format!("### Unstaged changes\n{}", unstaged));
+            if !filtered_unstaged.is_empty() {
+                chunks.push(format!("### Unstaged changes\n{}", filtered_unstaged));
             }
 
-            Ok(chunks.join("\n\n"))
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((chunks.join("\n\n"), skipped))
         }
         ReviewTarget::Revision(revision) => {
-            run_git_command(&["show", "--no-color", "--patch", revision])
+            let diff = run_git_command(&["show", "--no-color", "--patch", "--format=", revision])?;
+            let numstat = run_git_command(&["show", "--numstat", "--format=", revision])?;
+            let binary_paths = parse_binary_paths(&numstat);
+            let filtered = filter_binary_sections(&diff, &binary_paths);
+            let mut skipped: Vec<String> = binary_paths.into_iter().collect();
+            skipped.sort();
+            Ok((filtered, skipped))
         }
     }
 }
@@ -2017,10 +2152,11 @@ impl App {
     }
 
     fn run_review_command(&mut self, args: &[&str], raw_command: &str) {
-        let target = parse_review_target(args);
+        let _ = args;
+        let target = parse_review_target_from_command(raw_command);
         let target_description = target.description();
 
-        let content = match collect_review_content(&target) {
+        let (content, skipped_binary) = match collect_review_content(&target) {
             Ok(content) => content,
             Err(err) => {
                 self.push_message("error", format!("Failed to gather review input: {}", err));
@@ -2029,9 +2165,14 @@ impl App {
         };
 
         if content.is_empty() {
+            let suffix = if skipped_binary.is_empty() {
+                String::new()
+            } else {
+                format!(" Skipped binary files: {}.", skipped_binary.join(", "))
+            };
             self.push_message(
                 "system",
-                format!("No diff found for {}.", target_description),
+                format!("No diff found for {}.{}", target_description, suffix),
             );
             return;
         }
@@ -2045,7 +2186,12 @@ impl App {
             ),
         );
 
-        let review_prompt = build_review_prompt(&target, &content);
+        let mut review_prompt = build_review_prompt(&target, &content);
+        if !skipped_binary.is_empty() {
+            review_prompt.push_str("\n\nSkipped binary files: ");
+            review_prompt.push_str(&skipped_binary.join(", "));
+            review_prompt.push('.');
+        }
         if let Some(ref tx) = self.agent_input_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
@@ -2894,6 +3040,33 @@ mod tests {
             parse_review_target(&["HEAD~1"]),
             ReviewTarget::Revision("HEAD~1".to_string())
         );
+    }
+
+    #[test]
+    fn parse_review_target_from_command_supports_quoted_paths() {
+        assert_eq!(
+            parse_review_target_from_command("/review \"crates/uira-tui/src/app.rs\""),
+            ReviewTarget::File("crates/uira-tui/src/app.rs".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_binary_paths_detects_binary_entries() {
+        let binaries = parse_binary_paths("12\t4\tsrc/lib.rs\n-\t-\tassets/logo.png\n");
+        assert!(binaries.contains("assets/logo.png"));
+        assert!(!binaries.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn filter_binary_sections_removes_binary_diff() {
+        let mut binaries = HashSet::new();
+        binaries.insert("assets/logo.png".to_string());
+
+        let input = "diff --git a/src/lib.rs b/src/lib.rs\nindex 1..2 100644\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/assets/logo.png b/assets/logo.png\nindex 3..4 100644\nBinary files a/assets/logo.png and b/assets/logo.png differ\n";
+
+        let filtered = filter_binary_sections(input, &binaries);
+        assert!(filtered.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert!(!filtered.contains("diff --git a/assets/logo.png b/assets/logo.png"));
     }
 
     #[test]
