@@ -1,5 +1,6 @@
 //! Main agent implementation
 
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -1245,6 +1246,115 @@ impl Agent {
         }
     }
 
+    async fn emit_background_event_from_tool_output(&self, tool_name: &str, output: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            return;
+        };
+
+        match tool_name {
+            "delegate_task" => {
+                let Some(task_id) = value.get("taskId").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let description = value
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Background task started")
+                    .to_string();
+                let agent = value
+                    .get("agent")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                self.emit_event(ThreadEvent::BackgroundTaskSpawned {
+                    task_id: task_id.to_string(),
+                    description,
+                    agent,
+                })
+                .await;
+            }
+            "background_output" => {
+                let Some(task_id) = value.get("taskId").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let Some(status) = value.get("status").and_then(|v| v.as_str()) else {
+                    return;
+                };
+
+                match status {
+                    "queued" | "pending" | "running" => {
+                        let message = value
+                            .get("progress")
+                            .and_then(|p| p.get("lastTool"))
+                            .and_then(|v| v.as_str())
+                            .map(|tool| format!("last tool: {tool}"));
+                        self.emit_event(ThreadEvent::BackgroundTaskProgress {
+                            task_id: task_id.to_string(),
+                            status: status.to_string(),
+                            message,
+                        })
+                        .await;
+                    }
+                    "completed" | "error" | "cancelled" => {
+                        let started_at = value
+                            .get("startedAt")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                            .map(|dt| dt.with_timezone(&Utc));
+                        let completed_at = value
+                            .get("completedAt")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                            .map(|dt| dt.with_timezone(&Utc));
+                        let duration_secs = started_at
+                            .zip(completed_at)
+                            .map(|(start, end)| {
+                                (end - start).num_milliseconds().max(0) as f64 / 1000.0
+                            })
+                            .unwrap_or(0.0);
+                        let result_preview = value
+                            .get("result")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.chars().take(200).collect::<String>())
+                            .or_else(|| {
+                                value
+                                    .get("error")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.chars().take(200).collect::<String>())
+                            });
+                        self.emit_event(ThreadEvent::BackgroundTaskCompleted {
+                            task_id: task_id.to_string(),
+                            success: status == "completed",
+                            result_preview,
+                            duration_secs,
+                        })
+                        .await;
+                    }
+                    _ => {}
+                }
+            }
+            "background_cancel" => {
+                let Some(task_id) = value.get("taskId").and_then(|v| v.as_str()) else {
+                    return;
+                };
+                let status = value
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("cancelled");
+                if status == "cancelled" {
+                    self.emit_event(ThreadEvent::BackgroundTaskCompleted {
+                        task_id: task_id.to_string(),
+                        success: false,
+                        result_preview: Some("Task cancelled".to_string()),
+                        duration_secs: 0.0,
+                    })
+                    .await;
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Execute tool calls and return results as content blocks
     ///
     /// This method handles approval flow at the Agent level:
@@ -1435,8 +1545,11 @@ impl Agent {
             approved_calls.push((call.id.clone(), call.name.clone(), call.input.clone()));
         }
 
-        // Phase 2: Emit tool start events (must be sequential for proper ordering)
+        // Phase 2: Emit tool start events and build call_id->name mapping
+        let mut call_id_to_name: HashMap<String, String> =
+            HashMap::with_capacity(approved_calls.len());
         for (id, name, input) in &approved_calls {
+            call_id_to_name.insert(id.clone(), name.clone());
             self.record_tool_call(id, name, input);
             self.emit_event(ThreadEvent::ItemStarted {
                 item: Item::ToolCall {
@@ -1459,7 +1572,9 @@ impl Agent {
             .await;
 
         // Phase 4: Process results and emit events (must be sequential)
+        let mut todo_updated = false;
         for (call_id, result) in execution_results {
+            let tool_name = call_id_to_name.get(&call_id).map(|s| s.as_str());
             match result {
                 Ok(output) => {
                     let content = output.as_text().unwrap_or("").to_string();
@@ -1473,11 +1588,20 @@ impl Agent {
                     self.emit_event(ThreadEvent::ItemCompleted {
                         item: Item::ToolResult {
                             tool_call_id: call_id,
-                            output: content,
+                            output: content.clone(),
                             is_error: false,
                         },
                     })
                     .await;
+
+                    if let Some(name) = tool_name {
+                        self.emit_background_event_from_tool_output(name, &content)
+                            .await;
+                    }
+
+                    if tool_name == Some("TodoWrite") {
+                        todo_updated = true;
+                    }
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -1494,6 +1618,12 @@ impl Agent {
                     .await;
                 }
             }
+        }
+
+        // Phase 5: Emit TodoUpdated event for TUI sidebar
+        if todo_updated {
+            let todos = self.session.todo_store.get(&ctx.session_id).await;
+            self.emit_event(ThreadEvent::TodoUpdated { todos }).await;
         }
 
         Ok(results)
