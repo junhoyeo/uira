@@ -521,10 +521,24 @@ async fn run_auth(
 
                 let server_clone = server.clone();
                 std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async {
-                        let _ = server_clone.start().await;
-                    });
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+
+                    match runtime {
+                        Ok(rt) => {
+                            rt.block_on(async {
+                                let _ = server_clone.start().await;
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{}: {}",
+                                "Warning: Failed to start OAuth callback runtime".yellow(),
+                                e
+                            );
+                        }
+                    }
                 });
 
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -626,7 +640,16 @@ async fn run_config(
     match command {
         ConfigCommands::Show => {
             println!("{}", "Current configuration:".cyan().bold());
-            println!("{}", serde_json::to_string_pretty(config)?);
+            let mut redacted = serde_json::to_value(config)?;
+            if let Some(api_keys) = redacted
+                .get_mut("api_keys")
+                .and_then(|value| value.as_object_mut())
+            {
+                for value in api_keys.values_mut() {
+                    *value = serde_json::Value::String("[REDACTED]".to_string());
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&redacted)?);
         }
         ConfigCommands::Get { key } => {
             let value = match key.as_str() {

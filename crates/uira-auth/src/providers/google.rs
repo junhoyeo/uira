@@ -1,3 +1,4 @@
+use crate::types::expires_at_from_now;
 use crate::{
     generate_pkce, AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result,
 };
@@ -5,6 +6,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
+
+const HTTP_TIMEOUT_SECS: u64 = 30;
 
 const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -70,7 +73,10 @@ impl GoogleAuth {
             .as_ref()
             .ok_or_else(|| AuthError::OAuthFailed("Client ID not configured".to_string()))?;
 
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
 
         let request = TokenRequest {
             grant_type: "authorization_code".to_string(),
@@ -101,7 +107,7 @@ impl GoogleAuth {
         Ok(OAuthTokens {
             access_token: token_response.access_token,
             refresh_token: token_response.refresh_token,
-            expires_at: token_response.expires_in,
+            expires_at: expires_at_from_now(token_response.expires_in),
             token_type: token_response.token_type,
         })
     }
@@ -112,7 +118,10 @@ impl GoogleAuth {
             .as_ref()
             .ok_or_else(|| AuthError::OAuthFailed("Client ID not configured".to_string()))?;
 
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
 
         let request = RefreshTokenRequest {
             grant_type: "refresh_token".to_string(),
@@ -141,7 +150,7 @@ impl GoogleAuth {
         Ok(OAuthTokens {
             access_token: token_response.access_token,
             refresh_token: token_response.refresh_token,
-            expires_at: token_response.expires_in,
+            expires_at: expires_at_from_now(token_response.expires_in),
             token_type: token_response.token_type,
         })
     }

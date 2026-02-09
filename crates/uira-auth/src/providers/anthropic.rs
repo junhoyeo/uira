@@ -1,3 +1,4 @@
+use crate::types::expires_at_from_now;
 use crate::{
     generate_pkce, AuthError, AuthMethod, AuthProvider, OAuthChallenge, OAuthTokens, Result,
 };
@@ -5,6 +6,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
+
+const HTTP_TIMEOUT_SECS: u64 = 30;
 
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
@@ -63,7 +66,10 @@ impl AnthropicAuth {
     }
 
     async fn exchange_code_impl(&self, code: &str, verifier: &str) -> Result<OAuthTokens> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
 
         // Code comes as "code#state" format from Anthropic's code-copy flow
         let (auth_code, state) = if let Some(pos) = code.find('#') {
@@ -103,13 +109,16 @@ impl AnthropicAuth {
         Ok(OAuthTokens {
             access_token: token_response.access_token,
             refresh_token: token_response.refresh_token,
-            expires_at: token_response.expires_in,
+            expires_at: expires_at_from_now(token_response.expires_in),
             token_type: token_response.token_type,
         })
     }
 
     async fn refresh_token_impl(&self, refresh_token: &str) -> Result<OAuthTokens> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| AuthError::OAuthFailed(e.to_string()))?;
 
         let request = RefreshTokenRequest {
             grant_type: "refresh_token".to_string(),
@@ -139,7 +148,7 @@ impl AnthropicAuth {
         Ok(OAuthTokens {
             access_token: token_response.access_token,
             refresh_token: token_response.refresh_token,
-            expires_at: token_response.expires_in,
+            expires_at: expires_at_from_now(token_response.expires_in),
             token_type: token_response.token_type,
         })
     }

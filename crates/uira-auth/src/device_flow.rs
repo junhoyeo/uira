@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 use crate::error::{AuthError, Result};
-use crate::types::OAuthTokens;
+use crate::types::{expires_at_from_now, OAuthTokens};
+
+const HTTP_TIMEOUT_SECS: u64 = 30;
 
 /// Response from device authorization endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +36,7 @@ impl From<RawTokenResponse> for OAuthTokens {
         OAuthTokens {
             access_token: raw.access_token,
             refresh_token: raw.refresh_token,
-            expires_at: raw.expires_in,
+            expires_at: expires_at_from_now(raw.expires_in),
             token_type: raw.token_type,
         }
     }
@@ -70,7 +72,10 @@ pub async fn poll_for_token(
     interval: u64,
     expires_in: u64,
 ) -> Result<OAuthTokens> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| AuthError::NetworkError(e.to_string()))?;
     let mut poll_interval = Duration::from_secs(interval);
     let timeout = Duration::from_secs(expires_in);
     let start = Instant::now();
@@ -140,8 +145,8 @@ pub async fn poll_for_token(
             }
             Err(e) => {
                 return Err(AuthError::OAuthError(format!(
-                    "Failed to parse token response: {} - Body: {}",
-                    e, body
+                    "Failed to parse token response: {}",
+                    e
                 )));
             }
         }
@@ -150,7 +155,10 @@ pub async fn poll_for_token(
 
 /// Initiates device authorization flow
 pub async fn start_device_flow(config: &DeviceFlowConfig) -> Result<DeviceCodeResponse> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| AuthError::NetworkError(e.to_string()))?;
 
     let response = client
         .post(&config.device_auth_url)

@@ -16,6 +16,18 @@ pub struct OAuthTokens {
     pub token_type: String,
 }
 
+pub fn expires_at_from_now(expires_in_seconds: Option<i64>) -> Option<i64> {
+    let expires_in = expires_in_seconds?;
+    if expires_in <= 0 {
+        return None;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some(now.as_secs() as i64 + expires_in)
+}
+
 impl std::fmt::Debug for OAuthTokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OAuthTokens")
