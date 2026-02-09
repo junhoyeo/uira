@@ -273,11 +273,11 @@ impl RolloutRecorder {
 
     /// Get the sessions directory
     fn sessions_dir() -> std::io::Result<PathBuf> {
-        let data_dir = dirs::data_dir().or_else(dirs::home_dir).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "No data directory found")
+        let home_dir = dirs::home_dir().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "No home directory found")
         })?;
 
-        Ok(data_dir.join("uira").join("sessions"))
+        Ok(home_dir.join(".uira").join("sessions"))
     }
 
     /// Append an item to the rollout (immediate flush)

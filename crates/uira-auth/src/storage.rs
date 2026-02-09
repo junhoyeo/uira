@@ -65,9 +65,9 @@ impl CredentialStore {
     }
 
     fn storage_path() -> Result<PathBuf> {
-        let data_dir = dirs::data_local_dir()
-            .ok_or_else(|| AuthError::StorageError("No data directory found".to_string()))?;
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| AuthError::StorageError("No home directory found".to_string()))?;
 
-        Ok(data_dir.join("uira").join("auth.json"))
+        Ok(home_dir.join(".uira").join("auth.json"))
     }
 }

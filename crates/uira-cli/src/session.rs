@@ -45,11 +45,10 @@ impl SessionStorage {
     }
 
     fn sessions_dir() -> std::io::Result<PathBuf> {
-        let data_dir = dirs::data_dir()
-            .or_else(dirs::home_dir)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No data dir"))?;
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No home dir"))?;
 
-        Ok(data_dir.join("uira").join("sessions"))
+        Ok(home_dir.join(".uira").join("sessions"))
     }
 
     fn validate_session_id(session_id: &str) -> std::io::Result<()> {
