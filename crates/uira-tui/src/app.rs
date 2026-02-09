@@ -173,6 +173,8 @@ fn is_valid_commit_reference(target: &str) -> bool {
 
 fn run_git_command(args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
+        .arg("-c")
+        .arg("core.quotePath=false")
         .args(args)
         .output()
         .map_err(|err| format!("Failed to run `git {}`: {}", args.join(" "), err))?;
@@ -205,7 +207,7 @@ fn parse_binary_paths(numstat: &str) -> HashSet<String> {
             let path = parts.collect::<Vec<_>>().join("\t");
 
             if added == "-" || removed == "-" {
-                Some(path)
+                Some(normalize_numstat_path(&path))
             } else {
                 None
             }
@@ -213,16 +215,64 @@ fn parse_binary_paths(numstat: &str) -> HashSet<String> {
         .collect()
 }
 
-fn parse_diff_path(header: &str) -> Option<String> {
-    if !header.starts_with("diff --git ") {
+fn normalize_numstat_path(path: &str) -> String {
+    let path = path.trim();
+    if let Some((prefix, rest)) = path.split_once('{') {
+        if let Some((inner, suffix)) = rest.split_once('}') {
+            if let Some((_, to)) = inner.split_once(" => ") {
+                return format!("{}{}{}", prefix, to.trim(), suffix);
+            }
+        }
+    }
+
+    if let Some((_, to)) = path.rsplit_once(" => ") {
+        return to.trim().to_string();
+    }
+
+    path.to_string()
+}
+
+fn take_diff_token(input: &str) -> Option<(String, &str)> {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() {
         return None;
     }
 
-    let mut parts = header.split_whitespace();
-    let _ = parts.next();
-    let _ = parts.next();
-    let left = parts.next()?;
-    Some(left.trim_start_matches("a/").to_string())
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        let mut escaped = false;
+        let mut token = String::new();
+        for (idx, ch) in rest.char_indices() {
+            if escaped {
+                token.push(ch);
+                escaped = false;
+                continue;
+            }
+            if ch == '\\' {
+                escaped = true;
+                continue;
+            }
+            if ch == '"' {
+                let tail = &rest[idx + ch.len_utf8()..];
+                return Some((token, tail));
+            }
+            token.push(ch);
+        }
+        return None;
+    }
+
+    let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    Some((trimmed[..end].to_string(), &trimmed[end..]))
+}
+
+fn parse_diff_paths(header: &str) -> Option<(String, String)> {
+    let rest = header.strip_prefix("diff --git ")?;
+    let (left, rest) = take_diff_token(rest)?;
+    let (right, _) = take_diff_token(rest)?;
+
+    Some((
+        left.trim_start_matches("a/").to_string(),
+        right.trim_start_matches("b/").to_string(),
+    ))
 }
 
 fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String {
@@ -232,22 +282,22 @@ fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String 
 
     let mut out = String::new();
     let mut section = String::new();
-    let mut section_path: Option<String> = None;
+    let mut section_paths: Option<(String, String)> = None;
     let mut in_section = false;
 
     for line in diff.lines() {
         if line.starts_with("diff --git ") {
             if in_section {
-                let is_binary = section_path
-                    .as_deref()
-                    .is_some_and(|p| binary_paths.contains(p));
+                let is_binary = section_paths.as_ref().is_some_and(|(left, right)| {
+                    binary_paths.contains(left) || binary_paths.contains(right)
+                });
                 if !is_binary {
                     out.push_str(&section);
                 }
                 section.clear();
             }
             in_section = true;
-            section_path = parse_diff_path(line);
+            section_paths = parse_diff_paths(line);
         }
 
         if in_section {
@@ -260,9 +310,9 @@ fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String 
     }
 
     if in_section {
-        let is_binary = section_path
-            .as_deref()
-            .is_some_and(|p| binary_paths.contains(p));
+        let is_binary = section_paths.as_ref().is_some_and(|(left, right)| {
+            binary_paths.contains(left) || binary_paths.contains(right)
+        });
         if !is_binary {
             out.push_str(&section);
         }
