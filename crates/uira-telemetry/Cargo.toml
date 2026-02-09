@@ -17,6 +17,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
 
 opentelemetry = { version = "0.21", optional = true }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"], optional = true }
@@ -24,4 +25,3 @@ opentelemetry-otlp = { version = "0.14", optional = true }
 tonic = { version = "0.10", optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true }

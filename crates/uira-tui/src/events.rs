@@ -5,6 +5,7 @@ use uira_protocol::{ThreadEvent, TodoItem};
 #[derive(Debug)]
 pub enum AppEvent {
     Agent(ThreadEvent),
+    TracingLog(String),
     UserInput(String),
     ApprovalRequest(crate::views::ApprovalRequest),
     TodoUpdated(Vec<TodoItem>),

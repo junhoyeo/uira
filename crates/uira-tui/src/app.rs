@@ -643,6 +643,19 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
     });
 }
 
+fn spawn_tracing_log_handler(
+    mut tracing_rx: mpsc::UnboundedReceiver<String>,
+    event_tx: mpsc::Sender<AppEvent>,
+) {
+    tokio::spawn(async move {
+        while let Some(message) = tracing_rx.recv().await {
+            if event_tx.send(AppEvent::TracingLog(message)).await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
 pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
@@ -774,6 +787,7 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
+        tracing_rx: Option<mpsc::UnboundedReceiver<String>>,
     ) -> std::io::Result<()> {
         let working_directory = config
             .working_directory
@@ -806,6 +820,10 @@ impl App {
         });
 
         spawn_approval_handler(approval_rx, self.event_tx.clone());
+
+        if let Some(rx) = tracing_rx {
+            spawn_tracing_log_handler(rx, self.event_tx.clone());
+        }
 
         tokio::spawn(async move {
             if let Err(e) = agent.run_interactive().await {
@@ -2168,6 +2186,9 @@ impl App {
         match event {
             AppEvent::Quit => self.should_quit = true,
             AppEvent::Agent(thread_event) => self.handle_agent_event(thread_event),
+            AppEvent::TracingLog(msg) => {
+                self.push_message("error", format!("log: {}", msg));
+            }
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
             }
