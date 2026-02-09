@@ -4,10 +4,11 @@ use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 use uira_oxc::{LintRule, Linter, Severity};
 use uira_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use walkdir::WalkDir;
@@ -75,11 +76,15 @@ impl ToolExecutor {
         let extensions = get_extensions_for_lang(lang);
         let mut files = Vec::new();
         let mut seen = HashSet::new();
+        let root_canonical = self
+            .root_path
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve workspace root: {}", e))?;
 
         if let Some(paths) = args["paths"].as_array() {
             for path in paths {
                 if let Some(p) = path.as_str() {
-                    let full_path = self.root_path.join(p);
+                    let full_path = resolve_workspace_path(&root_canonical, p)?;
                     if full_path.is_file() && seen.insert(full_path.clone()) {
                         files.push(full_path);
                     } else if full_path.is_dir() {
@@ -92,11 +97,20 @@ impl ToolExecutor {
         if let Some(globs) = args["globs"].as_array() {
             for g in globs {
                 if let Some(pattern) = g.as_str() {
-                    let full_pattern = self.root_path.join(pattern);
+                    validate_relative_pattern(pattern)?;
+                    let full_pattern = root_canonical.join(pattern);
                     if let Ok(entries) = glob(full_pattern.to_string_lossy().as_ref()) {
                         for entry in entries.flatten() {
-                            if entry.is_file() && seen.insert(entry.clone()) {
-                                files.push(entry);
+                            if entry.is_file() {
+                                let canonical_entry = match entry.canonicalize() {
+                                    Ok(p) => p,
+                                    Err(_) => continue,
+                                };
+                                if canonical_entry.starts_with(&root_canonical)
+                                    && seen.insert(canonical_entry.clone())
+                                {
+                                    files.push(canonical_entry);
+                                }
                             }
                         }
                     }
@@ -316,27 +330,38 @@ impl ToolExecutor {
                 continue;
             }
 
-            let mut new_content = content.clone();
-            let mut offset: i64 = 0;
-
+            let mut edits = Vec::new();
             for m in &matches {
                 let node = m.get_node();
                 let edit = m.replace_by(rewrite);
                 let inserted = String::from_utf8_lossy(&edit.inserted_text);
-                let start_byte = (edit.position as i64 + offset) as usize;
-                let end_byte = start_byte + edit.deleted_length;
+                edits.push((
+                    edit.position,
+                    edit.deleted_length,
+                    inserted.to_string(),
+                    node.start_pos().line() + 1,
+                    node.text().to_string(),
+                ));
+            }
 
-                let before = &new_content[..start_byte];
-                let after = &new_content[end_byte..];
-                new_content = format!("{}{}{}", before, inserted, after);
+            edits.sort_by(|a, b| b.0.cmp(&a.0));
+            let mut new_content = content.clone();
+            for (position, deleted_length, inserted, line, original) in edits {
+                let start_byte = position;
+                let end_byte = start_byte.saturating_add(deleted_length);
+                if start_byte > new_content.len() || end_byte > new_content.len() {
+                    return Err(format!(
+                        "ast_replace generated invalid edit range for {}",
+                        file_path.display()
+                    ));
+                }
 
-                offset += edit.inserted_text.len() as i64 - edit.deleted_length as i64;
+                new_content.replace_range(start_byte..end_byte, &inserted);
 
-                let pos = node.start_pos();
                 results.push(json!({
                     "file": file_path.to_string_lossy(),
-                    "line": pos.line() + 1,
-                    "original": node.text(),
+                    "line": line,
+                    "original": original,
                     "replacement": inserted,
                 }));
             }
@@ -420,15 +445,19 @@ impl ToolExecutor {
     }
 
     async fn run_cargo_check(&self, _file_path: &str) -> Result<String, String> {
-        let output = Command::new("cargo")
-            .arg("check")
-            .arg("--message-format=short")
-            .current_dir(&self.root_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| format!("Failed to run cargo check: {}", e))?;
+        let output = timeout(
+            Duration::from_secs(120),
+            Command::new("cargo")
+                .arg("check")
+                .arg("--message-format=short")
+                .current_dir(&self.root_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| "cargo check timed out after 120 seconds".to_string())?
+        .map_err(|e| format!("Failed to run cargo check: {}", e))?;
 
         let stderr = String::from_utf8_lossy(&output.stderr);
         if output.status.success() {
@@ -439,16 +468,20 @@ impl ToolExecutor {
     }
 
     async fn run_pyright_diagnostics(&self, file_path: &str) -> Result<String, String> {
-        let output = Command::new("npx")
-            .arg("pyright")
-            .arg("--outputjson")
-            .arg(file_path)
-            .current_dir(&self.root_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| format!("Failed to run pyright: {}", e))?;
+        let output = timeout(
+            Duration::from_secs(120),
+            Command::new("npx")
+                .arg("pyright")
+                .arg("--outputjson")
+                .arg(file_path)
+                .current_dir(&self.root_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| "pyright diagnostics timed out after 120 seconds".to_string())?
+        .map_err(|e| format!("Failed to run pyright: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         if stdout.trim().is_empty() {
@@ -725,4 +758,35 @@ impl ToolExecutor {
             Err("Must provide either 'taskId' or 'all: true'".to_string())
         }
     }
+}
+
+fn resolve_workspace_path(root: &Path, raw: &str) -> Result<PathBuf, String> {
+    validate_relative_pattern(raw)?;
+    let joined = root.join(raw);
+    let canonical = joined
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve path '{}': {}", raw, e))?;
+    if !canonical.starts_with(root) {
+        return Err(format!("Path escapes workspace root: {}", raw));
+    }
+    Ok(canonical)
+}
+
+fn validate_relative_pattern(raw: &str) -> Result<(), String> {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return Err(format!("Absolute paths are not allowed: {}", raw));
+    }
+    if path.components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!(
+            "Parent/root path traversal is not allowed: {}",
+            raw
+        ));
+    }
+    Ok(())
 }

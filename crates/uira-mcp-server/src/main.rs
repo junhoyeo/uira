@@ -422,7 +422,10 @@ async fn main() {
                 let _ = writeln!(
                     stdout,
                     "{}",
-                    serde_json::to_string(&error_response).unwrap()
+                    serde_json::to_string(&error_response)
+                        .unwrap_or_else(|_| {
+                            "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"serialization error\"}}".to_string()
+                        })
                 );
                 let _ = stdout.flush();
                 continue;
@@ -433,7 +436,11 @@ async fn main() {
 
         // Only send response if it has an id (not a notification)
         if response.id.is_some() || response.error.is_some() {
-            let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
+            let serialized = serde_json::to_string(&response).unwrap_or_else(|_| {
+                "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"serialization error\"}}"
+                    .to_string()
+            });
+            let _ = writeln!(stdout, "{}", serialized);
             let _ = stdout.flush();
         }
     }
