@@ -45,11 +45,16 @@ impl SessionStorage {
     }
 
     fn sessions_dir() -> std::io::Result<PathBuf> {
-        let data_dir = dirs::data_dir()
-            .or_else(dirs::home_dir)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No data dir"))?;
+        // Prefer ~/.uira for consistency with other CLI tools, fall back to XDG data dir
+        // for environments where HOME is unset (systemd services, containers)
+        let base_dir = dirs::home_dir()
+            .map(|h| h.join(".uira"))
+            .or_else(|| dirs::data_dir().map(|d| d.join("uira")))
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "No home or data dir")
+            })?;
 
-        Ok(data_dir.join("uira").join("sessions"))
+        Ok(base_dir.join("sessions"))
     }
 
     fn validate_session_id(session_id: &str) -> std::io::Result<()> {

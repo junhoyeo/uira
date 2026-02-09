@@ -65,9 +65,15 @@ impl CredentialStore {
     }
 
     fn storage_path() -> Result<PathBuf> {
-        let data_dir = dirs::data_local_dir()
-            .ok_or_else(|| AuthError::StorageError("No data directory found".to_string()))?;
+        // Prefer ~/.uira for consistency with other CLI tools, fall back to XDG data dir
+        // for environments where HOME is unset (systemd services, containers)
+        let base_dir = dirs::home_dir()
+            .map(|h| h.join(".uira"))
+            .or_else(|| dirs::data_local_dir().map(|d| d.join("uira")))
+            .ok_or_else(|| {
+                AuthError::StorageError("No home or data directory found".to_string())
+            })?;
 
-        Ok(data_dir.join("uira").join("auth.json"))
+        Ok(base_dir.join("auth.json"))
     }
 }

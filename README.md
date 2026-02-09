@@ -84,7 +84,7 @@ uira-agent auth logout anthropic
 - **Anthropic**: Uses code-copy flow. Opens browser → authorize → copy the code → paste in terminal
 - **OpenAI/Google**: Uses device code flow with automatic polling
 
-Credentials are securely stored in `~/.uira/credentials/`.
+Credentials are securely stored in `~/.uira/auth.json`.
 
 ## TUI Commands & Shortcuts
 
