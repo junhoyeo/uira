@@ -179,6 +179,8 @@ impl DelegationToolProvider {
             Ok(ToolOutput::text(
                 serde_json::to_string_pretty(&json!({
                     "taskId": task.id,
+                    "agent": task.agent,
+                    "description": task.description,
                     "status": "running",
                     "message": "Task started in background. Use background_output to get results."
                 }))
