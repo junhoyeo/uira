@@ -60,6 +60,7 @@ pub struct ForkResult {
 }
 
 pub enum AgentCommand {
+    Interrupt,
     SwitchClient(Arc<dyn ModelClient>),
     Fork {
         branch_name: Option<String>,
