@@ -256,10 +256,14 @@ impl Agent {
                                 + '_,
                         >,
                     > = match current_input {
-                        InteractiveInput::Message(message) => Box::pin(self.run_message(message)),
-                        InteractiveInput::Prompt(prompt) => {
-                            Box::pin(self.run_message(Message::user(prompt)))
+                        InteractiveInput::Message(message) => {
+                            if let MessageContent::Text(text) = &message.content {
+                                Box::pin(self.run_prompt_owned(text.clone()))
+                            } else {
+                                Box::pin(self.run_message(message))
+                            }
                         }
+                        InteractiveInput::Prompt(prompt) => Box::pin(self.run_prompt_owned(prompt)),
                     };
                     tokio::pin!(run_future);
 
@@ -753,6 +757,13 @@ impl Agent {
             .map_err(AgentLoopError::Context)?;
 
         self.run_turn_loop().await
+    }
+
+    async fn run_prompt_owned(
+        &mut self,
+        prompt: String,
+    ) -> Result<ExecutionResult, AgentLoopError> {
+        self.run(&prompt).await
     }
 
     async fn run_turn_loop(&mut self) -> Result<ExecutionResult, AgentLoopError> {
