@@ -5,6 +5,7 @@ pub struct LspServerConfig {
     pub args: Vec<String>,
     pub extensions: Vec<String>,
     pub install_hint: String,
+    pub install_command: Option<String>,
 }
 
 pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
@@ -20,8 +21,8 @@ pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
                     ".js".to_string(),
                     ".jsx".to_string(),
                 ],
-                install_hint: "Install with: npm install -g typescript-language-server typescript"
-                    .to_string(),
+                install_hint: "Run: npm install -g typescript-language-server typescript".to_string(),
+                install_command: Some("npm install -g typescript-language-server typescript".to_string()),
             })
         }
         "rust" => Some(LspServerConfig {
@@ -29,21 +30,24 @@ pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
             command: "rust-analyzer".to_string(),
             args: vec![],
             extensions: vec![".rs".to_string()],
-            install_hint: "Install with: rustup component add rust-analyzer OR download from https://github.com/rust-lang/rust-analyzer/releases".to_string(),
+            install_hint: "Run: curl -fsSL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-aarch64-apple-darwin.gz | gunzip > ~/.local/bin/rust-analyzer && chmod +x ~/.local/bin/rust-analyzer".to_string(),
+            install_command: Some("curl -fsSL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-aarch64-apple-darwin.gz | gunzip > ~/.local/bin/rust-analyzer && chmod +x ~/.local/bin/rust-analyzer".to_string()),
         }),
         "python" => Some(LspServerConfig {
             name: "pyright".to_string(),
             command: "pyright-langserver".to_string(),
             args: vec!["--stdio".to_string()],
             extensions: vec![".py".to_string()],
-            install_hint: "Install with: npm install -g pyright".to_string(),
+            install_hint: "Run: npm install -g pyright".to_string(),
+            install_command: Some("npm install -g pyright".to_string()),
         }),
         "go" => Some(LspServerConfig {
             name: "gopls".to_string(),
             command: "gopls".to_string(),
             args: vec!["serve".to_string()],
             extensions: vec![".go".to_string()],
-            install_hint: "Install with: go install golang.org/x/tools/gopls@latest".to_string(),
+            install_hint: "Run: go install golang.org/x/tools/gopls@latest".to_string(),
+            install_command: Some("go install golang.org/x/tools/gopls@latest".to_string()),
         }),
         "c" | "cpp" => Some(LspServerConfig {
             name: "clangd".to_string(),
@@ -55,7 +59,8 @@ pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
                 ".h".to_string(),
                 ".hpp".to_string(),
             ],
-            install_hint: "Install with: apt install clangd or brew install llvm".to_string(),
+            install_hint: "Run: brew install llvm (macOS) or apt install clangd (Linux)".to_string(),
+            install_command: None,
         }),
         "java" => Some(LspServerConfig {
             name: "jdtls".to_string(),
@@ -63,6 +68,7 @@ pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
             args: vec![],
             extensions: vec![".java".to_string()],
             install_hint: "Install Eclipse JDT Language Server from eclipse.org".to_string(),
+            install_command: None,
         }),
         _ => None,
     }

@@ -92,11 +92,22 @@ impl LspClientImpl {
             .stderr(Stdio::null())
             .env("PATH", &extended_path);
 
-        let mut child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
-            message: format!(
-                "Failed to start LSP server: {}. {}",
-                e, server_config.install_hint
-            ),
+        let mut child = cmd.spawn().map_err(|e| {
+            let install_info = if let Some(ref cmd) = server_config.install_command {
+                format!(
+                    "\n\nTo fix this, run the following command:\n```bash\n{}\n```",
+                    cmd
+                )
+            } else {
+                format!("\n\n{}", server_config.install_hint)
+            };
+
+            ToolError::ExecutionFailed {
+                message: format!(
+                    "LSP server '{}' not found: {}.{}",
+                    server_config.command, e, install_info
+                ),
+            }
         })?;
 
         let stdin = child
