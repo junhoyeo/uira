@@ -152,6 +152,35 @@ refactor: extract streaming logic to separate module
 docs: update README with new CLI options
 ```
 
+### Commit Message Rules (CRITICAL)
+
+**DO:**
+- Describe the actual change in plain, technical terms
+- Keep commits atomic (one logical change per commit)
+- Use the format: `<type>(<scope>): <what changed and why>`
+
+**DON'T:**
+- Reference internal review labels (P0, P1, P2, etc.)
+- Mention "Oracle", "audit", "review findings" in commit messages
+- Bundle multiple unrelated fixes into one commit
+- Use vague messages like "fix issues" or "address feedback"
+
+**Good Examples:**
+```
+fix(lsp): pass server args to stdio spawn command
+fix(lsp): convert 1-indexed input lines to 0-indexed LSP positions
+fix(gemini): parse SSE data frames instead of raw JSON lines
+fix(orchestrator): route provider tools through approval flow
+```
+
+**Bad Examples (NEVER do this):**
+```
+fix: address P0 issues from Oracle review      ❌
+fix(hardening): Oracle Round 4 fixes           ❌
+fix: audit findings                            ❌
+fix: various improvements                      ❌
+```
+
 ## Development Commands
 
 ```bash

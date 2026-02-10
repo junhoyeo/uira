@@ -29,7 +29,7 @@ pub fn get_server_config(language: &str) -> Option<LspServerConfig> {
             command: "rust-analyzer".to_string(),
             args: vec![],
             extensions: vec![".rs".to_string()],
-            install_hint: "Install with: rustup component add rust-analyzer".to_string(),
+            install_hint: "Install with: rustup component add rust-analyzer OR download from https://github.com/rust-lang/rust-analyzer/releases".to_string(),
         }),
         "python" => Some(LspServerConfig {
             name: "pyright".to_string(),

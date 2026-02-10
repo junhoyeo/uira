@@ -40,6 +40,22 @@ impl LspClientImpl {
         }
     }
 
+    fn build_extended_path() -> String {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+
+        let extra_paths = [
+            format!("{}/.cargo/bin", home),
+            format!("{}/.local/bin", home),
+            "/usr/local/bin".to_string(),
+            "/opt/homebrew/bin".to_string(),
+        ];
+
+        let mut paths: Vec<&str> = extra_paths.iter().map(|s| s.as_str()).collect();
+        paths.push(&current_path);
+        paths.join(":")
+    }
+
     async fn get_or_start_server(
         &self,
         language: &str,
@@ -64,13 +80,17 @@ impl LspClientImpl {
             }
         })?;
 
+        // Build extended PATH including common tool locations
+        let extended_path = Self::build_extended_path();
+
         let mut cmd = Command::new(&server_config.command);
         if !server_config.args.is_empty() {
             cmd.args(&server_config.args);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .env("PATH", &extended_path);
 
         let mut child = cmd.spawn().map_err(|e| ToolError::ExecutionFailed {
             message: format!(
