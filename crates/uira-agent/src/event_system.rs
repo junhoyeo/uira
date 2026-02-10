@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uira_events::{BroadcastBus, EventBus, HandlerRegistry, SubscriberRunner};
-use uira_hooks::create_legacy_adapter;
+use uira_hooks::create_hook_event_adapter;
 
 pub struct EventSystem {
     pub bus: Arc<BroadcastBus>,
@@ -14,8 +14,8 @@ impl EventSystem {
         let bus = Arc::new(BroadcastBus::new());
         let mut registry = HandlerRegistry::new();
 
-        let legacy_adapter = create_legacy_adapter(working_directory);
-        registry.register(Arc::new(legacy_adapter));
+        let hook_adapter = create_hook_event_adapter(working_directory);
+        registry.register(Arc::new(hook_adapter));
 
         Self {
             bus,
@@ -28,8 +28,8 @@ impl EventSystem {
         let bus = Arc::new(BroadcastBus::with_capacity(capacity));
         let mut registry = HandlerRegistry::new();
 
-        let legacy_adapter = create_legacy_adapter(working_directory);
-        registry.register(Arc::new(legacy_adapter));
+        let hook_adapter = create_hook_event_adapter(working_directory);
+        registry.register(Arc::new(hook_adapter));
 
         Self {
             bus,

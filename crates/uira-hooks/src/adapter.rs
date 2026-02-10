@@ -1,9 +1,7 @@
-//! Legacy Hook Adapter - Bridges old HookRegistry to new EventBus
+//! Hook Event Adapter - Bridges HookRegistry to EventBus
 //!
 //! This adapter allows the existing hooks to receive events from the new
 //! unified event bus system while we migrate to the new subscriber model.
-
-#![allow(deprecated)]
 
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -16,13 +14,15 @@ use uira_events::{
     Event, EventCategory, EventHandler, HandlerResult, SessionEndReason, SubscriptionFilter,
 };
 
-/// Adapter that wraps the legacy HookRegistry to work with the new EventBus
-pub struct LegacyHookAdapter {
+const HANDLER_NAME: &str = "hook-event-adapter";
+
+/// Adapter that wraps the HookRegistry to work with the new EventBus
+pub struct HookEventAdapter {
     registry: Arc<HookRegistry>,
     working_directory: String,
 }
 
-impl LegacyHookAdapter {
+impl HookEventAdapter {
     pub fn new(registry: Arc<HookRegistry>, working_directory: String) -> Self {
         Self {
             registry,
@@ -228,9 +228,9 @@ impl LegacyHookAdapter {
 }
 
 #[async_trait]
-impl EventHandler for LegacyHookAdapter {
+impl EventHandler for HookEventAdapter {
     fn name(&self) -> &str {
-        "legacy-hook-adapter"
+        HANDLER_NAME
     }
 
     fn filter(&self) -> SubscriptionFilter {
@@ -260,7 +260,7 @@ impl EventHandler for LegacyHookAdapter {
         {
             Ok(output) => Self::hook_output_to_handler_result(output),
             Err(e) => {
-                eprintln!("[legacy-hook-adapter] Error executing hooks: {}", e);
+                eprintln!("[{}] Error executing hooks: {}", HANDLER_NAME, e);
                 HandlerResult::pass()
             }
         }
@@ -271,10 +271,10 @@ impl EventHandler for LegacyHookAdapter {
     }
 }
 
-/// Helper to create a LegacyHookAdapter with default hooks
-pub fn create_legacy_adapter(working_directory: String) -> LegacyHookAdapter {
+/// Helper to create a HookEventAdapter with default hooks
+pub fn create_hook_event_adapter(working_directory: String) -> HookEventAdapter {
     let registry = Arc::new(crate::registry::default_hooks());
-    LegacyHookAdapter::new(registry, working_directory)
+    HookEventAdapter::new(registry, working_directory)
 }
 
 #[cfg(test)]
@@ -288,7 +288,7 @@ mod tests {
             parent_id: None,
         };
         assert_eq!(
-            LegacyHookAdapter::event_to_hook_event(&session_started),
+            HookEventAdapter::event_to_hook_event(&session_started),
             Some(HookEvent::SessionStart)
         );
 
@@ -297,7 +297,7 @@ mod tests {
             reason: SessionEndReason::Completed,
         };
         assert_eq!(
-            LegacyHookAdapter::event_to_hook_event(&session_ended),
+            HookEventAdapter::event_to_hook_event(&session_ended),
             Some(HookEvent::Stop)
         );
 
@@ -308,7 +308,7 @@ mod tests {
             input: serde_json::json!({}),
         };
         assert_eq!(
-            LegacyHookAdapter::event_to_hook_event(&tool_started),
+            HookEventAdapter::event_to_hook_event(&tool_started),
             Some(HookEvent::PreToolUse)
         );
 
@@ -321,7 +321,7 @@ mod tests {
             duration_ms: 100,
         };
         assert_eq!(
-            LegacyHookAdapter::event_to_hook_event(&tool_completed),
+            HookEventAdapter::event_to_hook_event(&tool_completed),
             Some(HookEvent::PostToolUse)
         );
 
@@ -329,7 +329,7 @@ mod tests {
             session_id: "test".to_string(),
             turn_number: 1,
         };
-        assert_eq!(LegacyHookAdapter::event_to_hook_event(&turn_started), None);
+        assert_eq!(HookEventAdapter::event_to_hook_event(&turn_started), None);
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
             input: serde_json::json!({"path": "/tmp/test.txt"}),
         };
 
-        let input = LegacyHookAdapter::event_to_hook_input(&event);
+        let input = HookEventAdapter::event_to_hook_input(&event);
 
         assert_eq!(input.session_id, Some("ses_123".to_string()));
         assert_eq!(input.tool_name, Some("read".to_string()));
@@ -358,18 +358,24 @@ mod tests {
     #[test]
     fn test_hook_output_to_handler_result() {
         let pass = HookOutput::pass();
-        let result = LegacyHookAdapter::hook_output_to_handler_result(pass);
+        let result = HookEventAdapter::hook_output_to_handler_result(pass);
         assert!(result.should_continue);
         assert!(result.message.is_none());
 
         let with_msg = HookOutput::continue_with_message("test message");
-        let result = LegacyHookAdapter::hook_output_to_handler_result(with_msg);
+        let result = HookEventAdapter::hook_output_to_handler_result(with_msg);
         assert!(result.should_continue);
         assert_eq!(result.message, Some("test message".to_string()));
 
         let block = HookOutput::block_with_reason("blocked reason");
-        let result = LegacyHookAdapter::hook_output_to_handler_result(block);
+        let result = HookEventAdapter::hook_output_to_handler_result(block);
         assert!(!result.should_continue);
         assert_eq!(result.message, Some("blocked reason".to_string()));
+    }
+
+    #[test]
+    fn test_handler_name_contract() {
+        let adapter = HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string());
+        assert_eq!(EventHandler::name(&adapter), HANDLER_NAME);
     }
 }
