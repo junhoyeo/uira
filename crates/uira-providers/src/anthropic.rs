@@ -560,7 +560,7 @@ impl ModelClient for AnthropicClient {
 
             if status.is_server_error() {
                 return Err(ProviderError::Unavailable {
-                    provider: "anthropic".to_string(),
+                    provider: PROVIDER_NAME.to_string(),
                 });
             }
 
@@ -624,7 +624,7 @@ impl ModelClient for AnthropicClient {
 
             if status.is_server_error() {
                 return Err(ProviderError::Unavailable {
-                    provider: "anthropic".to_string(),
+                    provider: PROVIDER_NAME.to_string(),
                 });
             }
 
