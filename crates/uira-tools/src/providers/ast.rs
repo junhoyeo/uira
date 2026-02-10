@@ -223,6 +223,7 @@ impl AstToolProvider {
         &self,
         root_path: &std::path::Path,
         input: &Value,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let pattern = input["pattern"]
             .as_str()
@@ -243,6 +244,13 @@ impl AstToolProvider {
             })?;
 
         let dry_run = input["dryRun"].as_bool().unwrap_or(true);
+
+        if !dry_run && ctx.sandbox_type != uira_sandbox::SandboxType::None {
+            return Err(ToolError::SandboxDenied {
+                message: "ast_replace write mode is not available in sandboxed sessions; use dryRun=true or disable sandbox for this run".to_string(),
+                retryable: false,
+            });
+        }
 
         let lang: SupportLang = lang_str.parse().map_err(|_| ToolError::ExecutionFailed {
             message: format!("Unsupported language: {}", lang_str),
@@ -450,7 +458,7 @@ impl ToolProvider for AstToolProvider {
 
         match name {
             "ast_search" => self.ast_search(&root_path, &input),
-            "ast_replace" => self.ast_replace(&root_path, &input),
+            "ast_replace" => self.ast_replace(&root_path, &input, ctx),
             _ => Err(ToolError::NotFound {
                 name: name.to_string(),
             }),

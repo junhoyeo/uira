@@ -83,7 +83,7 @@ impl ToolProvider for LspToolProvider {
                     )
                     .property(
                         "line",
-                        JsonSchema::number().description("Line number (0-indexed)"),
+                        JsonSchema::number().description("Line number (1-indexed)"),
                     )
                     .property(
                         "character",
@@ -101,7 +101,7 @@ impl ToolProvider for LspToolProvider {
                     )
                     .property(
                         "line",
-                        JsonSchema::number().description("Line number (0-indexed)"),
+                        JsonSchema::number().description("Line number (1-indexed)"),
                     )
                     .property(
                         "character",
@@ -147,7 +147,7 @@ impl ToolProvider for LspToolProvider {
                     )
                     .property(
                         "line",
-                        JsonSchema::number().description("Line number (0-indexed)"),
+                        JsonSchema::number().description("Line number (1-indexed)"),
                     )
                     .property(
                         "character",
@@ -165,7 +165,7 @@ impl ToolProvider for LspToolProvider {
                     )
                     .property(
                         "line",
-                        JsonSchema::number().description("Line number (0-indexed)"),
+                        JsonSchema::number().description("Line number (1-indexed)"),
                     )
                     .property(
                         "character",
@@ -183,7 +183,7 @@ impl ToolProvider for LspToolProvider {
                     )
                     .property(
                         "line",
-                        JsonSchema::number().description("Line number (0-indexed)"),
+                        JsonSchema::number().description("Line number (1-indexed)"),
                     )
                     .property(
                         "character",

@@ -65,6 +65,9 @@ impl LspClientImpl {
         })?;
 
         let mut cmd = Command::new(&server_config.command);
+        if !server_config.args.is_empty() {
+            cmd.args(&server_config.args);
+        }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
