@@ -61,6 +61,31 @@ pub struct ToolOrchestrator {
 }
 
 impl ToolOrchestrator {
+    fn provider_approval_requirement(
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> ApprovalRequirement {
+        match tool_name {
+            "ast_replace" => {
+                let dry_run = input
+                    .get("dryRun")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                if dry_run {
+                    ApprovalRequirement::skip()
+                } else {
+                    ApprovalRequirement::needs_approval(
+                        "ast_replace with dryRun=false writes files and requires explicit approval",
+                    )
+                }
+            }
+            "lsp_rename" => ApprovalRequirement::needs_approval(
+                "lsp_rename can modify files across the workspace",
+            ),
+            _ => ApprovalRequirement::skip(),
+        }
+    }
+
     pub fn new(router: Arc<ToolRouter>, sandbox_policy: SandboxPolicy) -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
@@ -128,14 +153,115 @@ impl ToolOrchestrator {
         // Check if tool is a direct tool or provider-backed
         let direct_tool = self.router.get(tool_name);
 
-        // Provider-backed tools (e.g., delegate_task, background_output) handle their own
-        // security through the provider implementation. They don't need orchestrator-level
-        // approval/sandbox because:
-        // 1. delegate_task spawns subagents with their own configs
-        // 2. background_output only reads task results, no file/command access
-        // 3. Providers implement their own validation in dispatch()
+        // Provider-backed tools still need permission and approval checks.
+        // They are dispatched via providers after the same top-level gates used for direct tools.
         if direct_tool.is_none() {
-            return self.router.dispatch(tool_name, input, ctx).await;
+            let mut provider_input = input;
+
+            if let Some(ref evaluator) = self.permission_evaluator {
+                let perm_result = evaluator.evaluate_tool(tool_name, &provider_input);
+
+                tracing::debug!(
+                    permission = %perm_result.permission,
+                    path = %perm_result.path,
+                    action = ?perm_result.action,
+                    rule = ?perm_result.matched_rule,
+                    "permission_evaluated"
+                );
+
+                match perm_result.action {
+                    PermissionAction::Deny => {
+                        let rule_info = perm_result
+                            .matched_rule
+                            .map(|r| format!(" (rule: {})", r))
+                            .unwrap_or_default();
+                        tracing::warn!(
+                            tool = %tool_name,
+                            permission = %perm_result.permission,
+                            path = %perm_result.path,
+                            "permission_denied"
+                        );
+                        return Err(ToolError::PermissionDenied {
+                            message: format!(
+                                "Permission denied for {} on {}{}",
+                                perm_result.permission, perm_result.path, rule_info
+                            ),
+                        });
+                    }
+                    PermissionAction::Allow => {
+                        // Continue directly to provider dispatch after permission allow.
+                    }
+                    PermissionAction::Ask => {}
+                }
+            }
+
+            if !options.skip_approval {
+                let requirement = self.approval_requirement_for(tool_name, &provider_input);
+                match requirement {
+                    ApprovalRequirement::Skip { .. } => {}
+                    ApprovalRequirement::NeedsApproval { reason } => {
+                        if !self.full_auto && !ctx.full_auto {
+                            let path = Self::extract_path_from_input(&provider_input);
+
+                            if let Some(ref cache) = self.approval_cache {
+                                let cache_read = cache.read().await;
+                                if let Some(cached) = cache_read.lookup(tool_name, &path) {
+                                    tracing::debug!(
+                                        tool = %tool_name,
+                                        path = %path,
+                                        decision = ?cached,
+                                        "approval_cache_hit"
+                                    );
+                                    if !cached.is_approve() {
+                                        return Err(ToolError::ExecutionFailed {
+                                            message: "Approval denied (cached)".to_string(),
+                                        });
+                                    }
+                                } else {
+                                    let decision = self
+                                        .request_approval(tool_name, &provider_input, &reason)
+                                        .await?;
+                                    let cache_decision = Self::review_to_cache_decision(&decision);
+                                    if cache_decision.should_cache() {
+                                        let key = ApprovalKey::from_tool_and_path(tool_name, &path);
+                                        let mut cache_write = cache.write().await;
+                                        cache_write.insert(key, cache_decision);
+                                    }
+
+                                    if decision.is_denied() {
+                                        return Err(ToolError::ExecutionFailed {
+                                            message: "Approval denied by user".to_string(),
+                                        });
+                                    }
+
+                                    if let ReviewDecision::Edit { new_input } = decision {
+                                        provider_input = new_input;
+                                    }
+                                }
+                            } else {
+                                let decision = self
+                                    .request_approval(tool_name, &provider_input, &reason)
+                                    .await?;
+                                if decision.is_denied() {
+                                    return Err(ToolError::ExecutionFailed {
+                                        message: "Approval denied by user".to_string(),
+                                    });
+                                }
+                                if let ReviewDecision::Edit { new_input } = decision {
+                                    provider_input = new_input;
+                                }
+                            }
+                        }
+                    }
+                    ApprovalRequirement::Forbidden { reason } => {
+                        return Err(ToolError::ExecutionFailed {
+                            message: format!("Tool execution forbidden: {}", reason),
+                        });
+                    }
+                }
+            }
+
+            return self.router.dispatch(tool_name, provider_input, ctx).await;
         }
 
         let tool = direct_tool.unwrap();
@@ -291,6 +417,19 @@ impl ToolOrchestrator {
     /// Get the router for direct tool access (e.g., for approval checks)
     pub fn router(&self) -> &Arc<ToolRouter> {
         &self.router
+    }
+
+    /// Determine approval requirement for any tool name (direct or provider-backed).
+    pub fn approval_requirement_for(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> ApprovalRequirement {
+        if let Some(tool) = self.router.get(tool_name) {
+            tool.approval_requirement(input)
+        } else {
+            Self::provider_approval_requirement(tool_name, input)
+        }
     }
 
     async fn execute_with_sandbox(

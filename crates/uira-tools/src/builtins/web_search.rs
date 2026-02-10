@@ -267,7 +267,11 @@ impl Tool for WebSearchTool {
                         provider: "duckduckgo".to_string(),
                         results: cached.results.clone(),
                     };
-                    return Ok(ToolOutput::json(serde_json::to_value(out).unwrap()));
+                    return serde_json::to_value(out)
+                        .map(ToolOutput::json)
+                        .map_err(|e| ToolError::ExecutionFailed {
+                            message: format!("Failed to serialize output: {}", e),
+                        });
                 }
             }
 
@@ -298,7 +302,11 @@ impl Tool for WebSearchTool {
             );
         }
 
-        Ok(ToolOutput::json(serde_json::to_value(out).unwrap()))
+        serde_json::to_value(out)
+            .map(ToolOutput::json)
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize output: {}", e),
+            })
     }
 }
 
@@ -473,7 +481,11 @@ impl Tool for FetchUrlTool {
             content,
             truncated,
         };
-        Ok(ToolOutput::json(serde_json::to_value(out).unwrap()))
+        serde_json::to_value(out)
+            .map(ToolOutput::json)
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to serialize output: {}", e),
+            })
     }
 }
 
@@ -656,7 +668,7 @@ async fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_private_or_local_ip(ip) {
-            return Err(ToolError::ExecutionFailed {
+            return Err(ToolError::InvalidInput {
                 message: "Blocked private or local IP address for fetch_url".to_string(),
             });
         }
@@ -670,7 +682,7 @@ async fn validate_fetch_url(url: &reqwest::Url) -> Result<(), ToolError> {
 
         for addr in resolved {
             if is_private_or_local_ip(addr.ip()) {
-                return Err(ToolError::ExecutionFailed {
+                return Err(ToolError::InvalidInput {
                     message: "Blocked hostname resolving to private or local address".to_string(),
                 });
             }
@@ -691,6 +703,15 @@ fn is_private_or_local_ip(ip: IpAddr) -> bool {
                 || v4 == Ipv4Addr::new(0, 0, 0, 0)
         }
         IpAddr::V6(v6) => {
+            if let Some(v4_mapped) = v6.to_ipv4_mapped() {
+                return v4_mapped.is_private()
+                    || v4_mapped.is_loopback()
+                    || v4_mapped.is_link_local()
+                    || v4_mapped.is_multicast()
+                    || v4_mapped == Ipv4Addr::new(169, 254, 169, 254)
+                    || v4_mapped == Ipv4Addr::new(0, 0, 0, 0);
+            }
+
             v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()

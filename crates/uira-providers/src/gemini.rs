@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uira_protocol::{
     ContentBlock, ContentDelta, ImageSource, Message, MessageContent, MessageDelta, ModelResponse,
-    Role, StopReason, StreamChunk, TokenUsage, ToolSpec,
+    Role, StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
 };
 
 use crate::{
@@ -17,6 +17,7 @@ use crate::{
 };
 
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 
 /// Google Gemini API client
 pub struct GeminiClient {
@@ -239,27 +240,10 @@ impl GeminiClient {
         }
     }
 
-    fn parse_sse_event(text: &str) -> Result<StreamChunk, ProviderError> {
-        // Gemini uses JSON streaming, not SSE
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // Try to parse as JSON
-            if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(line) {
-                return Ok(Self::convert_stream_response(response));
-            }
-        }
-
-        Ok(StreamChunk::Ping)
-    }
-
-    fn convert_stream_response(response: GeminiStreamResponse) -> StreamChunk {
+    fn convert_stream_response(response: GeminiStreamResponse) -> Vec<StreamChunk> {
         let candidate = match response.candidates.into_iter().next() {
             Some(c) => c,
-            None => return StreamChunk::Ping,
+            None => return vec![StreamChunk::Ping],
         };
 
         if let Some(reason) = candidate.finish_reason {
@@ -270,7 +254,7 @@ impl GeminiClient {
                 _ => StopReason::EndTurn,
             };
 
-            return StreamChunk::MessageDelta {
+            return vec![StreamChunk::MessageDelta {
                 delta: MessageDelta {
                     stop_reason: Some(stop_reason),
                 },
@@ -280,32 +264,63 @@ impl GeminiClient {
                     cache_read_tokens: 0,
                     cache_creation_tokens: 0,
                 }),
-            };
+            }];
         }
 
+        let mut chunks = Vec::new();
         for (index, part) in candidate.content.parts.into_iter().enumerate() {
             match part {
                 GeminiPart::Text { text } => {
-                    return StreamChunk::ContentBlockDelta {
+                    chunks.push(StreamChunk::ContentBlockDelta {
                         index,
                         delta: ContentDelta::TextDelta { text },
-                    };
+                    });
                 }
                 GeminiPart::FunctionCall { function_call } => {
-                    return StreamChunk::ContentBlockStart {
+                    chunks.push(StreamChunk::ContentBlockStart {
                         index,
                         content_block: ContentBlock::ToolUse {
                             id: format!("call_{}", uuid::Uuid::new_v4()),
                             name: function_call.name,
-                            input: function_call.args,
+                            input: serde_json::Value::Null,
                         },
-                    };
+                    });
+                    let partial_json = serde_json::to_string(&function_call.args)
+                        .unwrap_or_else(|_| "{}".to_string());
+                    chunks.push(StreamChunk::ContentBlockDelta {
+                        index,
+                        delta: ContentDelta::InputJsonDelta { partial_json },
+                    });
+                    chunks.push(StreamChunk::ContentBlockStop { index });
                 }
                 _ => {}
             }
         }
 
-        StreamChunk::Ping
+        if chunks.is_empty() {
+            vec![StreamChunk::Ping]
+        } else {
+            chunks
+        }
+    }
+
+    fn parse_sse_event_payload(event: &str) -> Option<String> {
+        let mut payload_lines = Vec::new();
+        for raw_line in event.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with(':') {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("data:") {
+                payload_lines.push(rest.trim_start().to_string());
+            }
+        }
+
+        if payload_lines.is_empty() {
+            None
+        } else {
+            Some(payload_lines.join("\n"))
+        }
     }
 }
 
@@ -314,24 +329,41 @@ impl ModelClient for GeminiClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
         let request = self.build_request(messages, tools);
         let url = format!(
-            "{}/v1beta/models/{}:generateContent?key={}",
+            "{}/v1beta/models/{}:generateContent",
             self.base_url(),
             self.config.model,
-            self.api_key()
         );
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
 
             if status.as_u16() == 429 {
-                return Err(ProviderError::RateLimited {
-                    retry_after_ms: 60000,
+                // Parse Retry-After header if present, otherwise default to 60s
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "gemini".to_string(),
                 });
             }
 
+            let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
                 status, body
@@ -349,16 +381,39 @@ impl ModelClient for GeminiClient {
     ) -> ModelResult<ResponseStream> {
         let request = self.build_request(messages, tools);
         let url = format!(
-            "{}/v1beta/models/{}:streamGenerateContent?key={}",
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse",
             self.base_url(),
             self.config.model,
-            self.api_key()
         );
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = self
+            .client
+            .post(&url)
+            .header("x-goog-api-key", self.api_key())
+            .json(&request)
+            .send()
+            .await?;
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "gemini".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -366,13 +421,105 @@ impl ModelClient for GeminiClient {
             )));
         }
 
-        let stream = response.bytes_stream().map(|result| match result {
-            Ok(bytes) => {
+        let byte_stream = response.bytes_stream();
+        let stream_id = format!("gemini_stream_{}", uuid::Uuid::new_v4());
+        let stream_model = self.config.model.clone();
+        let stream = async_stream::try_stream! {
+            let mut buffer = String::new();
+            futures::pin_mut!(byte_stream);
+
+            yield StreamChunk::MessageStart {
+                message: StreamMessageStart {
+                    id: stream_id,
+                    model: stream_model,
+                    usage: TokenUsage::default(),
+                },
+            };
+
+            while let Some(result) = byte_stream.next().await {
+                let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
-                Self::parse_sse_event(&text)
+                let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+                buffer.push_str(&normalized);
+
+                if buffer.len() > MAX_SSE_BUFFER {
+                    Err(ProviderError::StreamError(
+                        "SSE buffer exceeded maximum size".to_string(),
+                    ))?;
+                }
+
+                while let Some(pos) = buffer.find("\n\n") {
+                    let event = buffer[..pos].to_string();
+                    buffer = buffer[pos + 2..].to_string();
+
+                    let payload = match Self::parse_sse_event_payload(&event) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+
+                    if payload == "[DONE]" {
+                        yield StreamChunk::MessageStop;
+                        return;
+                    }
+
+                    if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(&payload) {
+                        let chunks = Self::convert_stream_response(response);
+                        let should_stop = chunks.iter().any(|chunk| {
+                            matches!(
+                                chunk,
+                                StreamChunk::MessageDelta {
+                                    delta: MessageDelta {
+                                        stop_reason: Some(_)
+                                    },
+                                    ..
+                                }
+                            )
+                        });
+                        for chunk in chunks {
+                            yield chunk;
+                        }
+                        if should_stop {
+                            yield StreamChunk::MessageStop;
+                            return;
+                        }
+                    }
+                }
             }
-            Err(e) => Err(ProviderError::StreamError(e.to_string())),
-        });
+
+            let remaining = buffer.trim();
+            if !remaining.is_empty() {
+                let payload = Self::parse_sse_event_payload(remaining)
+                    .unwrap_or_else(|| remaining.to_string());
+                if payload == "[DONE]" {
+                    yield StreamChunk::MessageStop;
+                    return;
+                }
+
+                if let Ok(response) = serde_json::from_str::<GeminiStreamResponse>(&payload) {
+                    let chunks = Self::convert_stream_response(response);
+                    let should_stop = chunks.iter().any(|chunk| {
+                        matches!(
+                            chunk,
+                            StreamChunk::MessageDelta {
+                                delta: MessageDelta {
+                                    stop_reason: Some(_)
+                                },
+                                ..
+                            }
+                        )
+                    });
+                    for chunk in chunks {
+                        yield chunk;
+                    }
+                    if should_stop {
+                        yield StreamChunk::MessageStop;
+                        return;
+                    }
+                }
+            }
+
+            yield StreamChunk::MessageStop;
+        };
 
         Ok(Box::pin(stream))
     }

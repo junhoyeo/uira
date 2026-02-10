@@ -22,6 +22,7 @@ use crate::{
 
 const OPENCODE_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 const PROVIDER_NAME: &str = "opencode";
 
 /// OpenCode Zen API client
@@ -271,14 +272,26 @@ impl ModelClient for OpenCodeClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
 
             if status.as_u16() == 429 {
-                return Err(ProviderError::RateLimited {
-                    retry_after_ms: 60000,
+                // Parse Retry-After header if present, otherwise default to 60s
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "opencode".to_string(),
                 });
             }
 
+            let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "OpenCode Zen API error {}: {}",
                 status, body
@@ -304,6 +317,24 @@ impl ModelClient for OpenCodeClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "opencode".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "OpenCode Zen API error {}: {}",
@@ -319,14 +350,39 @@ impl ModelClient for OpenCodeClient {
             while let Some(result) = byte_stream.next().await {
                 match result {
                     Ok(bytes) => {
-                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                        let text = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+                        buffer.push_str(&text);
+
+                        if buffer.len() > MAX_SSE_BUFFER {
+                            yield Err(ProviderError::StreamError(
+                                "SSE buffer exceeded maximum size".to_string(),
+                            ));
+                            return;
+                        }
 
                         while let Some(pos) = buffer.find("\n\n") {
                             let event = buffer[..pos].to_string();
                             buffer = buffer[pos + 2..].to_string();
 
                             if let Some(chunk) = Self::parse_sse_line(&event) {
+                                let is_stop = matches!(&chunk, StreamChunk::MessageStop);
+                                let has_stop_reason = matches!(
+                                    &chunk,
+                                    StreamChunk::MessageDelta {
+                                        delta: MessageDelta {
+                                            stop_reason: Some(_)
+                                        },
+                                        ..
+                                    }
+                                );
                                 yield Ok(chunk);
+                                if is_stop {
+                                    return;
+                                }
+                                if has_stop_reason {
+                                    yield Ok(StreamChunk::MessageStop);
+                                    return;
+                                }
                             }
                         }
                     }
@@ -366,12 +422,16 @@ impl ModelClient for OpenCodeClient {
 impl OpenCodeClient {
     fn parse_sse_line(event: &str) -> Option<StreamChunk> {
         for line in event.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with(':') {
+            let trimmed = line.trim_end_matches('\r');
+            if trimmed.is_empty() || trimmed.starts_with(':') {
                 continue;
             }
 
-            if let Some(data) = line.strip_prefix("data: ") {
+            if let Some(data) = trimmed
+                .strip_prefix("data: ")
+                .or_else(|| trimmed.strip_prefix("data:"))
+                .map(str::trim_start)
+            {
                 if data == "[DONE]" {
                     return Some(StreamChunk::MessageStop);
                 }

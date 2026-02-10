@@ -8,6 +8,8 @@ use uira_protocol::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutp
 
 use crate::{Tool, ToolContext, ToolError};
 
+const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
 /// Input for read tool
 #[derive(Debug, Deserialize)]
 struct ReadInput {
@@ -32,8 +34,8 @@ impl ReadTool {
             .enumerate()
             .map(|(i, line)| {
                 let line_num = offset + i + 1;
-                let truncated = if line.len() > 2000 {
-                    format!("{}...", &line[..2000])
+                let truncated = if line.chars().count() > 2000 {
+                    format!("{}...", line.chars().take(2000).collect::<String>())
                 } else {
                     line.to_string()
                 };
@@ -116,11 +118,36 @@ impl Tool for ReadTool {
             });
         }
 
-        let content = fs::read_to_string(path)
+        let metadata = fs::metadata(path)
             .await
             .map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to read file: {}", e),
+                message: format!("Failed to read file metadata: {}", e),
             })?;
+        if metadata.len() > MAX_READ_FILE_BYTES {
+            return Err(ToolError::ExecutionFailed {
+                message: format!(
+                    "File too large to read safely ({} bytes > {} bytes): {}",
+                    metadata.len(),
+                    MAX_READ_FILE_BYTES,
+                    input.file_path
+                ),
+            });
+        }
+
+        let content = fs::read_to_string(path).await.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                ToolError::ExecutionFailed {
+                    message: format!(
+                        "File appears to be binary or contains invalid UTF-8: {}",
+                        input.file_path
+                    ),
+                }
+            } else {
+                ToolError::ExecutionFailed {
+                    message: format!("Failed to read file: {}", e),
+                }
+            }
+        })?;
 
         let lines: Vec<&str> = content.lines().collect();
         let offset = input.offset.unwrap_or(0);

@@ -26,6 +26,8 @@ tracing = "0.1"
 glob = "0.3"
 regex = "1"
 walkdir = "2"
+ast-grep-core = "0.40"
+ast-grep-language = "0.40"
 uira-agents = { workspace = true }
 uira-config = { workspace = true }
 uira-features = { workspace = true }

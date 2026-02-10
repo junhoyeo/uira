@@ -1412,112 +1412,96 @@ impl Agent {
             }
 
             // ALWAYS check for Forbidden tools (security critical)
-            if let Some(tool) = self.session.orchestrator.router().get(&call.name) {
-                let requirement = tool.approval_requirement(&call.input);
+            let requirement = self
+                .session
+                .orchestrator
+                .approval_requirement_for(&call.name, &call.input);
 
-                // Forbidden MUST be enforced regardless of full_auto
-                if let ApprovalRequirement::Forbidden { reason } = &requirement {
-                    return Err(AgentLoopError::ToolForbidden {
-                        tool: call.name.clone(),
-                        reason: reason.clone(),
-                    });
-                }
+            // Forbidden MUST be enforced regardless of full_auto
+            if let ApprovalRequirement::Forbidden { reason } = &requirement {
+                return Err(AgentLoopError::ToolForbidden {
+                    tool: call.name.clone(),
+                    reason: reason.clone(),
+                });
+            }
 
-                // Handle approval (skip only NeedsApproval in full_auto mode)
-                if !ctx.full_auto {
-                    match requirement {
-                        ApprovalRequirement::NeedsApproval { reason } => {
-                            if let Some(cached) = self
-                                .session
-                                .orchestrator
-                                .check_approval_cache(&call.name, &call.input)
-                                .await
-                            {
-                                if cached.is_approve() {
-                                    tracing::debug!(
-                                        tool = %call.name,
-                                        cached_decision = ?cached,
-                                        "approval_cache_hit"
-                                    );
-                                    approved_calls.push((
-                                        call.id.clone(),
-                                        call.name.clone(),
-                                        call.input.clone(),
-                                    ));
-                                    continue;
-                                }
-                            }
-
-                            if let Some(ref approval_tx) = self.approval_tx {
-                                self.emit_event(ThreadEvent::ItemStarted {
-                                    item: Item::ApprovalRequest {
-                                        id: call.id.clone(),
-                                        tool_name: call.name.clone(),
-                                        input: call.input.clone(),
-                                        reason: reason.clone(),
-                                    },
-                                })
-                                .await;
-
-                                let decision = timeout(
-                                    APPROVAL_TIMEOUT,
-                                    approval_tx.request_approval(
-                                        &call.id,
-                                        &call.name,
-                                        call.input.clone(),
-                                        &reason,
-                                    ),
-                                )
-                                .await
-                                .map_err(|_| {
-                                    AgentLoopError::ApprovalTimeout {
-                                        tool: call.name.clone(),
-                                        timeout_secs: APPROVAL_TIMEOUT.as_secs(),
-                                    }
-                                })??;
-
-                                self.session
-                                    .orchestrator
-                                    .store_approval(&call.name, &call.input, &decision)
-                                    .await;
-
-                                self.emit_event(ThreadEvent::ItemCompleted {
-                                    item: Item::ApprovalDecision {
-                                        request_id: call.id.clone(),
-                                        approved: decision.is_approved(),
-                                    },
-                                })
-                                .await;
-
-                                if decision.is_denied() {
-                                    let deny_reason =
-                                        if let uira_protocol::ReviewDecision::Deny { reason } =
-                                            &decision
-                                        {
-                                            reason.clone().unwrap_or_default()
-                                        } else {
-                                            String::new()
-                                        };
-
-                                    let error_msg =
-                                        format!("Tool execution denied: {}", deny_reason);
-                                    results.push(ContentBlock::tool_error(&call.id, &error_msg));
-                                    self.record_tool_result(&call.id, &error_msg, true);
-                                    self.emit_event(ThreadEvent::ItemCompleted {
-                                        item: Item::ToolResult {
-                                            tool_call_id: call.id.clone(),
-                                            output: error_msg,
-                                            is_error: true,
-                                        },
-                                    })
-                                    .await;
-                                    continue;
-                                }
-                            } else {
-                                let error_msg = format!(
-                                    "Tool '{}' requires approval but no approval channel is configured",
-                                    call.name
+            // Handle approval (skip only NeedsApproval in full_auto mode)
+            if !ctx.full_auto {
+                match requirement {
+                    ApprovalRequirement::NeedsApproval { reason } => {
+                        if let Some(cached) = self
+                            .session
+                            .orchestrator
+                            .check_approval_cache(&call.name, &call.input)
+                            .await
+                        {
+                            if cached.is_approve() {
+                                tracing::debug!(
+                                    tool = %call.name,
+                                    cached_decision = ?cached,
+                                    "approval_cache_hit"
                                 );
+                                approved_calls.push((
+                                    call.id.clone(),
+                                    call.name.clone(),
+                                    call.input.clone(),
+                                ));
+                                continue;
+                            }
+                        }
+
+                        if let Some(ref approval_tx) = self.approval_tx {
+                            self.emit_event(ThreadEvent::ItemStarted {
+                                item: Item::ApprovalRequest {
+                                    id: call.id.clone(),
+                                    tool_name: call.name.clone(),
+                                    input: call.input.clone(),
+                                    reason: reason.clone(),
+                                },
+                            })
+                            .await;
+
+                            let decision = timeout(
+                                APPROVAL_TIMEOUT,
+                                approval_tx.request_approval(
+                                    &call.id,
+                                    &call.name,
+                                    call.input.clone(),
+                                    &reason,
+                                ),
+                            )
+                            .await
+                            .map_err(|_| {
+                                AgentLoopError::ApprovalTimeout {
+                                    tool: call.name.clone(),
+                                    timeout_secs: APPROVAL_TIMEOUT.as_secs(),
+                                }
+                            })??;
+
+                            self.session
+                                .orchestrator
+                                .store_approval(&call.name, &call.input, &decision)
+                                .await;
+
+                            self.emit_event(ThreadEvent::ItemCompleted {
+                                item: Item::ApprovalDecision {
+                                    request_id: call.id.clone(),
+                                    approved: decision.is_approved(),
+                                },
+                            })
+                            .await;
+
+                            if decision.is_denied() {
+                                let deny_reason =
+                                    if let uira_protocol::ReviewDecision::Deny { reason } =
+                                        &decision
+                                    {
+                                        reason.clone().unwrap_or_default()
+                                    } else {
+                                        String::new()
+                                    };
+
+                                let error_msg = format!("Tool execution denied: {}", deny_reason);
                                 results.push(ContentBlock::tool_error(&call.id, &error_msg));
                                 self.record_tool_result(&call.id, &error_msg, true);
                                 self.emit_event(ThreadEvent::ItemCompleted {
@@ -1530,13 +1514,29 @@ impl Agent {
                                 .await;
                                 continue;
                             }
+                        } else {
+                            let error_msg = format!(
+                                "Tool '{}' requires approval but no approval channel is configured",
+                                call.name
+                            );
+                            results.push(ContentBlock::tool_error(&call.id, &error_msg));
+                            self.record_tool_result(&call.id, &error_msg, true);
+                            self.emit_event(ThreadEvent::ItemCompleted {
+                                item: Item::ToolResult {
+                                    tool_call_id: call.id.clone(),
+                                    output: error_msg,
+                                    is_error: true,
+                                },
+                            })
+                            .await;
+                            continue;
                         }
-                        ApprovalRequirement::Skip { .. } => {
-                            // No approval needed
-                        }
-                        ApprovalRequirement::Forbidden { .. } => {
-                            // Already handled above
-                        }
+                    }
+                    ApprovalRequirement::Skip { .. } => {
+                        // No approval needed
+                    }
+                    ApprovalRequirement::Forbidden { .. } => {
+                        // Already handled above
                     }
                 }
             }

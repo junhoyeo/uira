@@ -22,6 +22,7 @@ use crate::{
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: usize = 8192;
+const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024; // 10MB SSE buffer cap
 const PROVIDER_NAME: &str = "anthropic";
 /// Buffer time before token expiration to trigger refresh (5 minutes)
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
@@ -214,6 +215,11 @@ impl AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
+                });
+            }
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::Configuration(format!(
                 "Token refresh failed ({}): {}",
@@ -268,7 +274,9 @@ impl AnthropicClient {
                     expires_at,
                 },
             );
-            let _ = store.save();
+            if let Err(e) = store.save() {
+                tracing::error!("Failed to save credential store after token refresh: {}", e);
+            }
         }
 
         Ok(())
@@ -537,14 +545,26 @@ impl ModelClient for AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
 
             if status.as_u16() == 429 {
-                return Err(ProviderError::RateLimited {
-                    retry_after_ms: 60000,
+                // Parse Retry-After header if present, otherwise default to 60s
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
                 });
             }
 
+            let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
                 status, body
@@ -590,6 +610,24 @@ impl ModelClient for AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
+
+            if status.as_u16() == 429 {
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .map(|secs| secs * 1000)
+                    .unwrap_or(60000);
+                return Err(ProviderError::RateLimited { retry_after_ms });
+            }
+
+            if status.is_server_error() {
+                return Err(ProviderError::Unavailable {
+                    provider: "anthropic".to_string(),
+                });
+            }
+
             let body = response.text().await.unwrap_or_default();
             return Err(ProviderError::InvalidResponse(format!(
                 "API error {}: {}",
@@ -606,13 +644,14 @@ impl ModelClient for AnthropicClient {
             while let Some(result) = byte_stream.next().await {
                 let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
                 let text = String::from_utf8_lossy(&bytes);
-                let text = if is_oauth {
-                    Self::strip_tool_prefix_from_sse(&text)
-                } else {
-                    text.to_string()
-                };
-                tracing::debug!("SSE raw chunk: {:?}", text);
+                let text = text.replace("\r\n", "\n");
                 buffer.push_str(&text);
+
+                if buffer.len() > MAX_SSE_BUFFER {
+                    Err(ProviderError::StreamError(
+                        "SSE buffer exceeded maximum size".to_string(),
+                    ))?;
+                }
 
                 // Process complete SSE events (separated by double newline)
                 while let Some(pos) = buffer.find("\n\n") {
@@ -621,12 +660,22 @@ impl ModelClient for AnthropicClient {
 
                     // Parse each line in the event
                     for line in event_text.lines() {
-                        if let Some(data) = line.strip_prefix("data: ") {
+                        let trimmed = line.trim_end_matches('\r');
+                        if let Some(data) = trimmed
+                            .strip_prefix("data: ")
+                            .or_else(|| trimmed.strip_prefix("data:"))
+                            .map(str::trim_start)
+                        {
+                            let data = if is_oauth {
+                                Self::strip_tool_prefix_from_sse(data)
+                            } else {
+                                data.to_string()
+                            };
                             if data == "[DONE]" {
                                 yield StreamChunk::MessageStop;
                                 return;
                             }
-                            match serde_json::from_str::<AnthropicStreamEvent>(data) {
+                            match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                                 Ok(event) => {
                                     tracing::debug!("Anthropic SSE event: {:?}", event);
                                     yield event.into();
@@ -645,12 +694,22 @@ impl ModelClient for AnthropicClient {
             // Process any remaining data in buffer
             if !buffer.is_empty() {
                 for line in buffer.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
+                    let trimmed = line.trim_end_matches('\r');
+                    if let Some(data) = trimmed
+                        .strip_prefix("data: ")
+                        .or_else(|| trimmed.strip_prefix("data:"))
+                        .map(str::trim_start)
+                    {
+                        let data = if is_oauth {
+                            Self::strip_tool_prefix_from_sse(data)
+                        } else {
+                            data.to_string()
+                        };
                         if data == "[DONE]" {
                             yield StreamChunk::MessageStop;
                             return;
                         }
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(data) {
+                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(&data) {
                             yield event.into();
                         }
                     }
