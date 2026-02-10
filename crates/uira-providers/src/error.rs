@@ -33,13 +33,36 @@ pub enum ProviderError {
 
     #[error("provider unavailable: {provider}")]
     Unavailable { provider: String },
+
+    /// Payment required - billing or quota issues (HTTP 402)
+    #[error("payment required: {message}")]
+    PaymentRequired { message: String },
+
+    /// Request timeout - network or server timeout
+    #[error("timeout: {message}")]
+    Timeout { message: String },
+
+    /// Image processing error - dimension or size issues
+    #[error("image error: {message}")]
+    ImageError { message: String },
+
+    /// Message ordering conflict - role alternation violation
+    #[error("message ordering conflict: messages must alternate between user and assistant")]
+    MessageOrderingConflict,
+
+    /// Tool call input missing - required tool input not provided
+    #[error("tool call input missing: tool_use block must have input field")]
+    ToolCallInputMissing,
 }
 
 impl ProviderError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::RateLimited { .. } | Self::Network(_) | Self::Unavailable { .. }
+            Self::RateLimited { .. }
+                | Self::Network(_)
+                | Self::Unavailable { .. }
+                | Self::Timeout { .. }
         )
     }
 

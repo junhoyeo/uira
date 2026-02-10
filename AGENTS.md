@@ -86,6 +86,37 @@ This document provides context for AI agents working on the Uira codebase.
 - TUI todo sidebar should be visible by default when todo items exist.
 - TUI chat/tool output should append chronologically and keep newest entries at the bottom.
 
+## Anthropic Provider Hardening
+
+The Anthropic provider (`uira-providers`) includes several hardening features:
+
+### Retry Logic
+- Automatic retry for transient errors (429, 5xx, timeouts)
+- Configurable via `ProviderConfig::with_max_retries(n)` (default: 3)
+- Exponential backoff with jitter to prevent thundering herd
+- Respects `Retry-After` header from rate limit responses
+
+### Error Classification
+- Automatic classification of API errors based on status code and message
+- Maps to specific `ProviderError` variants for proper handling
+- Supports: context overflow, rate limit, billing, auth, timeout, overloaded, image errors
+
+### Turn Validation
+- Automatically merges consecutive user messages
+- Ensures strict user→assistant alternation required by Anthropic API
+- Respects thinking block boundaries
+
+### Extended Thinking
+- Enable via `ProviderConfig::with_thinking(budget_tokens)`
+- Automatically sets temperature to None (Anthropic requirement)
+- Default budget: 64,000 tokens
+
+### Payload Logging
+- Enable via `UIRA_ANTHROPIC_PAYLOAD_LOG=true`
+- Logs request payloads as JSONL with SHA-256 digest
+- Custom path: `UIRA_ANTHROPIC_PAYLOAD_LOG_FILE`
+- Default: `~/.local/share/uira/logs/anthropic-payload.jsonl`
+
 ### Rust Style
 
 - Follow standard Rust conventions (rustfmt)
