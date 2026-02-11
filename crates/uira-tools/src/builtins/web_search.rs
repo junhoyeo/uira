@@ -25,6 +25,8 @@ const DEFAULT_PROVIDER: &str = "exa";
 const EXA_MCP_URL: &str = "https://mcp.exa.ai/mcp";
 const EXA_SEARCH_TIMEOUT_SECS: u64 = 25;
 const EXA_CODE_SEARCH_TIMEOUT_SECS: u64 = 30;
+const GREP_APP_MCP_URL: &str = "https://mcp.grep.app";
+const GREP_APP_TIMEOUT_SECS: u64 = 25;
 
 static STATE: Lazy<Mutex<WebState>> = Lazy::new(|| Mutex::new(WebState::new()));
 
@@ -210,6 +212,39 @@ struct FetchUrlOutput {
 
 pub struct WebSearchTool;
 pub struct CodeSearchTool;
+pub struct GrepAppTool;
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct GrepAppInput {
+    query: String,
+    #[serde(default)]
+    language: Option<Vec<String>>,
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default, rename = "matchCase")]
+    match_case: Option<bool>,
+    #[serde(default, rename = "matchWholeWords")]
+    match_whole_words: Option<bool>,
+    #[serde(default, rename = "useRegexp")]
+    use_regexp: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct GrepAppMcpRequest {
+    jsonrpc: String,
+    id: u32,
+    method: String,
+    params: GrepAppMcpParams,
+}
+
+#[derive(Serialize)]
+struct GrepAppMcpParams {
+    name: String,
+    arguments: serde_json::Value,
+}
 
 impl WebSearchTool {
     pub fn new() -> Self {
@@ -230,6 +265,18 @@ impl CodeSearchTool {
 }
 
 impl Default for CodeSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GrepAppTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for GrepAppTool {
     fn default() -> Self {
         Self::new()
     }
@@ -545,6 +592,260 @@ impl Tool for CodeSearchTool {
     }
 }
 
+#[async_trait]
+impl Tool for GrepAppTool {
+    fn name(&self) -> &str {
+        "grep_app"
+    }
+
+    fn description(&self) -> &str {
+        "Find real-world code examples from over a million public GitHub repositories. Searches for literal code patterns (like grep), not keywords. Use actual code that would appear in files. Filter by language, repository, or file path."
+    }
+
+    fn schema(&self) -> JsonSchema {
+        JsonSchema::object()
+            .property(
+                "query",
+                JsonSchema::string().description(
+                    "The literal code pattern to search for (e.g., 'useState(', 'export function'). Use actual code that would appear in files, not keywords or questions.",
+                ),
+            )
+            .property(
+                "language",
+                JsonSchema::array(JsonSchema::string()).description(
+                    "Filter by programming language. Examples: ['TypeScript', 'TSX'], ['Python'], ['Rust']",
+                ),
+            )
+            .property(
+                "repo",
+                JsonSchema::string().description(
+                    "Filter by repository. Examples: 'facebook/react', 'vercel/ai'. Can match partial names like 'vercel/'",
+                ),
+            )
+            .property(
+                "path",
+                JsonSchema::string().description(
+                    "Filter by file path. Examples: 'src/components/Button.tsx', '/route.ts'",
+                ),
+            )
+            .property(
+                "matchCase",
+                JsonSchema::boolean().description("Whether the search should be case sensitive (default: false)"),
+            )
+            .property(
+                "matchWholeWords",
+                JsonSchema::boolean().description("Whether to match whole words only (default: false)"),
+            )
+            .property(
+                "useRegexp",
+                JsonSchema::boolean().description(
+                    "Whether to interpret the query as a regular expression (default: false). Prefix with '(?s)' to match across multiple lines.",
+                ),
+            )
+            .required(&["query"])
+    }
+
+    fn approval_requirement(&self, input: &serde_json::Value) -> ApprovalRequirement {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<unknown>");
+        ApprovalRequirement::NeedsApproval {
+            reason: format!("Search GitHub code for: {query}"),
+        }
+    }
+
+    fn sandbox_preference(&self) -> SandboxPreference {
+        SandboxPreference::Forbid
+    }
+
+    fn supports_parallel(&self) -> bool {
+        false
+    }
+
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let runtime = load_runtime_config(&ctx.cwd);
+        if !runtime.enabled {
+            return Err(ToolError::ExecutionFailed {
+                message: "grep_app is disabled by uira.yml tools.web_search.enabled=false"
+                    .to_string(),
+            });
+        }
+
+        let input: GrepAppInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
+                message: e.to_string(),
+            })?;
+
+        let query = input.query.trim();
+        if query.is_empty() {
+            return Err(ToolError::InvalidInput {
+                message: "query must not be empty".to_string(),
+            });
+        }
+
+        {
+            let mut state = STATE.lock().await;
+            state.cleanup(runtime.rate_limit_window_secs);
+            state.check_rate_limit(
+                runtime.rate_limit_max_requests,
+                runtime.rate_limit_window_secs,
+            )?;
+            state.request_times.push_back(Instant::now());
+        }
+
+        let output = grep_app_search(
+            query,
+            input.language.as_deref(),
+            input.repo.as_deref(),
+            input.path.as_deref(),
+            input.match_case.unwrap_or(false),
+            input.match_whole_words.unwrap_or(false),
+            input.use_regexp.unwrap_or(false),
+        )
+        .await?;
+
+        Ok(ToolOutput::json(serde_json::json!({
+            "query": query,
+            "provider": "grep.app",
+            "output": output
+        })))
+    }
+}
+
+async fn grep_app_search(
+    query: &str,
+    language: Option<&[String]>,
+    repo: Option<&str>,
+    path: Option<&str>,
+    match_case: bool,
+    match_whole_words: bool,
+    use_regexp: bool,
+) -> Result<String, ToolError> {
+    let mut args = serde_json::json!({
+        "query": query,
+        "matchCase": match_case,
+        "matchWholeWords": match_whole_words,
+        "useRegexp": use_regexp,
+    });
+
+    if let Some(lang) = language {
+        args["language"] = serde_json::json!(lang);
+    }
+    if let Some(r) = repo {
+        args["repo"] = serde_json::json!(r);
+    }
+    if let Some(p) = path {
+        args["path"] = serde_json::json!(p);
+    }
+
+    let request = GrepAppMcpRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "tools/call".to_string(),
+        params: GrepAppMcpParams {
+            name: "searchGitHub".to_string(),
+            arguments: args,
+        },
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(GREP_APP_TIMEOUT_SECS))
+        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .build()
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to initialize grep.app HTTP client: {e}"),
+        })?;
+
+    let response = client
+        .post(GREP_APP_MCP_URL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                ToolError::ExecutionFailed {
+                    message: "grep.app search request timed out".to_string(),
+                }
+            } else {
+                ToolError::ExecutionFailed {
+                    message: format!("grep.app search request failed: {e}"),
+                }
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ToolError::ExecutionFailed {
+            message: format!("grep.app search returned HTTP {}", response.status()),
+        });
+    }
+
+    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
+        message: format!("Failed to read grep.app response body: {e}"),
+    })?;
+
+    parse_mcp_sse_response(&response_text, "grep.app")
+}
+
+fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String, ToolError> {
+    let mut last_error: Option<String> = None;
+
+    for line in response_text.split('\n') {
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let payload = line.trim_start_matches("data: ").trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+
+        let parsed: ExaMcpResponse = serde_json::from_str(payload).map_err(|e| {
+            ToolError::ExecutionFailed {
+                message: format!("Failed to parse {provider} SSE payload: {e}"),
+            }
+        })?;
+
+        let result = parsed.result.ok_or_else(|| ToolError::ExecutionFailed {
+            message: format!("{provider} response missing result payload"),
+        })?;
+
+        let first = result.content.first().ok_or_else(|| ToolError::ExecutionFailed {
+            message: format!("{provider} response contained no content"),
+        })?;
+
+        if first.content_type != "text" {
+            last_error = Some(format!(
+                "Unexpected {provider} content type '{}' in SSE response",
+                first.content_type
+            ));
+            continue;
+        }
+
+        if first.text.trim().is_empty() {
+            return Err(ToolError::ExecutionFailed {
+                message: format!("{provider} response contained no content"),
+            });
+        }
+
+        return Ok(first.text.clone());
+    }
+
+    if let Some(message) = last_error {
+        return Err(ToolError::ExecutionFailed { message });
+    }
+
+    Err(ToolError::ExecutionFailed {
+        message: format!("Failed to parse {provider} SSE response"),
+    })
+}
+
 async fn exa_search(
     query: &str,
     num_results: usize,
@@ -609,7 +910,7 @@ async fn exa_search(
         message: format!("Failed to read Exa web search response body: {e}"),
     })?;
 
-    match parse_exa_sse_response(&response_text) {
+    match parse_mcp_sse_response(&response_text, "Exa") {
         Ok(text) => Ok(text),
         Err(ToolError::ExecutionFailed { message })
             if message == "Exa response contained no content" =>
@@ -671,60 +972,7 @@ async fn exa_code_search(query: &str, tokens_num: usize) -> Result<String, ToolE
         message: format!("Failed to read Exa code search response body: {e}"),
     })?;
 
-    parse_exa_sse_response(&response_text)
-}
-
-fn parse_exa_sse_response(response_text: &str) -> Result<String, ToolError> {
-    let mut last_error: Option<String> = None;
-
-    for line in response_text.split('\n') {
-        if !line.starts_with("data: ") {
-            continue;
-        }
-
-        let payload = line.trim_start_matches("data: ").trim();
-        if payload.is_empty() || payload == "[DONE]" {
-            continue;
-        }
-
-        let parsed: ExaMcpResponse = serde_json::from_str(payload).map_err(|e| {
-            ToolError::ExecutionFailed {
-                message: format!("Failed to parse Exa SSE payload: {e}"),
-            }
-        })?;
-
-        let result = parsed.result.ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Exa response missing result payload".to_string(),
-        })?;
-
-        let first = result.content.first().ok_or_else(|| ToolError::ExecutionFailed {
-            message: "Exa response contained no content".to_string(),
-        })?;
-
-        if first.content_type != "text" {
-            last_error = Some(format!(
-                "Unexpected Exa content type '{}' in SSE response",
-                first.content_type
-            ));
-            continue;
-        }
-
-        if first.text.trim().is_empty() {
-            return Err(ToolError::ExecutionFailed {
-                message: "Exa response contained no content".to_string(),
-            });
-        }
-
-        return Ok(first.text.clone());
-    }
-
-    if let Some(message) = last_error {
-        return Err(ToolError::ExecutionFailed { message });
-    }
-
-    Err(ToolError::ExecutionFailed {
-        message: "Failed to parse Exa SSE response".to_string(),
-    })
+    parse_mcp_sse_response(&response_text, "Exa")
 }
 
 pub struct FetchUrlTool;
