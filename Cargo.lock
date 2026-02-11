@@ -5627,7 +5627,6 @@ dependencies = [
  "uira-providers",
  "uira-sandbox",
  "uira-sdk",
- "uira-telemetry",
  "uira-tools",
  "uira-types",
  "unicase",
@@ -5642,19 +5641,23 @@ dependencies = [
  "dirs",
  "futures",
  "indexmap 2.13.0",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tonic 0.10.2",
  "tracing",
+ "tracing-subscriber",
  "uira-config",
  "uira-events",
  "uira-hooks",
  "uira-permissions",
  "uira-providers",
  "uira-sandbox",
- "uira-telemetry",
  "uira-tools",
  "uira-types",
  "uuid",
@@ -5724,7 +5727,6 @@ dependencies = [
  "uira-providers",
  "uira-sandbox",
  "uira-skills",
- "uira-telemetry",
  "uira-tui",
  "uira-types",
  "webbrowser",
@@ -6023,22 +6025,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "uira-telemetry"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "serde",
- "serde_json",
- "tokio",
- "tonic 0.10.2",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

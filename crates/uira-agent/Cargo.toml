@@ -7,6 +7,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic"]
+
 [dependencies]
 uira-types = { workspace = true }
 uira-providers = { workspace = true }
@@ -16,7 +20,6 @@ uira-config = { workspace = true }
 uira-hooks = { workspace = true }
 uira-events = { workspace = true }
 uira-permissions = { workspace = true }
-uira-telemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -24,9 +27,14 @@ tokio = { workspace = true, features = ["sync"] }
 futures = { workspace = true }
 async-trait = "0.1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 indexmap = { version = "2", features = ["serde"] }
 chrono = { workspace = true }
 dirs = { workspace = true }
+opentelemetry = { version = "0.21", optional = true }
+opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.14", optional = true }
+tonic = { version = "0.10", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

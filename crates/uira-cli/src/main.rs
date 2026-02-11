@@ -6,7 +6,10 @@ use colored::Colorize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
-use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
+use uira_agent::{
+    init_subscriber, init_tui_subscriber, Agent, AgentConfig, ExecutorConfig,
+    RecursiveAgentExecutor, TelemetryConfig,
+};
 use uira_agents::{get_agent_definitions, ModelRegistry};
 use uira_types::ExecutionResult;
 use uira_providers::{
@@ -14,7 +17,6 @@ use uira_providers::{
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
-use uira_telemetry::{init_subscriber, init_tui_subscriber, TelemetryConfig};
 
 mod commands;
 mod config;

@@ -21,7 +21,6 @@ uira-mcp-client = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-features = { workspace = true }
 uira-hooks = { workspace = true }
-uira-telemetry = { workspace = true }
 uira-tui = { workspace = true }
 uira-skills = { workspace = true }
 uira-gateway = { workspace = true }

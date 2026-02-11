@@ -20,7 +20,6 @@ members = [
 "crates/uira-agent",
 "crates/uira-events",
 "crates/uira-permissions",
-"crates/uira-telemetry",
     "crates/uira-cli",
     "crates/uira-tui",
     "crates/uira-skills",
@@ -57,7 +56,6 @@ uira-sandbox = { path = "crates/uira-sandbox" }
 uira-agent = { path = "crates/uira-agent" }
 uira-events = { path = "crates/uira-events" }
 uira-permissions = { path = "crates/uira-permissions" }
-uira-telemetry = { path = "crates/uira-telemetry" }
 
 # Internal crates - Applications
 uira-cli = { path = "crates/uira-cli" }

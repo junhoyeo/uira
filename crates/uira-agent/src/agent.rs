@@ -16,7 +16,7 @@ use uira_types::{
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
 use uira_providers::ModelClient;
-use uira_telemetry::{SessionSpan, TurnSpan};
+use crate::telemetry::{SessionSpan, TurnSpan};
 
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
