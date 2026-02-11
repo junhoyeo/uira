@@ -57,6 +57,17 @@ pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
                     }
                 }
             }
+            Role::Tool => {
+                if !pending_user_blocks.is_empty() {
+                    result.push(Message::with_blocks(
+                        Role::User,
+                        pending_user_blocks.clone(),
+                    ));
+                    pending_user_blocks.clear();
+                }
+
+                result.push(msg.clone());
+            }
             Role::Assistant => {
                 // Flush any pending user messages before adding assistant message
                 if !pending_user_blocks.is_empty() {
@@ -73,7 +84,7 @@ pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
                 // If this assistant message has thinking blocks, it acts as a boundary
                 // (already handled by flushing above)
             }
-            Role::System | Role::Tool => {
+            Role::System => {
                 // System and tool messages are handled separately in Anthropic API
                 // Don't include them in turn validation
                 continue;
@@ -239,6 +250,24 @@ mod tests {
         assert_eq!(validated.len(), 2);
         assert_eq!(validated[0].role, Role::Assistant);
         assert_eq!(validated[1].role, Role::Assistant);
+    }
+
+    #[test]
+    fn test_tool_messages_preserved() {
+        let messages = vec![
+            Message::user("Q1"),
+            Message::tool_result("tc_1", "tool output"),
+            Message::assistant("A1"),
+        ];
+
+        let validated = validate_anthropic_turns(&messages);
+
+        assert_eq!(validated.len(), 3);
+        assert_eq!(validated[0].role, Role::User);
+        assert_eq!(validated[1].role, Role::Tool);
+        assert_eq!(validated[2].role, Role::Assistant);
+        assert_eq!(validated[1].tool_call_id.as_deref(), Some("tc_1"));
+        assert!(matches!(validated[1].content, MessageContent::Text(_)));
     }
 
     #[test]
