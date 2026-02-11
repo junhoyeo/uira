@@ -5618,15 +5618,13 @@ dependencies = [
  "typos",
  "typos-dict",
  "uira-agent",
- "uira-agents",
  "uira-comment-checker",
- "uira-config",
- "uira-features",
+ "uira-core",
  "uira-hooks",
+ "uira-orchestration",
  "uira-oxc",
  "uira-providers",
  "uira-sandbox",
- "uira-sdk",
  "uira-tools",
  "uira-types",
  "unicase",
@@ -5652,8 +5650,7 @@ dependencies = [
  "tonic 0.10.2",
  "tracing",
  "tracing-subscriber",
- "uira-config",
- "uira-events",
+ "uira-core",
  "uira-hooks",
  "uira-permissions",
  "uira-providers",
@@ -5661,16 +5658,6 @@ dependencies = [
  "uira-tools",
  "uira-types",
  "uuid",
-]
-
-[[package]]
-name = "uira-agents"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5689,8 +5676,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
- "uira-config",
- "uira-events",
+ "uira-core",
  "uira-types",
 ]
 
@@ -5718,12 +5704,11 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uira-agent",
- "uira-agents",
- "uira-config",
- "uira-features",
+ "uira-core",
  "uira-gateway",
  "uira-hooks",
  "uira-mcp-client",
+ "uira-orchestration",
  "uira-providers",
  "uira-sandbox",
  "uira-skills",
@@ -5767,50 +5752,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-config"
+name = "uira-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "json5",
+ "parking_lot",
  "serde",
  "serde_json",
  "serde_yaml_ng",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "uira-events"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "parking_lot",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
- "uira-types",
-]
-
-[[package]]
-name = "uira-features"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "futures",
- "lazy_static",
- "parking_lot",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "uira-hooks",
- "uira-sdk",
  "uira-types",
 ]
 
@@ -5831,8 +5786,7 @@ dependencies = [
  "tracing",
  "uira-agent",
  "uira-channels",
- "uira-config",
- "uira-events",
+ "uira-core",
  "uira-types",
 ]
 
@@ -5854,8 +5808,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "uira-comment-checker",
- "uira-config",
- "uira-events",
+ "uira-core",
  "uira-types",
 ]
 
@@ -5891,8 +5844,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uira-config",
- "uira-features",
+ "uira-core",
+ "uira-orchestration",
  "uira-oxc",
  "uira-tools",
  "walkdir",
@@ -5911,13 +5864,34 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "tokio",
- "uira-agents",
- "uira-config",
- "uira-features",
+ "uira-core",
  "uira-hooks",
+ "uira-orchestration",
  "uira-oxc",
- "uira-sdk",
  "uira-tools",
+ "uira-types",
+]
+
+[[package]]
+name = "uira-orchestration"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "parking_lot",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "uira-core",
+ "uira-hooks",
  "uira-types",
 ]
 
@@ -6000,20 +5974,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "thiserror 2.0.18",
- "tokio",
- "uira-agents",
- "uira-config",
-]
-
-[[package]]
 name = "uira-skills"
 version = "0.1.0"
 dependencies = [
@@ -6051,14 +6011,12 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "tracing",
- "uira-agents",
  "uira-comment-checker",
- "uira-config",
- "uira-features",
+ "uira-core",
  "uira-mcp-client",
+ "uira-orchestration",
  "uira-permissions",
  "uira-sandbox",
- "uira-sdk",
  "uira-types",
  "uuid",
  "walkdir",
@@ -6080,7 +6038,7 @@ dependencies = [
  "tracing",
  "tui-textarea",
  "uira-agent",
- "uira-events",
+ "uira-core",
  "uira-providers",
  "uira-types",
 ]

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
-use uira_events::{Event, EventBus};
+use uira_core::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_types::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
@@ -501,7 +501,7 @@ impl Agent {
         }
 
         if let Some(bus) = &self.event_bus {
-            let event = uira_events::Event::SessionForked {
+            let event = uira_core::Event::SessionForked {
                 session_id: forked_session_id.clone(),
                 parent_id: parent_session_id.clone(),
                 fork_point_message_id: fork_point_message_id.map(|id| id.to_string()),

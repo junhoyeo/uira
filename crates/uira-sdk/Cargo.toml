@@ -20,7 +20,7 @@ anyhow = { workspace = true }
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 
-uira-config = { workspace = true }
+uira-core = { workspace = true }
 uira-agents = { workspace = true }
 
 # napi-rs for Node.js interop (will be used for SDK calls)

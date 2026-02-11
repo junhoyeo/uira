@@ -3,7 +3,7 @@
 use crate::events::EventSender;
 use futures::future::join_all;
 use std::path::Path;
-use uira_config::schema::GoalConfig;
+use uira_core::schema::GoalConfig;
 use uira_hooks::{GoalCheckResult, GoalRunner, VerificationResult};
 use uira_types::ThreadEvent;
 

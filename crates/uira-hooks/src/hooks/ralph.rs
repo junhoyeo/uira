@@ -803,7 +803,7 @@ impl RalphHook {
             return None;
         }
 
-        let config = uira_config::load_config(Some(&config_path)).ok()?;
+        let config = uira_core::load_config(Some(&config_path)).ok()?;
 
         if !config.goals.auto_verify {
             return None;

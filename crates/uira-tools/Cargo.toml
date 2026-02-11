@@ -28,10 +28,8 @@ regex = "1"
 walkdir = "2"
 ast-grep-core = "0.40"
 ast-grep-language = "0.40"
-uira-agents = { workspace = true }
-uira-config = { workspace = true }
-uira-features = { workspace = true }
-uira-sdk = { workspace = true }
+uira-core = { workspace = true }
+uira-orchestration = { workspace = true }
 uira-mcp-client = { workspace = true }
 uira-types = { workspace = true }
 uira-sandbox = { workspace = true }

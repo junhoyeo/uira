@@ -263,12 +263,12 @@ continue working until everything is done."#
 
                     // Try loading as UiraConfig and convert
                     if let Ok(uira_config) =
-                        serde_yaml_ng::from_str::<uira_config::UiraConfig>(&content)
+                        serde_yaml_ng::from_str::<uira_core::UiraConfig>(&content)
                     {
                         return Some(Self::convert_uira_to_plugin_config(&uira_config));
                     }
                     if let Ok(uira_config) =
-                        serde_json::from_str::<uira_config::UiraConfig>(&content)
+                        serde_json::from_str::<uira_core::UiraConfig>(&content)
                     {
                         return Some(Self::convert_uira_to_plugin_config(&uira_config));
                     }
@@ -280,7 +280,7 @@ continue working until everything is done."#
     }
 
     /// Convert UiraConfig to PluginConfig
-    fn convert_uira_to_plugin_config(uira: &uira_config::UiraConfig) -> PluginConfig {
+    fn convert_uira_to_plugin_config(uira: &uira_core::UiraConfig) -> PluginConfig {
         use crate::config::*;
 
         // Convert agent settings

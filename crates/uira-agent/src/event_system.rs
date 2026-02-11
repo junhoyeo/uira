@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use uira_events::{BroadcastBus, EventBus, HandlerRegistry, SubscriberRunner};
+use uira_core::{BroadcastBus, EventBus, HandlerRegistry, SubscriberRunner};
 use uira_hooks::create_hook_event_adapter;
 
 pub struct EventSystem {
@@ -76,7 +76,7 @@ pub fn create_event_system(working_directory: String) -> EventSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uira_events::Event;
+    use uira_core::Event;
 
     #[tokio::test]
     async fn test_event_system_creation() {

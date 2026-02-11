@@ -3,13 +3,11 @@ resolver = "2"
 members = [
   "crates/uira",
   "crates/uira-napi",
-  "crates/uira-sdk",
+  "crates/uira-orchestration",
   "crates/uira-comment-checker",
   "crates/uira-hooks",
-  "crates/uira-features",
-  "crates/uira-agents",
   "crates/uira-tools",
-  "crates/uira-config",
+  "crates/uira-core",
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
@@ -18,7 +16,6 @@ members = [
 "crates/uira-providers",
 "crates/uira-sandbox",
 "crates/uira-agent",
-"crates/uira-events",
 "crates/uira-permissions",
     "crates/uira-cli",
     "crates/uira-tui",
@@ -36,11 +33,12 @@ repository = "https://github.com/junhoyeo/uira"
 [workspace.dependencies]
 # Internal crates - Core
 uira-types = { path = "crates/uira-types" }
-uira-config = { path = "crates/uira-config" }
+uira-core = { path = "crates/uira-core" }
 
 # Internal crates - Features
 uira-agents = { path = "crates/uira-agents" }
 uira-features = { path = "crates/uira-features" }
+uira-orchestration = { path = "crates/uira-orchestration" }
 uira-hooks = { path = "crates/uira-hooks" }
 uira-sdk = { path = "crates/uira-sdk" }
 
@@ -54,7 +52,6 @@ uira-comment-checker = { path = "crates/uira-comment-checker" }
 uira-providers = { path = "crates/uira-providers" }
 uira-sandbox = { path = "crates/uira-sandbox" }
 uira-agent = { path = "crates/uira-agent" }
-uira-events = { path = "crates/uira-events" }
 uira-permissions = { path = "crates/uira-permissions" }
 
 # Internal crates - Applications

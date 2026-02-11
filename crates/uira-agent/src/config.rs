@@ -3,7 +3,7 @@
 use crate::context::{CompactionConfig, CompactionStrategy};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_config::schema::{
+use uira_core::schema::{
     CompactionSettings, GoalConfig, NamedMcpServerConfig, PermissionActionConfig,
     PermissionRuleConfig,
 };

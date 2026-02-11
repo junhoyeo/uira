@@ -10,7 +10,7 @@ use uira_agent::{
     init_subscriber, init_tui_subscriber, Agent, AgentConfig, ExecutorConfig,
     RecursiveAgentExecutor, TelemetryConfig,
 };
-use uira_agents::{get_agent_definitions, ModelRegistry};
+use uira_orchestration::{get_agent_definitions, ModelRegistry};
 use uira_types::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
@@ -112,7 +112,7 @@ async fn run_rpc(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error
         return Err("RPC mode does not support subcommands or prompt arguments".into());
     }
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -142,7 +142,7 @@ async fn run_exec(
     use futures::StreamExt;
     use uira_types::{Item, ThreadEvent};
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -685,7 +685,7 @@ async fn run_config(
 }
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_config::loader::load_config;
+    use uira_core::loader::load_config;
                     use uira_hooks::GoalRunner;
 
     match command {
@@ -812,7 +812,7 @@ async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Er
 }
 
 async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_features::background_agent::{BackgroundManager, BackgroundTaskConfig};
+    use uira_orchestration::background_agent::{BackgroundManager, BackgroundTaskConfig};
 
     let config = BackgroundTaskConfig::default();
     let manager = BackgroundManager::new(config);
@@ -831,20 +831,22 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
 
             for task in tasks {
                 let status_str = match task.status {
-                    uira_features::background_agent::BackgroundTaskStatus::Queued => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Queued => {
                         "queued".yellow()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Pending => {
                         "pending".yellow()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Running => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Running => {
                         "running".cyan()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                         "completed".green()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
-                    uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
+                        "error".red()
+                    }
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                         "cancelled".dimmed()
                     }
                 };
@@ -890,16 +892,22 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
             println!("{}: {}", "Agent".cyan(), task.agent.cyan());
 
             let status_str = match task.status {
-                uira_features::background_agent::BackgroundTaskStatus::Queued => "queued".yellow(),
-                uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Queued => {
+                    "queued".yellow()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Pending => {
                     "pending".yellow()
                 }
-                uira_features::background_agent::BackgroundTaskStatus::Running => "running".cyan(),
-                uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Running => {
+                    "running".cyan()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                     "completed".green()
                 }
-                uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
-                uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
+                    "error".red()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                     "cancelled".dimmed()
                 }
             };
@@ -945,7 +953,7 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
 }
 
 async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_config::loader::load_config;
+    use uira_core::loader::load_config;
     use uira_skills::discover_skills;
 
     let config = load_config(None)?;
@@ -1108,7 +1116,7 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
 
     match command {
         GatewayCommands::Start { host, port } => {
-            let config = uira_config::loader::load_config(None).ok();
+            let config = uira_core::loader::load_config(None).ok();
             let gateway_settings = config
                 .as_ref()
                 .map(|c| &c.gateway)
@@ -1148,7 +1156,7 @@ async fn run_interactive(
     use ratatui::Terminal;
     use std::io::stdout;
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -1203,7 +1211,7 @@ async fn run_interactive(
 }
 
 fn build_agent_model_overrides(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> std::collections::HashMap<String, String> {
     let mut overrides = std::collections::HashMap::new();
     if let Some(config) = uira_config {
@@ -1217,7 +1225,7 @@ fn build_agent_model_overrides(
 }
 
 fn build_theme_overrides(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> uira_tui::ThemeOverrides {
     uira_tui::ThemeOverrides {
         bg: uira_config.and_then(|cfg| cfg.theme_colors.bg.clone()),
@@ -1233,7 +1241,7 @@ fn build_theme_overrides(
 fn create_client(
     cli: &Cli,
     config: &CliConfig,
-    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
+    agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
     registry: &ModelRegistry,
     agent_model_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
@@ -1339,9 +1347,9 @@ fn create_client(
 fn create_agent_config(
     cli: &Cli,
     _config: &CliConfig,
-    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
-    uira_config: Option<&uira_config::schema::UiraConfig>,
-    external_mcp_servers: Vec<uira_config::schema::NamedMcpServerConfig>,
+    agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
+    external_mcp_servers: Vec<uira_core::schema::NamedMcpServerConfig>,
     external_mcp_specs: Vec<uira_types::ToolSpec>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -1389,10 +1397,10 @@ fn create_agent_config(
 }
 
 async fn prepare_external_mcp(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> Result<
     (
-        Vec<uira_config::schema::NamedMcpServerConfig>,
+        Vec<uira_core::schema::NamedMcpServerConfig>,
         Vec<uira_types::ToolSpec>,
     ),
     Box<dyn std::error::Error>,

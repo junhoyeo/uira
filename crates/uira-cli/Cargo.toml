@@ -14,12 +14,11 @@ path = "src/main.rs"
 [dependencies]
 uira-types = { workspace = true }
 uira-agent = { workspace = true }
-uira-agents = { workspace = true }
-uira-config = { workspace = true }
+uira-core = { workspace = true }
 uira-providers = { workspace = true, features = ["oauth-server"] }
 uira-mcp-client = { workspace = true }
 uira-sandbox = { workspace = true }
-uira-features = { workspace = true }
+uira-orchestration = { workspace = true }
 uira-hooks = { workspace = true }
 uira-tui = { workspace = true }
 uira-skills = { workspace = true }

@@ -1,0 +1,38 @@
+[package]
+name = "uira-orchestration"
+description = "Unified orchestration crate for agents, sdk, and feature modules"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+uira-core = { workspace = true }
+uira-types = { workspace = true }
+uira-hooks = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+tokio = { workspace = true }
+
+parking_lot = "0.12"
+
+chrono = { version = "0.4", features = ["serde"] }
+
+regex = { workspace = true }
+
+rayon = { workspace = true }
+
+lazy_static = "1.4"
+
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = { workspace = true }

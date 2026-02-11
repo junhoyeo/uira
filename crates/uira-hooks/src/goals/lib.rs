@@ -5,7 +5,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::process::Command;
 use tokio::time::timeout;
-use uira_config::schema::GoalConfig;
+use uira_core::schema::GoalConfig;
 
 #[derive(Error, Debug)]
 pub enum GoalError {

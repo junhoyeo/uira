@@ -26,8 +26,7 @@ teloxide = { workspace = true }
 
 # Internal dependencies
 uira-types = { workspace = true }
-uira-events = { workspace = true }
-uira-config = { workspace = true }
+uira-core = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

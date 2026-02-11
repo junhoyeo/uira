@@ -16,9 +16,8 @@ uira-types = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-tools = { workspace = true }
-uira-config = { workspace = true }
+uira-core = { workspace = true }
 uira-hooks = { workspace = true }
-uira-events = { workspace = true }
 uira-permissions = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

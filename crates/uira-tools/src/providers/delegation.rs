@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use uira_config::load_config;
-use uira_features::background_agent::{
+use uira_core::load_config;
+use uira_orchestration::background_agent::{
     get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
     LaunchInput,
 };

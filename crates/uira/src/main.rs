@@ -19,10 +19,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
-use uira_agents::get_agent_definitions;
-use uira_features::builtin_skills::{create_builtin_skills, get_builtin_skill};
-use uira_features::uira_state::has_uira_state;
-use uira_sdk::{create_uira_session, SessionOptions};
+use uira_orchestration::features::builtin_skills::{create_builtin_skills, get_builtin_skill};
+use uira_orchestration::features::uira_state::has_uira_state;
+use uira_orchestration::{create_uira_session, get_agent_definitions, AgentConfig, SessionOptions};
 use uira_agent::{init_subscriber, TelemetryConfig};
 
 #[derive(Parser)]
@@ -636,7 +635,7 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
             // Group agents by base name
             let mut groups: std::collections::HashMap<
                 String,
-                Vec<(&String, &uira_sdk::AgentConfig)>,
+                Vec<(&String, &AgentConfig)>,
             > = std::collections::HashMap::new();
 
             for (name, config) in &sorted_agents {
@@ -1230,7 +1229,7 @@ async fn goals_command_async(action: GoalsCommands) -> anyhow::Result<()> {
         );
     }
 
-    let config = uira_config::load_config(Some(&config_path))?;
+    let config = uira_core::load_config(Some(&config_path))?;
     let goals = &config.goals.goals;
 
     if goals.is_empty() {

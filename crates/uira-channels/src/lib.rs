@@ -1,5 +1,13 @@
 //! Multi-channel messaging for Uira.
-//!
-//! This crate provides a `Channel` trait and implementations for Slack and
-//! Telegram, enabling the Uira agent to receive and respond to messages
-//! from external messaging platforms.
+
+pub mod channel;
+pub mod error;
+pub mod slack;
+pub mod telegram;
+pub mod types;
+
+pub use channel::Channel;
+pub use error::ChannelError;
+pub use slack::SlackChannel;
+pub use telegram::TelegramChannel;
+pub use types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
