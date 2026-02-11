@@ -40,18 +40,18 @@ impl RetryConfig {
     /// Calculate delay for a given attempt with exponential backoff and jitter
     fn calculate_delay(&self, attempt: u32) -> u64 {
         // Calculate base delay with exponential backoff
-        let base_delay = self.initial_delay_ms as f64
-            * self.backoff_multiplier.powi(attempt as i32 - 1);
-        
+        let base_delay =
+            self.initial_delay_ms as f64 * self.backoff_multiplier.powi(attempt as i32 - 1);
+
         // Cap at max delay
         let capped_delay = base_delay.min(self.max_delay_ms as f64);
-        
+
         // Add jitter using simple time-based pseudo-random
         let jitter = self.calculate_jitter(capped_delay);
-        
+
         (capped_delay + jitter) as u64
     }
-    
+
     /// Calculate jitter using time-based pseudo-random value
     fn calculate_jitter(&self, delay: f64) -> f64 {
         // Use current time as pseudo-random seed
@@ -59,10 +59,10 @@ impl RetryConfig {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        
+
         // Simple pseudo-random: use lower bits of nanoseconds
         let random_factor = ((now % 1000) as f64) / 1000.0;
-        
+
         // Apply jitter: random value between -jitter_factor and +jitter_factor
         let jitter_range = delay * self.jitter_factor;
         (random_factor * 2.0 - 1.0) * jitter_range
@@ -99,21 +99,18 @@ where
     Fut: Future<Output = Result<T, ProviderError>>,
 {
     let mut attempt = 1;
-    
+
     loop {
         debug!(
             attempt = attempt,
             max_attempts = config.max_attempts,
             "Attempting operation"
         );
-        
+
         match operation().await {
             Ok(result) => {
                 if attempt > 1 {
-                    debug!(
-                        attempt = attempt,
-                        "Operation succeeded after retry"
-                    );
+                    debug!(attempt = attempt, "Operation succeeded after retry");
                 }
                 return Ok(result);
             }
@@ -126,7 +123,7 @@ where
                     );
                     return Err(err);
                 }
-                
+
                 // Check if we've exhausted retries
                 if attempt >= config.max_attempts {
                     warn!(
@@ -137,7 +134,7 @@ where
                     );
                     return Err(err);
                 }
-                
+
                 // Calculate delay (respect retry_after_ms from rate limits)
                 let delay_ms = if let Some(retry_after) = err.retry_after_ms() {
                     debug!(
@@ -148,7 +145,7 @@ where
                 } else {
                     config.calculate_delay(attempt)
                 };
-                
+
                 warn!(
                     attempt = attempt,
                     max_attempts = config.max_attempts,
@@ -156,10 +153,10 @@ where
                     error = ?err,
                     "Operation failed, retrying after delay"
                 );
-                
+
                 // Wait before retry
                 sleep(Duration::from_millis(delay_ms)).await;
-                
+
                 attempt += 1;
             }
         }
@@ -169,7 +166,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config() {
         let config = RetryConfig::default();
@@ -179,7 +176,7 @@ mod tests {
         assert_eq!(config.backoff_multiplier, 2.0);
         assert_eq!(config.jitter_factor, 0.1);
     }
-    
+
     #[test]
     fn test_calculate_delay_exponential() {
         let config = RetryConfig {
@@ -189,20 +186,20 @@ mod tests {
             backoff_multiplier: 2.0,
             jitter_factor: 0.0, // No jitter for predictable test
         };
-        
+
         // First retry: 100ms
         let delay1 = config.calculate_delay(1);
         assert_eq!(delay1, 100);
-        
+
         // Second retry: 200ms
         let delay2 = config.calculate_delay(2);
         assert_eq!(delay2, 200);
-        
+
         // Third retry: 400ms
         let delay3 = config.calculate_delay(3);
         assert_eq!(delay3, 400);
     }
-    
+
     #[test]
     fn test_calculate_delay_capped() {
         let config = RetryConfig {
@@ -212,30 +209,27 @@ mod tests {
             backoff_multiplier: 2.0,
             jitter_factor: 0.0,
         };
-        
+
         // Should cap at max_delay_ms
         let delay = config.calculate_delay(10);
         assert_eq!(delay, 5_000);
     }
-    
+
     #[tokio::test]
     async fn test_retry_success_first_attempt() {
         let config = RetryConfig::default();
-        
-        let result = with_retry(&config, || async {
-            Ok::<_, ProviderError>(42)
-        })
-        .await;
-        
+
+        let result = with_retry(&config, || async { Ok::<_, ProviderError>(42) }).await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
     }
-    
+
     #[tokio::test]
     async fn test_retry_success_after_retries() {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
-        
+
         let config = RetryConfig {
             max_attempts: 3,
             initial_delay_ms: 10,
@@ -243,7 +237,7 @@ mod tests {
         };
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = call_count.clone();
-        
+
         let result = with_retry(&config, move || {
             let count = call_count_clone.fetch_add(1, Ordering::SeqCst) + 1;
             async move {
@@ -257,21 +251,21 @@ mod tests {
             }
         })
         .await;
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
         assert_eq!(call_count.load(Ordering::SeqCst), 3);
     }
-    
+
     #[tokio::test]
     async fn test_retry_non_retryable_error() {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
-        
+
         let config = RetryConfig::default();
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = call_count.clone();
-        
+
         let result = with_retry(&config, move || {
             call_count_clone.fetch_add(1, Ordering::SeqCst);
             async move {
@@ -281,16 +275,16 @@ mod tests {
             }
         })
         .await;
-        
+
         assert!(result.is_err());
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
     }
-    
+
     #[tokio::test]
     async fn test_retry_max_attempts_exceeded() {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
-        
+
         let config = RetryConfig {
             max_attempts: 2,
             initial_delay_ms: 10,
@@ -298,7 +292,7 @@ mod tests {
         };
         let call_count = Arc::new(AtomicU32::new(0));
         let call_count_clone = call_count.clone();
-        
+
         let result = with_retry(&config, move || {
             call_count_clone.fetch_add(1, Ordering::SeqCst);
             async move {
@@ -308,7 +302,7 @@ mod tests {
             }
         })
         .await;
-        
+
         assert!(result.is_err());
         assert_eq!(call_count.load(Ordering::SeqCst), 2);
     }

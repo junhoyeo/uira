@@ -15,17 +15,23 @@ use uira_protocol::{
     StopReason, StreamChunk, StreamError, StreamMessageStart, TokenUsage, ToolSpec,
 };
 
+mod beta_features;
+mod error_classify;
+mod payload_log;
+mod response_handling;
+mod retry;
+mod turn_validation;
+
+pub use beta_features::BetaFeatures;
+pub use error_classify::classify_error;
+pub use payload_log::{PayloadLogEvent, PayloadLogger};
+pub use retry::{with_retry, RetryConfig};
+pub use turn_validation::validate_anthropic_turns;
+
+use self::response_handling::{extract_retry_after, parse_error_body};
 use crate::{
-    beta_features::BetaFeatures,
-    error_classify::classify_error,
-    image::normalize_image_source,
-    payload_log::PayloadLogger,
-    response_handling::{extract_retry_after, parse_error_body},
-    retry::{with_retry, RetryConfig},
-    traits::ModelResult,
-    traits::ResponseStream,
-    turn_validation::validate_anthropic_turns,
-    ModelClient, ProviderConfig, ProviderError,
+    image::normalize_image_source, traits::ModelResult, traits::ResponseStream, ModelClient,
+    ProviderConfig, ProviderError,
 };
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";

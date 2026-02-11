@@ -42,7 +42,7 @@ struct ErrorResponse {
 impl std::fmt::Display for ErrorResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut parts = Vec::new();
-        
+
         if let Some(code) = &self.error_code {
             parts.push(format!("code: {}", code));
         }
@@ -52,7 +52,7 @@ impl std::fmt::Display for ErrorResponse {
         if let Some(message) = &self.error_message {
             parts.push(format!("message: {}", message));
         }
-        
+
         if parts.is_empty() {
             write!(f, "Unknown error")
         } else {
@@ -70,7 +70,7 @@ mod tests {
     fn test_extract_retry_after_present() {
         let mut headers = HeaderMap::new();
         headers.insert("retry-after", HeaderValue::from_static("60"));
-        
+
         assert_eq!(extract_retry_after(&headers), Some(60000));
     }
 
@@ -84,7 +84,7 @@ mod tests {
     fn test_extract_retry_after_invalid() {
         let mut headers = HeaderMap::new();
         headers.insert("retry-after", HeaderValue::from_static("invalid"));
-        
+
         assert_eq!(extract_retry_after(&headers), None);
     }
 
@@ -95,7 +95,7 @@ mod tests {
             error_message: Some("Too many requests".to_string()),
             error_code: Some("429".to_string()),
         };
-        
+
         let display = error.to_string();
         assert!(display.contains("code: 429"));
         assert!(display.contains("type: rate_limit_error"));
