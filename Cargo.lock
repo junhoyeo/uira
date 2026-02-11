@@ -5580,7 +5580,6 @@ dependencies = [
  "uira-agents",
  "uira-comment-checker",
  "uira-config",
- "uira-core",
  "uira-features",
  "uira-goals",
  "uira-oxc",
@@ -5654,7 +5653,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
- "uira-core",
+ "uira-protocol",
  "url",
  "uuid",
 ]
@@ -5665,6 +5664,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5672,6 +5672,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "uira-config",
  "uira-events",
@@ -5705,13 +5706,14 @@ dependencies = [
  "uira-agents",
  "uira-auth",
  "uira-config",
- "uira-core",
  "uira-features",
+ "uira-gateway",
  "uira-goals",
  "uira-mcp-client",
  "uira-protocol",
  "uira-providers",
  "uira-sandbox",
+ "uira-skills",
  "uira-telemetry",
  "uira-tui",
  "webbrowser",
@@ -5777,16 +5779,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "uira-events"
 version = "0.1.0"
 dependencies = [
@@ -5816,8 +5808,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
- "uira-core",
  "uira-hooks",
+ "uira-protocol",
  "uira-sdk",
 ]
 
@@ -5825,7 +5817,10 @@ dependencies = [
 name = "uira-gateway"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.8",
+ "chrono",
+ "futures-util",
  "serde",
  "serde_json",
  "tempfile",
@@ -5834,6 +5829,7 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tracing",
  "uira-agent",
+ "uira-channels",
  "uira-config",
  "uira-events",
  "uira-protocol",
@@ -5932,11 +5928,11 @@ dependencies = [
  "tokio",
  "uira-agents",
  "uira-config",
- "uira-core",
  "uira-features",
  "uira-goals",
  "uira-hooks",
  "uira-oxc",
+ "uira-protocol",
  "uira-sdk",
  "uira-tools",
 ]
@@ -5972,6 +5968,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "uuid",

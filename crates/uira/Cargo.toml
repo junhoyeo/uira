@@ -10,7 +10,6 @@ keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-uira-core = { workspace = true }
 uira-sdk = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }

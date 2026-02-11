@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
   "crates/uira",
-  "crates/uira-core",
   "crates/uira-napi",
   "crates/uira-sdk",
   "crates/uira-comment-checker",
@@ -40,7 +39,6 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
-uira-core = { path = "crates/uira-core" }
 uira-protocol = { path = "crates/uira-protocol" }
 uira-config = { path = "crates/uira-config" }
 

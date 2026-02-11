@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use napi_derive::napi;
 use uira_agents::{get_agent_definitions_with_config, AgentModelConfig};
-use uira_core::HookOutput;
+use uira_protocol::HookOutput;
 use uira_features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
 use uira_features::keywords::KeywordDetector;
 use uira_features::model_routing::{

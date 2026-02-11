@@ -2,7 +2,7 @@ use crate::{AuthError, Result, StoredCredential};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use uira_core::atomic_write_secure;
+use uira_protocol::atomic_write_secure;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CredentialStore {

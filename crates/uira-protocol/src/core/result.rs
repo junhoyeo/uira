@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::PermissionDecision;
+use super::types::PermissionDecision;
 
 fn default_true() -> bool {
     true

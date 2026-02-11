@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-uira-core = { workspace = true }
+uira-protocol = { workspace = true }
 uira-hooks = { workspace = true }
 uira-sdk = { workspace = true }
 
