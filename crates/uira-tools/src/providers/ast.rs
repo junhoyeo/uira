@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use uira_protocol::{JsonSchema, ToolOutput, ToolSpec};
+use uira_types::{JsonSchema, ToolOutput, ToolSpec};
 use walkdir::WalkDir;
 
 fn get_extensions_for_lang(lang: &str) -> &'static [&'static str] {

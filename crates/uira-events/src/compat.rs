@@ -1,5 +1,5 @@
 use crate::events::{ApprovalDecision, Event, FileChangeType, SessionEndReason};
-use uira_protocol::{Item, ThreadEvent, TokenUsage};
+use uira_types::{Item, ThreadEvent, TokenUsage};
 
 impl From<ThreadEvent> for Event {
     fn from(thread_event: ThreadEvent) -> Self {
@@ -73,10 +73,10 @@ impl From<ThreadEvent> for Event {
                     session_id: String::new(),
                     path,
                     change_type: match change_type {
-                        uira_protocol::FileChangeType::Create => FileChangeType::Create,
-                        uira_protocol::FileChangeType::Modify => FileChangeType::Modify,
-                        uira_protocol::FileChangeType::Delete => FileChangeType::Delete,
-                        uira_protocol::FileChangeType::Rename => FileChangeType::Rename,
+                        uira_types::FileChangeType::Create => FileChangeType::Create,
+                        uira_types::FileChangeType::Modify => FileChangeType::Modify,
+                        uira_types::FileChangeType::Delete => FileChangeType::Delete,
+                        uira_types::FileChangeType::Rename => FileChangeType::Rename,
                     },
                     patch,
                 },

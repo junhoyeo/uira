@@ -12,7 +12,7 @@ uira-config = { workspace = true }
 uira-goals = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-events = { workspace = true }
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

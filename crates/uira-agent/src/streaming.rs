@@ -4,7 +4,7 @@
 //! chunks from the model, buffering text until newlines arrive before
 //! committing lines for display.
 
-use uira_protocol::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
+use uira_types::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamOutput {
@@ -387,7 +387,7 @@ impl Default for StreamController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uira_protocol::StreamMessageStart;
+    use uira_types::StreamMessageStart;
 
     fn make_message_start() -> StreamChunk {
         StreamChunk::MessageStart {

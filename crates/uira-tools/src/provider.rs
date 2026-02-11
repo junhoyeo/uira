@@ -3,7 +3,7 @@
 use crate::{ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::Value;
-use uira_protocol::{ToolOutput, ToolSpec};
+use uira_types::{ToolOutput, ToolSpec};
 
 /// A provider of tools that can be dynamically registered
 #[async_trait]

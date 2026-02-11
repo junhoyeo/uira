@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use uira_protocol::Provider;
+use uira_types::Provider;
 use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
 use uira_tools::AgentExecutor;
 

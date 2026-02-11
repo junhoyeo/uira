@@ -5583,12 +5583,12 @@ dependencies = [
  "uira-features",
  "uira-goals",
  "uira-oxc",
- "uira-protocol",
  "uira-providers",
  "uira-sandbox",
  "uira-sdk",
  "uira-telemetry",
  "uira-tools",
+ "uira-types",
  "unicase",
 ]
 
@@ -5613,11 +5613,11 @@ dependencies = [
  "uira-goals",
  "uira-hooks",
  "uira-permissions",
- "uira-protocol",
  "uira-providers",
  "uira-sandbox",
  "uira-telemetry",
  "uira-tools",
+ "uira-types",
  "uuid",
 ]
 
@@ -5653,7 +5653,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
- "uira-protocol",
+ "uira-types",
  "url",
  "uuid",
 ]
@@ -5676,7 +5676,7 @@ dependencies = [
  "tracing",
  "uira-config",
  "uira-events",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -5710,12 +5710,12 @@ dependencies = [
  "uira-gateway",
  "uira-goals",
  "uira-mcp-client",
- "uira-protocol",
  "uira-providers",
  "uira-sandbox",
  "uira-skills",
  "uira-telemetry",
  "uira-tui",
+ "uira-types",
  "webbrowser",
 ]
 
@@ -5775,7 +5775,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -5788,7 +5788,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -5809,8 +5809,8 @@ dependencies = [
  "tokio",
  "tokio-test",
  "uira-hooks",
- "uira-protocol",
  "uira-sdk",
+ "uira-types",
 ]
 
 [[package]]
@@ -5832,7 +5832,7 @@ dependencies = [
  "uira-channels",
  "uira-config",
  "uira-events",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -5871,7 +5871,7 @@ dependencies = [
  "uira-config",
  "uira-events",
  "uira-goals",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -5932,9 +5932,9 @@ dependencies = [
  "uira-goals",
  "uira-hooks",
  "uira-oxc",
- "uira-protocol",
  "uira-sdk",
  "uira-tools",
+ "uira-types",
 ]
 
 [[package]]
@@ -5962,19 +5962,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-protocol"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "uira-providers"
 version = "0.1.0"
 dependencies = [
@@ -5996,7 +5983,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uira-auth",
- "uira-protocol",
+ "uira-types",
  "uuid",
  "wiremock",
 ]
@@ -6014,7 +6001,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-protocol",
+ "uira-types",
 ]
 
 [[package]]
@@ -6091,9 +6078,9 @@ dependencies = [
  "uira-features",
  "uira-mcp-client",
  "uira-permissions",
- "uira-protocol",
  "uira-sandbox",
  "uira-sdk",
+ "uira-types",
  "uuid",
  "walkdir",
 ]
@@ -6115,8 +6102,21 @@ dependencies = [
  "tui-textarea",
  "uira-agent",
  "uira-events",
- "uira-protocol",
  "uira-providers",
+ "uira-types",
+]
+
+[[package]]
+name = "uira-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

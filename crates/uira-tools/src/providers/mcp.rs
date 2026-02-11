@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use uira_config::schema::NamedMcpServerConfig;
 use uira_mcp_client::{McpRuntimeManager, McpServerConfig};
-use uira_protocol::{ToolOutput, ToolSpec};
+use uira_types::{ToolOutput, ToolSpec};
 
 #[derive(Debug, Clone)]
 struct ToolRoute {

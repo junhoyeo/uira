@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_protocol::TokenUsage;
+use uira_types::TokenUsage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +14,8 @@ pub enum EventCategory {
     Background,
     Todo,
     System,
+    Gateway,
+    Channel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,7 +222,7 @@ pub enum Event {
     // ============================================================================
     TodoUpdated {
         session_id: String,
-        todos: Vec<uira_protocol::TodoItem>,
+        todos: Vec<uira_types::TodoItem>,
     },
 
     // ============================================================================
@@ -242,6 +244,52 @@ pub enum Event {
     // ============================================================================
     MessagesTransform {
         session_id: String,
+    },
+
+    // ============================================================================
+    // Gateway Events
+    // ============================================================================
+    GatewayStarted {
+        host: String,
+        port: u16,
+    },
+    GatewaySessionCreated {
+        session_id: String,
+    },
+    GatewaySessionDestroyed {
+        session_id: String,
+    },
+    GatewaySessionError {
+        session_id: String,
+        error: String,
+    },
+
+    // ============================================================================
+    // Channel Events
+    // ============================================================================
+    ChannelConnected {
+        channel_type: String,
+        channel_id: String,
+    },
+    ChannelDisconnected {
+        channel_type: String,
+        channel_id: String,
+    },
+    ChannelMessageReceived {
+        channel_type: String,
+        sender: String,
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+    },
+    ChannelMessageSent {
+        channel_type: String,
+        recipient: String,
+        content: String,
+    },
+    ChannelError {
+        channel_type: String,
+        error: String,
     },
 }
 
@@ -291,6 +339,17 @@ impl Event {
             Self::ModelSwitched { .. } | Self::Error { .. } | Self::MessagesTransform { .. } => {
                 EventCategory::System
             }
+
+            Self::GatewayStarted { .. }
+            | Self::GatewaySessionCreated { .. }
+            | Self::GatewaySessionDestroyed { .. }
+            | Self::GatewaySessionError { .. } => EventCategory::Gateway,
+
+            Self::ChannelConnected { .. }
+            | Self::ChannelDisconnected { .. }
+            | Self::ChannelMessageReceived { .. }
+            | Self::ChannelMessageSent { .. }
+            | Self::ChannelError { .. } => EventCategory::Channel,
         }
     }
 
@@ -329,6 +388,19 @@ impl Event {
             Self::BackgroundTaskSpawned { .. }
             | Self::BackgroundTaskProgress { .. }
             | Self::BackgroundTaskCompleted { .. } => None,
+
+            Self::GatewaySessionCreated { session_id }
+            | Self::GatewaySessionDestroyed { session_id }
+            | Self::GatewaySessionError { session_id, .. } => Some(session_id),
+
+            Self::GatewayStarted { .. } => None,
+
+            Self::ChannelMessageReceived { session_id, .. } => session_id.as_deref(),
+
+            Self::ChannelConnected { .. }
+            | Self::ChannelDisconnected { .. }
+            | Self::ChannelMessageSent { .. }
+            | Self::ChannelError { .. } => None,
         }
     }
 
@@ -366,6 +438,15 @@ impl Event {
             Self::Error { .. } => "error",
             Self::MessagesTransform { .. } => "messages_transform",
             Self::TodoUpdated { .. } => "todo_updated",
+            Self::GatewayStarted { .. } => "gateway_started",
+            Self::GatewaySessionCreated { .. } => "gateway_session_created",
+            Self::GatewaySessionDestroyed { .. } => "gateway_session_destroyed",
+            Self::GatewaySessionError { .. } => "gateway_session_error",
+            Self::ChannelConnected { .. } => "channel_connected",
+            Self::ChannelDisconnected { .. } => "channel_disconnected",
+            Self::ChannelMessageReceived { .. } => "channel_message_received",
+            Self::ChannelMessageSent { .. } => "channel_message_sent",
+            Self::ChannelError { .. } => "channel_error",
         }
     }
 }
@@ -455,5 +536,58 @@ mod tests {
 
         let parsed: Event = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.event_name(), "approval_decided");
+    }
+
+    #[test]
+    fn test_gateway_event_category() {
+        let event = Event::GatewayStarted {
+            host: "127.0.0.1".to_string(),
+            port: 18789,
+        };
+        assert_eq!(event.category(), EventCategory::Gateway);
+        assert_eq!(event.session_id(), None);
+        assert_eq!(event.event_name(), "gateway_started");
+    }
+
+    #[test]
+    fn test_gateway_session_event() {
+        let event = Event::GatewaySessionCreated {
+            session_id: "ses_123".to_string(),
+        };
+        assert_eq!(event.category(), EventCategory::Gateway);
+        assert_eq!(event.session_id(), Some("ses_123"));
+    }
+
+    #[test]
+    fn test_channel_event_category() {
+        let event = Event::ChannelConnected {
+            channel_type: "telegram".to_string(),
+            channel_id: "bot123".to_string(),
+        };
+        assert_eq!(event.category(), EventCategory::Channel);
+        assert_eq!(event.session_id(), None);
+        assert_eq!(event.event_name(), "channel_connected");
+    }
+
+    #[test]
+    fn test_channel_message_received_with_session() {
+        let event = Event::ChannelMessageReceived {
+            channel_type: "slack".to_string(),
+            sender: "U12345".to_string(),
+            content: "hello".to_string(),
+            session_id: Some("ses_456".to_string()),
+        };
+        assert_eq!(event.session_id(), Some("ses_456"));
+    }
+
+    #[test]
+    fn test_channel_message_received_without_session() {
+        let event = Event::ChannelMessageReceived {
+            channel_type: "telegram".to_string(),
+            sender: "user1".to_string(),
+            content: "hi".to_string(),
+            session_id: None,
+        };
+        assert_eq!(event.session_id(), None);
     }
 }

@@ -13,7 +13,7 @@ use ratatui::{
     Frame,
 };
 use tokio::sync::oneshot;
-use uira_protocol::ReviewDecision;
+use uira_types::ReviewDecision;
 
 use crate::Theme;
 

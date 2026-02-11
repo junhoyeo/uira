@@ -1,5 +1,5 @@
 use regex::Regex;
-use uira_protocol::HookOutput;
+use uira_types::HookOutput;
 
 pub struct KeywordPattern {
     pub name: &'static str,

@@ -15,7 +15,7 @@ members = [
   "crates/uira-oxc",
   "crates/uira-goals",
 # New agent harness crates
-"crates/uira-protocol",
+"crates/uira-types",
 "crates/uira-providers",
 "crates/uira-sandbox",
 "crates/uira-context",
@@ -39,7 +39,7 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
-uira-protocol = { path = "crates/uira-protocol" }
+uira-types = { path = "crates/uira-types" }
 uira-config = { path = "crates/uira-config" }
 
 # Internal crates - Features

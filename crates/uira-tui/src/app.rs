@@ -20,8 +20,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender};
-use uira_protocol::Provider;
-use uira_protocol::{
+use uira_types::Provider;
+use uira_types::{
     AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
     TodoItem, TodoPriority, TodoStatus,
 };

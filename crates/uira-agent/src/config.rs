@@ -8,7 +8,7 @@ use uira_config::schema::{
 };
 use uira_context::{CompactionConfig, CompactionStrategy};
 use uira_permissions::{ConfigAction, ConfigRule};
-use uira_protocol::{SandboxPreference, ToolSpec};
+use uira_types::{SandboxPreference, ToolSpec};
 use uira_sandbox::SandboxPolicy;
 
 /// Configuration for the agent

@@ -1,6 +1,6 @@
 //! Message history storage
 
-use uira_protocol::Message;
+use uira_types::Message;
 
 /// Stores conversation history
 #[derive(Debug, Default, Clone)]

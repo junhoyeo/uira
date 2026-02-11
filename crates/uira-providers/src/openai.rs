@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use uira_auth::CredentialStore;
-use uira_protocol::{
+use uira_types::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
 };

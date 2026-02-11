@@ -1,6 +1,6 @@
 //! Token monitoring for context window management
 
-use uira_protocol::TokenUsage;
+use uira_types::TokenUsage;
 
 #[derive(Debug, Clone)]
 pub struct TokenMonitor {

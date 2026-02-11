@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uira_events::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
-use uira_protocol::{
+use uira_types::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
@@ -364,7 +364,7 @@ impl Agent {
 
                     current_input = InteractiveInput::Prompt(format!(
                         "{}\n\n[Status: {}/{} completed, {} remaining]",
-                        uira_protocol::TODO_CONTINUATION_PROMPT,
+                        uira_types::TODO_CONTINUATION_PROMPT,
                         total.saturating_sub(incomplete_count),
                         total,
                         incomplete_count
@@ -874,7 +874,7 @@ impl Agent {
 
             // Add assistant message to context
             let assistant_message =
-                Message::with_blocks(uira_protocol::Role::Assistant, response.content.clone());
+                Message::with_blocks(uira_types::Role::Assistant, response.content.clone());
             self.record_message(assistant_message.clone());
             self.session
                 .context
@@ -934,8 +934,8 @@ impl Agent {
     /// Get model response with streaming, emitting ContentDelta events
     async fn get_response_streaming(
         &mut self,
-        tool_specs: &[uira_protocol::ToolSpec],
-    ) -> Result<uira_protocol::ModelResponse, AgentLoopError> {
+        tool_specs: &[uira_types::ToolSpec],
+    ) -> Result<uira_types::ModelResponse, AgentLoopError> {
         let stream = self
             .session
             .client
@@ -1140,8 +1140,8 @@ impl Agent {
                     .rev()
                     .find(|m| m.role == Role::Assistant)
                     .map(|m| match &m.content {
-                        uira_protocol::MessageContent::Text(s) => s.clone(),
-                        uira_protocol::MessageContent::Blocks(blocks) => blocks
+                        uira_types::MessageContent::Text(s) => s.clone(),
+                        uira_types::MessageContent::Blocks(blocks) => blocks
                             .iter()
                             .filter_map(|b| {
                                 if let ContentBlock::Text { text } = b {
@@ -1152,7 +1152,7 @@ impl Agent {
                             })
                             .collect::<Vec<_>>()
                             .join(""),
-                        uira_protocol::MessageContent::ToolCalls(_) => String::new(),
+                        uira_types::MessageContent::ToolCalls(_) => String::new(),
                     })
                     .unwrap_or_default();
 
@@ -1229,7 +1229,7 @@ impl Agent {
     }
 
     /// Record turn context to the rollout
-    fn record_turn(&mut self, turn: usize, usage: uira_protocol::TokenUsage) {
+    fn record_turn(&mut self, turn: usize, usage: uira_types::TokenUsage) {
         if let Some(ref mut rollout) = self.rollout {
             if let Err(e) = rollout.record_turn(turn, usage) {
                 tracing::warn!("Failed to record turn to rollout: {}", e);
@@ -1493,7 +1493,7 @@ impl Agent {
 
                             if decision.is_denied() {
                                 let deny_reason =
-                                    if let uira_protocol::ReviewDecision::Deny { reason } =
+                                    if let uira_types::ReviewDecision::Deny { reason } =
                                         &decision
                                     {
                                         reason.clone().unwrap_or_default()

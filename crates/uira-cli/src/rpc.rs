@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, EventStream};
 use uira_agents::ModelRegistry;
-use uira_protocol::{AgentState, Item, Message, ReviewDecision, ThreadEvent};
+use uira_types::{AgentState, Item, Message, ReviewDecision, ThreadEvent};
 use uira_providers::ModelClient;
 
 const JSONRPC_VERSION: &str = "2.0";

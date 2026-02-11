@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_protocol::atomic_write_secure;
+use uira_types::atomic_write_secure;
 
 /// CLI-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

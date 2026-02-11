@@ -19,7 +19,7 @@ uira-oxc = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-agent = { workspace = true }
 uira-providers = { workspace = true }
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 uira-tools = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-telemetry = { workspace = true }

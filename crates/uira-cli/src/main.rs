@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
 use uira_agents::{get_agent_definitions, ModelRegistry};
-use uira_protocol::ExecutionResult;
+use uira_types::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
@@ -138,7 +138,7 @@ async fn run_exec(
     json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use futures::StreamExt;
-    use uira_protocol::{Item, ThreadEvent};
+    use uira_types::{Item, ThreadEvent};
 
     let uira_config = uira_config::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
@@ -305,10 +305,10 @@ async fn run_resume(
 
             for msg in messages_to_show {
                 let role = match msg.role {
-                    uira_protocol::Role::User => "User".green(),
-                    uira_protocol::Role::Assistant => "Assistant".blue(),
-                    uira_protocol::Role::System => "System".yellow(),
-                    uira_protocol::Role::Tool => "Tool".magenta(),
+                    uira_types::Role::User => "User".green(),
+                    uira_types::Role::Assistant => "Assistant".blue(),
+                    uira_types::Role::System => "System".yellow(),
+                    uira_types::Role::Tool => "Tool".magenta(),
                 };
                 let content = get_message_text(&msg.content);
                 println!("{}: {}", role.bold(), content);
@@ -1236,7 +1236,7 @@ fn create_client(
     agent_model_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
     use secrecy::SecretString;
-    use uira_protocol::Provider;
+    use uira_types::Provider;
 
     let provider = cli
         .provider
@@ -1340,7 +1340,7 @@ fn create_agent_config(
     agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
     uira_config: Option<&uira_config::schema::UiraConfig>,
     external_mcp_servers: Vec<uira_config::schema::NamedMcpServerConfig>,
-    external_mcp_specs: Vec<uira_protocol::ToolSpec>,
+    external_mcp_specs: Vec<uira_types::ToolSpec>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
@@ -1391,7 +1391,7 @@ async fn prepare_external_mcp(
 ) -> Result<
     (
         Vec<uira_config::schema::NamedMcpServerConfig>,
-        Vec<uira_protocol::ToolSpec>,
+        Vec<uira_types::ToolSpec>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -1427,9 +1427,9 @@ async fn prepare_external_mcp(
     let specs = discovered
         .into_iter()
         .map(|tool| {
-            let schema = serde_json::from_value::<uira_protocol::JsonSchema>(tool.input_schema)
-                .unwrap_or_else(|_| uira_protocol::JsonSchema::object());
-            uira_protocol::ToolSpec::new(tool.namespaced_name, tool.description, schema)
+            let schema = serde_json::from_value::<uira_types::JsonSchema>(tool.input_schema)
+                .unwrap_or_else(|_| uira_types::JsonSchema::object());
+            uira_types::ToolSpec::new(tool.namespaced_name, tool.description, schema)
         })
         .collect::<Vec<_>>();
 
@@ -1464,19 +1464,19 @@ fn generate_completions(shell: Shell) {
 }
 
 /// Extract text content from a message content
-fn get_message_text(content: &uira_protocol::MessageContent) -> String {
+fn get_message_text(content: &uira_types::MessageContent) -> String {
     match content {
-        uira_protocol::MessageContent::Text(t) => t.clone(),
-        uira_protocol::MessageContent::Blocks(blocks) => blocks
+        uira_types::MessageContent::Text(t) => t.clone(),
+        uira_types::MessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                uira_protocol::ContentBlock::Text { text } => Some(text.as_str()),
-                uira_protocol::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                uira_types::ContentBlock::Text { text } => Some(text.as_str()),
+                uira_types::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
-        uira_protocol::MessageContent::ToolCalls(calls) => calls
+        uira_types::MessageContent::ToolCalls(calls) => calls
             .iter()
             .map(|c| format!("Tool: {} ({})", c.name, c.id))
             .collect::<Vec<_>>()

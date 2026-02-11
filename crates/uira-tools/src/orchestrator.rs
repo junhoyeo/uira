@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uira_permissions::{Action as PermissionAction, PermissionEvaluator};
-use uira_protocol::{ApprovalRequirement, ReviewDecision, ToolOutput};
+use uira_types::{ApprovalRequirement, ReviewDecision, ToolOutput};
 use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 
 use crate::approval_cache::{ApprovalCache, ApprovalKey, CacheDecision};
@@ -670,7 +670,7 @@ impl ToolOrchestrator {
 mod tests {
     use super::*;
     use crate::FunctionTool;
-    use uira_protocol::JsonSchema;
+    use uira_types::JsonSchema;
 
     fn create_test_router() -> Arc<ToolRouter> {
         let mut router = ToolRouter::new();

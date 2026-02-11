@@ -5,7 +5,7 @@ use futures::future::join_all;
 use std::path::Path;
 use uira_config::schema::GoalConfig;
 use uira_goals::{GoalCheckResult, GoalRunner, VerificationResult};
-use uira_protocol::ThreadEvent;
+use uira_types::ThreadEvent;
 
 /// Goal verifier for agent execution
 ///

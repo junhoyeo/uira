@@ -16,7 +16,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 
 # Internal dependencies
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

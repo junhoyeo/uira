@@ -11,7 +11,7 @@ use uira_features::background_agent::{
     get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
     LaunchInput,
 };
-use uira_protocol::{JsonSchema, ToolOutput, ToolSpec};
+use uira_types::{JsonSchema, ToolOutput, ToolSpec};
 
 static BACKGROUND_MANAGER: Lazy<Arc<BackgroundManager>> =
     Lazy::new(|| get_background_manager(BackgroundTaskConfig::default()));

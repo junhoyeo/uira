@@ -11,7 +11,7 @@ repository.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 uira-hooks = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }
