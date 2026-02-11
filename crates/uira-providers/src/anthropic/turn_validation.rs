@@ -1,40 +1,10 @@
 //! Turn validation for Anthropic API
 //!
-//! Anthropic requires strict user→assistant alternation in conversation history.
-//! This module provides utilities to validate and fix message sequences:
-//! - Merge consecutive user messages
-//! - Ensure alternating user/assistant turns
-//! - Respect thinking block boundaries (don't merge across them)
+//! Merges consecutive user messages and preserves tool-role turns.
 
+use tracing::warn;
 use uira_protocol::{ContentBlock, Message, MessageContent, Role};
 
-/// Validates and fixes message turns for Anthropic API compatibility.
-///
-/// This function ensures:
-/// 1. Consecutive user messages are merged into a single message
-/// 2. Messages alternate between user and assistant roles
-/// 3. Thinking blocks act as merge boundaries (don't merge across them)
-///
-/// # Arguments
-/// * `messages` - Slice of messages to validate
-///
-/// # Returns
-/// A new vector of messages with proper turn alternation
-///
-/// # Example
-/// ```
-/// use uira_protocol::{Message, Role};
-/// use uira_providers::validate_anthropic_turns;
-///
-/// let messages = vec![
-///     Message::user("First question"),
-///     Message::user("Second question"),  // Will be merged with first
-///     Message::assistant("Answer"),
-/// ];
-///
-/// let validated = validate_anthropic_turns(&messages);
-/// assert_eq!(validated.len(), 2); // Merged into 2 messages
-/// ```
 pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
     let mut result = Vec::new();
     let mut pending_user_blocks: Vec<ContentBlock> = Vec::new();
@@ -50,10 +20,16 @@ pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
                     MessageContent::Blocks(blocks) => {
                         pending_user_blocks.extend(blocks.clone());
                     }
-                    MessageContent::ToolCalls(_) => {
-                        // Tool calls shouldn't appear in user messages for Anthropic,
-                        // but if they do, skip them
-                        continue;
+                    MessageContent::ToolCalls(calls) => {
+                        warn!(
+                            "User message contains ToolCalls ({} calls) — converting to text",
+                            calls.len()
+                        );
+                        for call in calls {
+                            pending_user_blocks.push(ContentBlock::Text {
+                                text: format!("[tool_call: {}({})]", call.name, call.input),
+                            });
+                        }
                     }
                 }
             }
@@ -100,16 +76,6 @@ pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
     result
 }
 
-/// Checks if a message contains thinking blocks.
-///
-/// Thinking blocks act as merge boundaries - we should not merge user messages
-/// across an assistant message that contains thinking.
-///
-/// # Arguments
-/// * `message` - The message to check
-///
-/// # Returns
-/// `true` if the message contains at least one thinking block
 #[allow(dead_code)]
 fn has_thinking_blocks(message: &Message) -> bool {
     match &message.content {

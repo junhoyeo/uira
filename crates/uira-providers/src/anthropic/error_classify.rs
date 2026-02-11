@@ -7,6 +7,8 @@ use crate::error::ProviderError;
 use lazy_static::lazy_static;
 use regex::Regex;
 
+const DEFAULT_RATE_LIMIT_RETRY_MS: u64 = 60_000;
+
 lazy_static! {
     // Context overflow patterns
     static ref CONTEXT_OVERFLOW_PATTERNS: Vec<Regex> = vec![
@@ -134,6 +136,18 @@ fn is_image_error(message: &str) -> bool {
         .any(|pattern| pattern.is_match(message))
 }
 
+fn parse_token_counts(message: &str) -> (u64, u64) {
+    lazy_static::lazy_static! {
+        static ref TOKEN_RE: Regex =
+            Regex::new(r"(\d[\d,]*)\s*tokens?\b.*?(\d[\d,]*)\s*(?:token|limit|maximum)\b").unwrap();
+    }
+    if let Some(caps) = TOKEN_RE.captures(message) {
+        let parse = |s: &str| s.replace(',', "").parse::<u64>().unwrap_or(0);
+        return (parse(&caps[1]), parse(&caps[2]));
+    }
+    (0, 0)
+}
+
 /// Classify an API error based on status code and message content
 ///
 /// # Arguments
@@ -155,7 +169,7 @@ pub fn classify_error(provider: &str, status: u16, message: &str) -> ProviderErr
         // HTTP 429 - Rate Limited
         429 => {
             return ProviderError::RateLimited {
-                retry_after_ms: 60000, // Default 60s retry
+                retry_after_ms: DEFAULT_RATE_LIMIT_RETRY_MS,
             };
         }
         // HTTP 401/403 - Auth errors
@@ -167,14 +181,13 @@ pub fn classify_error(provider: &str, status: u16, message: &str) -> ProviderErr
 
     // Check message patterns
     if is_context_overflow(message) {
-        // Try to extract token counts from message
-        // Default to generic values if not found
-        return ProviderError::ContextExceeded { used: 0, limit: 0 };
+        let (used, limit) = parse_token_counts(message);
+        return ProviderError::ContextExceeded { used, limit };
     }
 
     if is_rate_limit(message) {
         return ProviderError::RateLimited {
-            retry_after_ms: 60000,
+            retry_after_ms: DEFAULT_RATE_LIMIT_RETRY_MS,
         };
     }
 

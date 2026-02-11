@@ -33,7 +33,7 @@ impl Default for ProviderConfig {
             timeout_seconds: Some(120),
             max_retries: Some(3),
             enable_thinking: false,
-            thinking_budget: Some(64000),
+            thinking_budget: None,
         }
     }
 }

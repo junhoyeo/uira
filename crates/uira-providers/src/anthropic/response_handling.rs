@@ -1,4 +1,4 @@
-//! Shared utilities for handling API responses across providers
+//! Utilities for handling Anthropic API responses
 
 use serde::Deserialize;
 
@@ -12,23 +12,21 @@ pub fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> 
         .map(|secs| secs * 1000)
 }
 
-/// Parse error message from API error response body
-/// Attempts to extract structured error information from JSON response
 pub async fn parse_error_body(response: reqwest::Response) -> String {
-    // Try to parse as JSON error first
     if let Ok(text) = response.text().await {
-        // Try to parse as a structured error response
         if let Ok(error) = serde_json::from_str::<ErrorResponse>(&text) {
             return error.to_string();
         }
-        // Fall back to raw text
+        // Anthropic wraps errors as {"error": {"type": ..., "message": ...}}
+        if let Ok(wrapper) = serde_json::from_str::<NestedErrorResponse>(&text) {
+            return wrapper.error.to_string();
+        }
         text
     } else {
         "Failed to read error response body".to_string()
     }
 }
 
-/// Common error response structure used by many APIs
 #[derive(Debug, Deserialize)]
 struct ErrorResponse {
     #[serde(alias = "type")]
@@ -37,6 +35,11 @@ struct ErrorResponse {
     error_message: Option<String>,
     #[serde(alias = "code")]
     error_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NestedErrorResponse {
+    error: ErrorResponse,
 }
 
 impl std::fmt::Display for ErrorResponse {
@@ -100,5 +103,14 @@ mod tests {
         assert!(display.contains("code: 429"));
         assert!(display.contains("type: rate_limit_error"));
         assert!(display.contains("message: Too many requests"));
+    }
+
+    #[test]
+    fn test_nested_error_response_deserializes() {
+        let json = r#"{"error":{"type":"overloaded_error","message":"Overloaded"}}"#;
+        let wrapper: NestedErrorResponse = serde_json::from_str(json).unwrap();
+        let display = wrapper.error.to_string();
+        assert!(display.contains("type: overloaded_error"));
+        assert!(display.contains("message: Overloaded"));
     }
 }

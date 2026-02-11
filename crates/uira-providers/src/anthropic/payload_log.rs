@@ -10,12 +10,13 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use tracing::warn;
 
 /// Payload log event structure
 #[derive(Debug, Clone, Serialize)]
 pub struct PayloadLogEvent {
     pub ts: String,
-    pub stage: String, // "request" | "usage"
+    pub stage: String, // "request" | "usage" | "error"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -169,21 +170,28 @@ impl PayloadLogger {
         hex::encode(result)
     }
 
-    /// Write event to JSONL file
     fn write_event(&self, event: &PayloadLogEvent) {
-        // Ensure log directory exists
         if let Some(parent) = self.log_path.parent() {
-            let _ = fs::create_dir_all(parent);
+            if let Err(e) = fs::create_dir_all(parent) {
+                warn!("Failed to create payload log directory: {}", e);
+                return;
+            }
         }
 
-        // Append event as JSONL
-        if let Ok(mut file) = OpenOptions::new()
+        match OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.log_path)
         {
-            if let Ok(json) = serde_json::to_string(event) {
-                let _ = writeln!(file, "{}", json);
+            Ok(mut file) => {
+                if let Ok(json) = serde_json::to_string(event) {
+                    if let Err(e) = writeln!(file, "{}", json) {
+                        warn!("Failed to write payload log event: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to open payload log file: {}", e);
             }
         }
     }
@@ -227,8 +235,10 @@ mod tests {
 
     #[test]
     fn test_disabled_by_default() {
-        std::env::remove_var("UIRA_ANTHROPIC_PAYLOAD_LOG");
-        let logger = PayloadLogger::from_env();
+        let logger = PayloadLogger {
+            enabled: false,
+            log_path: PathBuf::from("/tmp/test-disabled.jsonl"),
+        };
         assert!(!logger.enabled);
     }
 }

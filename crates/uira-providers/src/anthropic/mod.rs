@@ -694,7 +694,6 @@ impl ModelClient for AnthropicClient {
         let stream = async_stream::try_stream! {
             let mut buffer = String::new();
             let mut consecutive_parse_errors: usize = 0;
-            let mut _received_message_stop = false;
             const MAX_CONSECUTIVE_PARSE_ERRORS: usize = 10;
 
             futures::pin_mut!(byte_stream);
@@ -721,8 +720,8 @@ impl ModelClient for AnthropicClient {
 
                 // Process complete SSE events (separated by double newline)
                 while let Some(pos) = buffer.find("\n\n") {
-                    let event_text = buffer[..pos].to_string();
-                    buffer = buffer[pos + 2..].to_string();
+                    let event_text: String = buffer.drain(..pos + 2).collect();
+                    let event_text = &event_text[..event_text.len() - 2];
 
                     // Parse each line in the event
                     for line in event_text.lines() {
@@ -738,29 +737,18 @@ impl ModelClient for AnthropicClient {
                                 data.to_string()
                             };
                             if data == "[DONE]" {
-                                _received_message_stop = true;
                                 yield StreamChunk::MessageStop;
                                 return;
                             }
                             match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                                 Ok(event) => {
                                     tracing::debug!("Anthropic SSE event: {:?}", event);
-
-                                    // Track MessageStop event
-                                    if matches!(event, AnthropicStreamEvent::MessageStop) {
-                                        _received_message_stop = true;
-                                    }
-
-                                    // Reset consecutive parse errors on successful parse
                                     consecutive_parse_errors = 0;
-
                                     yield event.into();
                                 }
                                 Err(e) => {
                                     if !data.trim().is_empty() && !data.starts_with(':') {
                                         tracing::debug!("SSE parse error: {} for data: {}", e, data);
-
-                                        // Increment consecutive parse errors
                                         consecutive_parse_errors += 1;
                                         if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {
                                             Err(ProviderError::StreamError(
@@ -790,27 +778,17 @@ impl ModelClient for AnthropicClient {
                             data.to_string()
                         };
                         if data == "[DONE]" {
-                            _received_message_stop = true;
                             yield StreamChunk::MessageStop;
                             return;
                         }
                         match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                             Ok(event) => {
-                                // Track MessageStop event
-                                if matches!(event, AnthropicStreamEvent::MessageStop) {
-                                    _received_message_stop = true;
-                                }
-
-                                // Reset consecutive parse errors on successful parse
                                 consecutive_parse_errors = 0;
-
                                 yield event.into();
                             }
                             Err(e) => {
                                 if !data.trim().is_empty() && !data.starts_with(':') {
                                     tracing::debug!("SSE parse error in remaining buffer: {} for data: {}", e, data);
-
-                                    // Increment consecutive parse errors
                                     consecutive_parse_errors += 1;
                                     if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {
                                         Err(ProviderError::StreamError(
@@ -899,18 +877,17 @@ impl AnthropicClient {
     }
 }
 
-/// Extended thinking configuration for Claude models
 #[derive(Debug, Clone, Serialize)]
-pub struct ThinkingConfig {
+pub(crate) struct ThinkingConfig {
     #[serde(rename = "type")]
-    pub thinking_type: String,
-    pub budget_tokens: u32,
+    thinking_type: &'static str,
+    budget_tokens: u32,
 }
 
 impl ThinkingConfig {
-    pub fn enabled(budget_tokens: u32) -> Self {
+    pub(crate) fn enabled(budget_tokens: u32) -> Self {
         Self {
-            thinking_type: "enabled".to_string(),
+            thinking_type: "enabled",
             budget_tokens,
         }
     }
@@ -1166,7 +1143,8 @@ impl From<AnthropicStreamEvent> for StreamChunk {
 
 #[cfg(test)]
 mod tests {
-    use super::{AnthropicClient, ThinkingConfig};
+    use super::AnthropicClient;
+    use super::ThinkingConfig;
 
     #[test]
     fn normalize_tool_input_keeps_object() {

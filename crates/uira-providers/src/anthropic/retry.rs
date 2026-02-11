@@ -46,25 +46,23 @@ impl RetryConfig {
         // Cap at max delay
         let capped_delay = base_delay.min(self.max_delay_ms as f64);
 
-        // Add jitter using simple time-based pseudo-random
         let jitter = self.calculate_jitter(capped_delay);
 
-        (capped_delay + jitter) as u64
+        // Clamp to avoid negative-to-u64 wrapping and ensure at least 1ms
+        (capped_delay + jitter).max(1.0) as u64
     }
 
-    /// Calculate jitter using time-based pseudo-random value
     fn calculate_jitter(&self, delay: f64) -> f64 {
-        // Use current time as pseudo-random seed
+        let jitter_factor = self.jitter_factor.clamp(0.0, 1.0);
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
 
-        // Simple pseudo-random: use lower bits of nanoseconds
         let random_factor = ((now % 1000) as f64) / 1000.0;
 
-        // Apply jitter: random value between -jitter_factor and +jitter_factor
-        let jitter_range = delay * self.jitter_factor;
+        let jitter_range = delay * jitter_factor;
         (random_factor * 2.0 - 1.0) * jitter_range
     }
 }
@@ -198,6 +196,22 @@ mod tests {
         // Third retry: 400ms
         let delay3 = config.calculate_delay(3);
         assert_eq!(delay3, 400);
+    }
+
+    #[test]
+    fn test_calculate_delay_never_zero_or_wraps() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 10,
+            max_delay_ms: 100,
+            backoff_multiplier: 2.0,
+            jitter_factor: 1.0,
+        };
+
+        for attempt in 1..=5 {
+            let delay = config.calculate_delay(attempt);
+            assert!(delay >= 1, "delay must be at least 1ms, got {}", delay);
+        }
     }
 
     #[test]
