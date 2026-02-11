@@ -42,11 +42,20 @@ All Anthropic-specific helpers live under `src/anthropic/`:
 - Temperature is forced to `None` when thinking is enabled (Anthropic requirement)
 
 ### Payload Logging
-- Enable via `UIRA_ANTHROPIC_PAYLOAD_LOG=true`
+- Config-based: `providers.anthropic.payload_log.enabled` and `providers.anthropic.payload_log.path` in `uira.yaml`/`uira.jsonc`
+- Environment variables override config: `UIRA_ANTHROPIC_PAYLOAD_LOG=true`, `UIRA_ANTHROPIC_PAYLOAD_LOG_FILE=<path>`
 - Stages: `"request"`, `"usage"`, `"error"`
 - FS errors are logged via `tracing::warn!` (not silently swallowed)
 - Default path: `~/.local/share/uira/logs/anthropic-payload.jsonl`
-- Override: `UIRA_ANTHROPIC_PAYLOAD_LOG_FILE`
+
+Example config:
+```yaml
+providers:
+  anthropic:
+    payload_log:
+      enabled: true
+      path: ~/.local/share/uira/logs/anthropic-payload.jsonl
+```
 
 ### Re-exports (`lib.rs`)
 - `classify_error`, `validate_anthropic_turns`, `AnthropicClient`, `BetaFeatures`, `with_retry`, `PayloadLogEvent`, `PayloadLogger`, `RetryConfig` are intentionally `pub` — used by integration tests and downstream crates (`uira-agent`, `uira-tui`, `uira-cli`)

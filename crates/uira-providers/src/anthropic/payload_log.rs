@@ -29,30 +29,43 @@ pub struct PayloadLogEvent {
     pub error: Option<String>,
 }
 
-/// Payload logger with environment-based opt-in
 pub struct PayloadLogger {
     enabled: bool,
     log_path: PathBuf,
 }
 
 impl PayloadLogger {
-    /// Create logger from environment variables
-    ///
-    /// Checks `UIRA_ANTHROPIC_PAYLOAD_LOG` (true/1 to enable)
-    /// and `UIRA_ANTHROPIC_PAYLOAD_LOG_FILE` (custom path)
+    pub fn new(enabled: bool, path: Option<PathBuf>) -> Self {
+        let log_path = path.unwrap_or_else(Self::default_log_path);
+        Self { enabled, log_path }
+    }
+
     pub fn from_env() -> Self {
         let enabled = std::env::var("UIRA_ANTHROPIC_PAYLOAD_LOG")
             .map(|v| v == "true" || v == "1")
             .unwrap_or(false);
 
         let log_path = std::env::var("UIRA_ANTHROPIC_PAYLOAD_LOG_FILE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| Self::default_log_path());
+            .ok()
+            .map(PathBuf::from);
 
-        Self { enabled, log_path }
+        Self::new(enabled, log_path)
     }
 
-    /// Default log path: ~/.local/share/uira/logs/anthropic-payload.jsonl
+    pub fn from_config(enabled: bool, path: Option<String>) -> Self {
+        let env_enabled = std::env::var("UIRA_ANTHROPIC_PAYLOAD_LOG")
+            .map(|v| v == "true" || v == "1")
+            .ok();
+        let env_path = std::env::var("UIRA_ANTHROPIC_PAYLOAD_LOG_FILE")
+            .ok()
+            .map(PathBuf::from);
+
+        let final_enabled = env_enabled.unwrap_or(enabled);
+        let final_path = env_path.or_else(|| path.map(PathBuf::from));
+
+        Self::new(final_enabled, final_path)
+    }
+
     fn default_log_path() -> PathBuf {
         let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("uira");

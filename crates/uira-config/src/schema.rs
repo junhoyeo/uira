@@ -62,6 +62,10 @@ pub struct UiraConfig {
     /// Permission rules for tool execution
     #[serde(default)]
     pub permissions: PermissionsSettings,
+
+    /// Provider-specific settings
+    #[serde(default)]
+    pub providers: ProvidersSettings,
 }
 
 impl Default for UiraConfig {
@@ -80,6 +84,7 @@ impl Default for UiraConfig {
             goals: GoalsConfig::default(),
             compaction: CompactionSettings::default(),
             permissions: PermissionsSettings::default(),
+            providers: ProvidersSettings::default(),
         }
     }
 }
@@ -784,6 +789,31 @@ fn default_protected_tokens() -> usize {
 
 fn default_compaction_strategy() -> String {
     "summarize".to_string()
+}
+
+// ============================================================================
+// Providers Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProvidersSettings {
+    #[serde(default)]
+    pub anthropic: AnthropicProviderSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnthropicProviderSettings {
+    #[serde(default)]
+    pub payload_log: PayloadLogSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PayloadLogSettings {
+    #[serde(default)]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 // ============================================================================
