@@ -699,13 +699,7 @@ impl ModelClient for AnthropicClient {
                     Err(e) => {
                         // Network error mid-stream - NO RETRY per Metis decision
                         tracing::warn!("SSE network error (no retry mid-stream): {}", e);
-                        yield StreamChunk::Error {
-                            error: StreamError {
-                                r#type: "network_error".to_string(),
-                                message: e.to_string(),
-                            },
-                        };
-                        continue;
+                        Err(ProviderError::StreamError(e.to_string()))?
                     }
                 };
 
