@@ -71,6 +71,7 @@ impl WebState {
 struct CachedResults {
     results: Vec<SearchResult>,
     output: Option<String>,
+    provider: String,
     expires_at: Instant,
 }
 
@@ -178,17 +179,25 @@ struct ExaMcpParams {
 }
 
 #[derive(Deserialize)]
-struct ExaMcpResponse {
-    result: Option<ExaMcpResult>,
+struct McpResponse {
+    result: Option<McpResult>,
+    error: Option<McpError>,
 }
 
 #[derive(Deserialize)]
-struct ExaMcpResult {
-    content: Vec<ExaMcpContent>,
+struct McpResult {
+    content: Vec<McpContent>,
+    #[serde(default, rename = "isError")]
+    is_error: bool,
 }
 
 #[derive(Deserialize)]
-struct ExaMcpContent {
+struct McpError {
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct McpContent {
     #[serde(rename = "type")]
     content_type: String,
     text: String,
@@ -421,7 +430,7 @@ impl Tool for WebSearchTool {
                         query: query.to_string(),
                         mode,
                         cached: true,
-                        provider: runtime.provider.clone(),
+                        provider: cached.provider.clone(),
                         output: cached.output.clone(),
                         results: cached.results.clone(),
                     };
@@ -487,6 +496,7 @@ impl Tool for WebSearchTool {
                 CachedResults {
                     results,
                     output: out.output.clone(),
+                    provider: effective_provider.to_string(),
                     expires_at: Instant::now() + Duration::from_secs(runtime.cache_ttl_secs),
                 },
             );
@@ -809,7 +819,7 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
 
         found_data_line = true;
 
-        let parsed: ExaMcpResponse = match serde_json::from_str(payload) {
+        let parsed: McpResponse = match serde_json::from_str(payload) {
             Ok(p) => p,
             Err(_) => {
                 return Err(ToolError::ExecutionFailed {
@@ -817,6 +827,12 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
                 });
             }
         };
+
+        if let Some(err) = parsed.error {
+            return Err(ToolError::ExecutionFailed {
+                message: err.message,
+            });
+        }
 
         let result = parsed.result.ok_or_else(|| ToolError::ExecutionFailed {
             message: format!("{provider} response missing result payload"),
@@ -832,6 +848,12 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
                 first.content_type
             ));
             continue;
+        }
+
+        if result.is_error {
+            return Err(ToolError::ExecutionFailed {
+                message: first.text.clone(),
+            });
         }
 
         if first.text.trim().is_empty() {
