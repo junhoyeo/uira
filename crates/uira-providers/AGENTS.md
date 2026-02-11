@@ -50,3 +50,33 @@ All Anthropic-specific helpers live under `src/anthropic/`:
 
 ### Re-exports (`lib.rs`)
 - `classify_error`, `validate_anthropic_turns`, `AnthropicClient`, `BetaFeatures`, `with_retry`, `PayloadLogEvent`, `PayloadLogger`, `RetryConfig` are intentionally `pub` — used by integration tests and downstream crates (`uira-agent`, `uira-tui`, `uira-cli`)
+
+## OpenAI Provider (`src/openai/`)
+
+OpenAI-specific helpers live under `src/openai/`:
+`mod.rs` (client + SSE stream), `error_classify.rs`.
+
+### OAuth (Codex) Support
+- Supports both API key and OAuth credentials (Codex CLI flow)
+- Token refresh handled automatically with 5-minute buffer before expiry
+- Credential lookup priority: credential store → config API key → `OPENAI_API_KEY` env
+
+### Retry Logic
+- Reuses `with_retry` from `anthropic/retry.rs` (generic implementation)
+- Retries transient errors (429, 5xx, timeouts) — NOT mid-stream errors
+- `ProviderConfig::with_max_retries(n)` (default: 3)
+- Respects `Retry-After` header from 429 responses
+
+### Error Classification
+- OpenAI wraps errors as `{"error": {"message": ..., "type": ..., "code": ...}}`
+- `parse_error_body()` tries nested format first, then flat fallback
+- Status-code checked first (402, 429, 401/403, 5xx), then code/message patterns
+- Recognizes OpenAI-specific codes: `context_length_exceeded`, `rate_limit_exceeded`, `insufficient_quota`
+
+### SSE Streaming
+- Buffer uses `drain()` for O(n) event extraction (not O(n²) slice-to-string)
+- `[DONE]` sentinel yields `MessageStop` and returns
+- Transport errors mid-stream are terminal (no retry)
+
+### Re-exports (`lib.rs`)
+- `classify_openai_error`, `OpenAIClient` are `pub`

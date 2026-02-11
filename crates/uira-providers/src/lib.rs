@@ -27,6 +27,7 @@ pub use config::ProviderConfig;
 pub use error::ProviderError;
 pub use gemini::GeminiClient;
 pub use ollama::OllamaClient;
+pub use openai::classify_error as classify_openai_error;
 pub use openai::OpenAIClient;
 pub use opencode::OpenCodeClient;
 pub use secrecy::SecretString;

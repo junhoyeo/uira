@@ -16,6 +16,11 @@ use uira_protocol::{
     StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
 };
 
+mod error_classify;
+
+pub use error_classify::classify_error;
+
+use crate::anthropic::{with_retry, RetryConfig};
 use crate::{
     image::image_source_to_data_url, traits::ModelResult, traits::ResponseStream, ModelClient,
     ProviderConfig, ProviderError,
@@ -28,6 +33,15 @@ const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 const OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
+fn extract_retry_after(response: &reqwest::Response) -> Option<u64> {
+    response
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|secs| secs * 1000)
+}
+
 #[derive(Debug, Clone)]
 enum CredentialSource {
     OAuth {
@@ -39,7 +53,6 @@ enum CredentialSource {
     ApiKey(SecretString),
 }
 
-/// OpenAI API client with OAuth (Codex) support
 pub struct OpenAIClient {
     client: Client,
     config: ProviderConfig,
@@ -517,52 +530,50 @@ impl OpenAIClient {
                 .unwrap_or_default(),
         }
     }
+
+    fn retry_config(&self) -> RetryConfig {
+        RetryConfig {
+            max_attempts: self.config.max_retries.unwrap_or(3),
+            ..Default::default()
+        }
+    }
 }
 
 #[async_trait]
 impl ModelClient for OpenAIClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
-        let auth_headers = self.get_auth_headers().await?;
-        let request = self.build_request(messages, tools, false);
-        let url = format!("{}/v1/chat/completions", self.base_url());
+        let retry_config = self.retry_config();
 
-        let mut req_builder = self.client.post(&url).json(&request);
-        for (key, value) in auth_headers {
-            req_builder = req_builder.header(&key, &value);
-        }
+        with_retry(&retry_config, || async {
+            let auth_headers = self.get_auth_headers().await?;
+            let request = self.build_request(messages, tools, false);
+            let url = format!("{}/v1/chat/completions", self.base_url());
 
-        let response = req_builder.send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-
-            if status.as_u16() == 429 {
-                // Parse Retry-After header if present, otherwise default to 60s
-                let retry_after_ms = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .map(|secs| secs * 1000)
-                    .unwrap_or(60000);
-                return Err(ProviderError::RateLimited { retry_after_ms });
+            let mut req_builder = self.client.post(&url).json(&request);
+            for (key, value) in &auth_headers {
+                req_builder = req_builder.header(key, value);
             }
 
-            if status.is_server_error() {
-                return Err(ProviderError::Unavailable {
-                    provider: PROVIDER_NAME.to_string(),
-                });
+            let response = req_builder.send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let retry_after = extract_retry_after(&response);
+                let body = response.text().await.unwrap_or_default();
+
+                let mut err = classify_error(status, &body);
+                if let ProviderError::RateLimited { retry_after_ms } = &mut err {
+                    if let Some(ra) = retry_after {
+                        *retry_after_ms = ra;
+                    }
+                }
+                return Err(err);
             }
 
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::InvalidResponse(format!(
-                "API error {}: {}",
-                status, body
-            )));
-        }
-
-        let api_response: OpenAIResponse = response.json().await?;
-        Ok(self.convert_response(api_response))
+            let api_response: OpenAIResponse = response.json().await?;
+            Ok(self.convert_response(api_response))
+        })
+        .await
     }
 
     async fn chat_stream(
@@ -570,43 +581,37 @@ impl ModelClient for OpenAIClient {
         messages: &[Message],
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
-        let auth_headers = self.get_auth_headers().await?;
-        let request = self.build_request(messages, tools, true);
-        let url = format!("{}/v1/chat/completions", self.base_url());
+        let retry_config = self.retry_config();
 
-        let mut req_builder = self.client.post(&url).json(&request);
-        for (key, value) in auth_headers {
-            req_builder = req_builder.header(&key, &value);
-        }
+        let response = with_retry(&retry_config, || async {
+            let auth_headers = self.get_auth_headers().await?;
+            let request = self.build_request(messages, tools, true);
+            let url = format!("{}/v1/chat/completions", self.base_url());
 
-        let response = req_builder.send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-
-            if status.as_u16() == 429 {
-                let retry_after_ms = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .map(|secs| secs * 1000)
-                    .unwrap_or(60000);
-                return Err(ProviderError::RateLimited { retry_after_ms });
+            let mut req_builder = self.client.post(&url).json(&request);
+            for (key, value) in &auth_headers {
+                req_builder = req_builder.header(key, value);
             }
 
-            if status.is_server_error() {
-                return Err(ProviderError::Unavailable {
-                    provider: PROVIDER_NAME.to_string(),
-                });
+            let response = req_builder.send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let retry_after = extract_retry_after(&response);
+                let body = response.text().await.unwrap_or_default();
+
+                let mut err = classify_error(status, &body);
+                if let ProviderError::RateLimited { retry_after_ms } = &mut err {
+                    if let Some(ra) = retry_after {
+                        *retry_after_ms = ra;
+                    }
+                }
+                return Err(err);
             }
 
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::InvalidResponse(format!(
-                "API error {}: {}",
-                status, body
-            )));
-        }
+            Ok(response)
+        })
+        .await?;
 
         let byte_stream = response.bytes_stream();
         let stream = async_stream::try_stream! {
@@ -625,8 +630,8 @@ impl ModelClient for OpenAIClient {
                 }
 
                 while let Some(pos) = buffer.find("\n\n") {
-                    let event_text = buffer[..pos].to_string();
-                    buffer = buffer[pos + 2..].to_string();
+                    let event_text: String = buffer.drain(..pos).collect();
+                    buffer.drain(..2.min(buffer.len()));
 
                     for line in event_text.lines() {
                         let trimmed = line.trim_end_matches('\r');
@@ -654,7 +659,6 @@ impl ModelClient for OpenAIClient {
                 }
             }
 
-            // Process any remaining data in buffer
             if !buffer.is_empty() {
                 for line in buffer.lines() {
                     let trimmed = line.trim_end_matches('\r');
