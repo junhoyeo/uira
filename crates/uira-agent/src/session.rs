@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use uira_context::ContextManager;
+use crate::context::ContextManager;
 use uira_permissions::build_evaluator_from_rules;
 use uira_types::{MessageId, SessionId, TokenUsage};
 use uira_providers::ModelClient;

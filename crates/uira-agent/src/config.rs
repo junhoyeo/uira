@@ -1,15 +1,15 @@
 //! Agent configuration
 
+use crate::context::{CompactionConfig, CompactionStrategy};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uira_config::schema::{
     CompactionSettings, GoalConfig, NamedMcpServerConfig, PermissionActionConfig,
     PermissionRuleConfig,
 };
-use uira_context::{CompactionConfig, CompactionStrategy};
 use uira_permissions::{ConfigAction, ConfigRule};
-use uira_types::{SandboxPreference, ToolSpec};
 use uira_sandbox::SandboxPolicy;
+use uira_types::{SandboxPreference, ToolSpec};
 
 /// Configuration for the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]

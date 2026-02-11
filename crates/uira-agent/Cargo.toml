@@ -11,7 +11,6 @@ repository.workspace = true
 uira-types = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
-uira-context = { workspace = true }
 uira-tools = { workspace = true }
 uira-config = { workspace = true }
 uira-hooks = { workspace = true }

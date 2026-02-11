@@ -17,7 +17,6 @@ members = [
 "crates/uira-types",
 "crates/uira-providers",
 "crates/uira-sandbox",
-"crates/uira-context",
 "crates/uira-agent",
 "crates/uira-events",
 "crates/uira-permissions",
@@ -55,7 +54,6 @@ uira-comment-checker = { path = "crates/uira-comment-checker" }
 # Internal crates - Agent harness
 uira-providers = { path = "crates/uira-providers" }
 uira-sandbox = { path = "crates/uira-sandbox" }
-uira-context = { path = "crates/uira-context" }
 uira-agent = { path = "crates/uira-agent" }
 uira-events = { path = "crates/uira-events" }
 uira-permissions = { path = "crates/uira-permissions" }

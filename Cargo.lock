@@ -5649,7 +5649,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uira-config",
- "uira-context",
  "uira-events",
  "uira-hooks",
  "uira-permissions",
@@ -5776,18 +5775,6 @@ dependencies = [
  "serde_yaml_ng",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "uira-context"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uira-types",
 ]
 
 [[package]]
