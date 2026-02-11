@@ -1,9 +1,9 @@
-use crate::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
+use crate::tools::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use uira_orchestration::background_agent::{
+use crate::features::background_agent::{
     get_background_manager, BackgroundTask, BackgroundTaskConfig, BackgroundTaskStatus, LaunchInput,
 };
 
@@ -64,7 +64,7 @@ fn task_to_json(task: &BackgroundTask) -> Value {
 /// Handle the "launch" action: start a new background task.
 async fn handle_launch(
     input: &Value,
-    manager: &Arc<uira_orchestration::background_agent::BackgroundManager>,
+    manager: &Arc<crate::features::background_agent::BackgroundManager>,
 ) -> Result<ToolOutput, ToolError> {
     let description = get_required_string(input, "description")?;
     let prompt = get_required_string(input, "prompt")?;
@@ -108,7 +108,7 @@ async fn handle_launch(
 /// Handle the "output" action: retrieve output from a running/completed task.
 async fn handle_output(
     input: &Value,
-    manager: &Arc<uira_orchestration::background_agent::BackgroundManager>,
+    manager: &Arc<crate::features::background_agent::BackgroundManager>,
 ) -> Result<ToolOutput, ToolError> {
     let task_id = get_required_string(input, "taskId")?;
     let block = get_optional_bool(input, "block").unwrap_or(false);
@@ -174,7 +174,7 @@ async fn handle_output(
 /// Handle the "cancel" action: cancel a running task.
 async fn handle_cancel(
     input: &Value,
-    manager: &Arc<uira_orchestration::background_agent::BackgroundManager>,
+    manager: &Arc<crate::features::background_agent::BackgroundManager>,
 ) -> Result<ToolOutput, ToolError> {
     let task_id = get_required_string(input, "taskId")?;
 
@@ -209,7 +209,7 @@ async fn handle_cancel(
 
 /// Handle the "list" action: return all active background tasks.
 async fn handle_list(
-    manager: &Arc<uira_orchestration::background_agent::BackgroundManager>,
+    manager: &Arc<crate::features::background_agent::BackgroundManager>,
 ) -> Result<ToolOutput, ToolError> {
     let tasks = manager.get_all_tasks();
 
@@ -328,7 +328,7 @@ pub fn tool_definition() -> ToolDefinition {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use uira_orchestration::background_agent::BackgroundManager;
+    use crate::features::background_agent::BackgroundManager;
 
     /// Helper to create an isolated BackgroundManager for testing
     fn create_test_manager() -> (Arc<BackgroundManager>, TempDir) {
@@ -378,7 +378,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], true);
@@ -399,7 +399,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], true);
@@ -457,7 +457,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], false);
@@ -478,7 +478,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["success"], false);
@@ -500,7 +500,7 @@ mod tests {
             .await
             .unwrap();
         let launch_text = match &launch_result.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
         let launch_response: Value = serde_json::from_str(launch_text).unwrap();
 
@@ -518,7 +518,7 @@ mod tests {
                 .await
                 .unwrap();
             let cancel_text = match &cancel_result.content[0] {
-                crate::types::ToolContent::Text { text } => text,
+                crate::tools::types::ToolContent::Text { text } => text,
             };
             let cancel_response: Value = serde_json::from_str(cancel_text).unwrap();
             assert_eq!(cancel_response["success"], true);

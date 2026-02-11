@@ -1,6 +1,9 @@
 pub mod approval_cache;
+pub mod ast_grep;
+pub mod background_task;
 pub mod builtins;
 pub mod comment_hook;
+pub mod delegate_task;
 pub mod lsp;
 pub mod orchestrator;
 pub mod parallel;
@@ -8,6 +11,7 @@ pub mod provider;
 pub mod providers;
 pub mod registry;
 pub mod router;
+pub mod session_manager;
 pub mod traits;
 pub mod types;
 

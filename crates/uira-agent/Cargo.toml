@@ -15,7 +15,7 @@ otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic"]
 uira-types = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
-uira-tools = { workspace = true }
+uira-orchestration = { workspace = true }
 uira-core = { workspace = true }
 uira-hooks = { workspace = true }
 uira-permissions = { workspace = true }

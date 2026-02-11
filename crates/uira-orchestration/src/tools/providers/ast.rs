@@ -1,7 +1,7 @@
 //! AST tool provider - ast-grep based code search and replace
 
-use crate::provider::ToolProvider;
-use crate::{ToolContext, ToolError};
+use crate::tools::provider::ToolProvider;
+use crate::tools::{ToolContext, ToolError};
 use ast_grep_language::{LanguageExt, SupportLang};
 use async_trait::async_trait;
 use glob::glob;

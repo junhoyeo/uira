@@ -764,7 +764,7 @@ pub fn list_goals_from_config(directory: String) -> napi::Result<Vec<JsGoalConfi
 // Comment Checker Bindings
 // ============================================================================
 
-use uira_tools::CommentChecker;
+use uira_orchestration::CommentChecker;
 
 #[napi(js_name = "CommentChecker")]
 pub struct JsCommentChecker {

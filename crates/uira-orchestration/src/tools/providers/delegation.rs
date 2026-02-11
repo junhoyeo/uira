@@ -1,13 +1,13 @@
 //! Delegation tool provider - enables subagent orchestration
 
-use crate::provider::ToolProvider;
-use crate::{ToolContext, ToolError};
+use crate::tools::provider::ToolProvider;
+use crate::tools::{ToolContext, ToolError};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use uira_core::load_config;
-use uira_orchestration::background_agent::{
+use crate::features::background_agent::{
     get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
     LaunchInput,
 };

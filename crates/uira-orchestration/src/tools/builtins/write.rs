@@ -6,7 +6,7 @@ use std::path::Path;
 use tokio::fs;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 /// Input for write tool
 #[derive(Debug, Deserialize)]

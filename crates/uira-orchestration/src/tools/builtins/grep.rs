@@ -8,7 +8,7 @@ use tokio::fs;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use walkdir::WalkDir;
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 /// Input for grep tool
 #[derive(Debug, Deserialize)]

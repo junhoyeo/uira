@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::types::AgentConfig;
+use super::types::AgentConfig;
 
 /// Tool restrictions expressed as an allowlist.
 #[derive(Debug, Clone, Default)]

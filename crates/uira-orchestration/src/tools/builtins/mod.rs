@@ -21,7 +21,7 @@ pub use todo::{TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool};
 pub use web_search::{FetchUrlTool, WebSearchTool};
 pub use write::WriteTool;
 
-use crate::{BoxedTool, ToolRouter};
+use crate::tools::{BoxedTool, ToolRouter};
 use std::sync::Arc;
 
 pub fn register_builtins(router: &mut ToolRouter) {

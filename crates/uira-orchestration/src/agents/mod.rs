@@ -8,16 +8,16 @@ pub mod tier_builder;
 pub mod tool_restrictions;
 pub mod types;
 
-pub use crate::definitions::{
+pub use self::definitions::{
     get_agent_definitions, get_agent_definitions_with_config, AgentModelConfig,
 };
-pub use crate::models::{ModelRegistry, ProviderModels};
-pub use crate::prompt_loader::{PromptLoader, PromptSource};
-pub use crate::prompts::{get_embedded_prompt, EMBEDDED_PROMPTS};
-pub use crate::registry::{AgentFactory, AgentRegistry};
-pub use crate::tier_builder::{ModelTier, TierBuilder};
-pub use crate::tool_restrictions::{ToolRestrictions, ToolRestrictionsRegistry};
-pub use crate::types::{
+pub use self::models::{ModelRegistry, ProviderModels};
+pub use self::prompt_loader::{PromptLoader, PromptSource};
+pub use self::prompts::{get_embedded_prompt, EMBEDDED_PROMPTS};
+pub use self::registry::{AgentFactory, AgentRegistry};
+pub use self::tier_builder::{ModelTier, TierBuilder};
+pub use self::tool_restrictions::{ToolRestrictions, ToolRestrictionsRegistry};
+pub use self::types::{
     AgentCategory, AgentConfig, AgentCost, AgentOverrideConfig, AgentOverrides,
     AgentPromptMetadata, DelegationTrigger, ModelType, RoutingTier,
 };

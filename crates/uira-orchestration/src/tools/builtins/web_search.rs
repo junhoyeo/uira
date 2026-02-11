@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 const DEFAULT_LIMIT: usize = 5;
 const MAX_LIMIT: usize = 10;

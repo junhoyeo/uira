@@ -6,7 +6,7 @@ use std::path::Path;
 use tokio::fs;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
 

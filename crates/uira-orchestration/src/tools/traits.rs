@@ -8,7 +8,7 @@ use std::sync::Arc;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use uira_sandbox::{SandboxPolicy, SandboxType};
 
-use crate::ToolError;
+use crate::tools::ToolError;
 
 /// Context passed to tool execution
 pub struct ToolContext {

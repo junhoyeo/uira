@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::path::Path;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 /// Input for glob tool
 #[derive(Debug, Deserialize)]

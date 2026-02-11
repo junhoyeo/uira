@@ -62,7 +62,7 @@ impl Agent {
     pub fn new_with_executor(
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
-        executor: Option<Arc<dyn uira_tools::AgentExecutor>>,
+        executor: Option<Arc<dyn uira_orchestration::AgentExecutor>>,
     ) -> Self {
         Self {
             session: Session::new_with_executor(config, client, executor),

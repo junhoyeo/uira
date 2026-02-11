@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uira_types::ToolOutput;
 
-use crate::{ToolContext, ToolError, ToolOrchestrator, ToolRouter};
+use crate::tools::{ToolContext, ToolError, ToolOrchestrator, ToolRouter};
 
 /// Runtime for executing tool calls with parallelism control
 ///
@@ -198,7 +198,7 @@ impl ToolCallRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FunctionTool;
+    use crate::tools::FunctionTool;
     use serde_json::json;
     use uira_types::JsonSchema;
 

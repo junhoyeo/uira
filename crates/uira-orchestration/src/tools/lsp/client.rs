@@ -1,4 +1,4 @@
-use crate::types::{ToolError, ToolOutput};
+use crate::tools::types::{ToolError, ToolOutput};
 use async_trait::async_trait;
 use lsp_types::*;
 use serde_json::{json, Value};

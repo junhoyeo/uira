@@ -6,9 +6,9 @@ use uira_permissions::{Action as PermissionAction, PermissionEvaluator};
 use uira_types::{ApprovalRequirement, ReviewDecision, ToolOutput};
 use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 
-use crate::approval_cache::{ApprovalCache, ApprovalKey, CacheDecision};
-use crate::comment_hook::CommentChecker;
-use crate::{BoxedTool, ToolContext, ToolError, ToolRouter};
+use crate::tools::approval_cache::{ApprovalCache, ApprovalKey, CacheDecision};
+use crate::tools::comment_hook::CommentChecker;
+use crate::tools::{BoxedTool, ToolContext, ToolError, ToolRouter};
 
 /// Options for tool execution
 #[derive(Debug, Clone, Default)]
@@ -669,7 +669,7 @@ impl ToolOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FunctionTool;
+    use crate::tools::FunctionTool;
     use uira_types::JsonSchema;
 
     fn create_test_router() -> Arc<ToolRouter> {

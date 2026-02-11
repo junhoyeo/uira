@@ -1,5 +1,5 @@
+use super::types::{AgentConfig, ModelType};
 use crate::prompt_loader::PromptLoader;
-use crate::types::{AgentConfig, ModelType};
 
 /// Error marker returned when a prompt file is not found.
 /// Used to detect fallback scenarios in tier building.

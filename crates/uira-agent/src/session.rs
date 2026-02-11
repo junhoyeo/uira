@@ -7,7 +7,7 @@ use uira_permissions::build_evaluator_from_rules;
 use uira_types::{MessageId, SessionId, TokenUsage};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
-use uira_tools::{
+use uira_orchestration::{
     register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
     DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
     ToolContext, ToolOrchestrator, ToolRouter,

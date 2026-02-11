@@ -1,5 +1,5 @@
-use crate::provider::ToolProvider;
-use crate::{ToolContext, ToolError};
+use crate::tools::provider::ToolProvider;
+use crate::tools::{ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;

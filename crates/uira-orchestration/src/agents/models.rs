@@ -2,7 +2,7 @@
 //!
 //! Maps abstract model tiers (Opus/Sonnet/Haiku) to actual model IDs per provider.
 
-use crate::types::ModelType;
+use super::types::ModelType;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

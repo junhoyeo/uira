@@ -5625,7 +5625,6 @@ dependencies = [
  "uira-oxc",
  "uira-providers",
  "uira-sandbox",
- "uira-tools",
  "uira-types",
  "unicase",
 ]
@@ -5652,32 +5651,12 @@ dependencies = [
  "tracing-subscriber",
  "uira-core",
  "uira-hooks",
+ "uira-orchestration",
  "uira-permissions",
  "uira-providers",
  "uira-sandbox",
- "uira-tools",
  "uira-types",
  "uuid",
-]
-
-[[package]]
-name = "uira-channels"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "teloxide",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "tracing",
- "uira-core",
- "uira-types",
 ]
 
 [[package]]
@@ -5711,7 +5690,6 @@ dependencies = [
  "uira-orchestration",
  "uira-providers",
  "uira-sandbox",
- "uira-skills",
  "uira-tui",
  "uira-types",
  "webbrowser",
@@ -5776,16 +5754,19 @@ dependencies = [
  "async-trait",
  "axum 0.8.8",
  "chrono",
+ "dirs",
  "futures-util",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
+ "teloxide",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
  "uira-agent",
- "uira-channels",
  "uira-core",
  "uira-types",
 ]
@@ -5847,7 +5828,6 @@ dependencies = [
  "uira-core",
  "uira-orchestration",
  "uira-oxc",
- "uira-tools",
  "walkdir",
  "which",
 ]
@@ -5868,7 +5848,6 @@ dependencies = [
  "uira-hooks",
  "uira-orchestration",
  "uira-oxc",
- "uira-tools",
  "uira-types",
 ]
 
@@ -5877,22 +5856,39 @@ name = "uira-orchestration"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ast-grep-core",
+ "ast-grep-language",
+ "async-trait",
  "chrono",
  "futures",
+ "glob",
+ "hex",
  "lazy_static",
+ "lsp-types 0.95.1",
+ "once_cell",
  "parking_lot",
  "rayon",
  "regex",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "tower-lsp",
+ "tracing",
+ "uira-comment-checker",
  "uira-core",
  "uira-hooks",
+ "uira-mcp-client",
+ "uira-permissions",
+ "uira-sandbox",
  "uira-types",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
@@ -5971,55 +5967,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uira-types",
-]
-
-[[package]]
-name = "uira-skills"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "uira-tools"
-version = "0.1.0"
-dependencies = [
- "ast-grep-core",
- "ast-grep-language",
- "async-trait",
- "chrono",
- "futures",
- "glob",
- "hex",
- "lsp-types 0.95.1",
- "once_cell",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tower-lsp",
- "tracing",
- "uira-comment-checker",
- "uira-core",
- "uira-mcp-client",
- "uira-orchestration",
- "uira-permissions",
- "uira-sandbox",
- "uira-types",
- "uuid",
- "walkdir",
 ]
 
 [[package]]

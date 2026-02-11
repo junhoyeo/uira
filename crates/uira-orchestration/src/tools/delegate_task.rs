@@ -3,15 +3,14 @@
 //! The MOST CRITICAL tool - connects the agent system to actual delegation.
 //! Handles agent lookup, model routing, and task delegation.
 
-use crate::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
+use crate::tools::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use uira_orchestration::get_agent_definitions;
-use uira_orchestration::model_routing::{
+use crate::agents::{get_agent_definitions, ModelType};
+use crate::features::model_routing::{
     route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
 };
-use uira_orchestration::ModelType;
 use uuid::Uuid;
 
 /// Parameters for delegate_task tool
@@ -250,7 +249,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
@@ -272,7 +271,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
@@ -296,7 +295,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
@@ -329,7 +328,7 @@ mod tests {
 
         let output = result.unwrap();
         let text = match &output.content[0] {
-            crate::types::ToolContent::Text { text } => text,
+            crate::tools::types::ToolContent::Text { text } => text,
         };
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();

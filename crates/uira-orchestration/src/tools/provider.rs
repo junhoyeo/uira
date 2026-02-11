@@ -1,6 +1,6 @@
 //! Tool provider trait for extensible tool sources
 
-use crate::{ToolContext, ToolError};
+use crate::tools::{ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::Value;
 use uira_types::{ToolOutput, ToolSpec};

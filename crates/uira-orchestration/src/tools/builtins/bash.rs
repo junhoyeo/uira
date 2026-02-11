@@ -8,7 +8,7 @@ use tokio::time::timeout;
 use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
 
-use crate::{Tool, ToolContext, ToolError};
+use crate::tools::{Tool, ToolContext, ToolError};
 
 const MAX_OUTPUT_BYTES: usize = 5 * 1024 * 1024;
 

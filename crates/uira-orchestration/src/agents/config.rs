@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::{AgentConfig, AgentOverrideConfig, AgentOverrides, ModelType};
+use super::types::{AgentConfig, AgentOverrideConfig, AgentOverrides, ModelType};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentConfigError {

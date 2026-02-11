@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uira_types::ToolOutput;
 
-use crate::provider::ToolProvider;
-use crate::{BoxedTool, Tool, ToolContext, ToolError};
+use crate::tools::provider::ToolProvider;
+use crate::tools::{BoxedTool, Tool, ToolContext, ToolError};
 
 /// Router for dispatching tool calls to the appropriate tool
 pub struct ToolRouter {
@@ -123,7 +123,7 @@ impl Default for ToolRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FunctionTool;
+    use crate::tools::FunctionTool;
     use serde_json::json;
     use uira_types::JsonSchema;
 

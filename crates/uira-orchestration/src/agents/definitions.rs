@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use super::types::{AgentConfig, AgentOverrides, ModelType};
 use crate::config::apply_overrides;
 use crate::prompt_loader::PromptLoader;
 use crate::tool_restrictions::ToolRestrictionsRegistry;
-use crate::types::{AgentConfig, AgentOverrides, ModelType};
 
 /// Model configuration for agents (maps agent name to model ID string)
 pub type AgentModelConfig = HashMap<String, String>;

@@ -1,4 +1,4 @@
-use crate::types::{ToolDefinition, ToolError};
+use crate::tools::types::{ToolDefinition, ToolError};
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
@@ -60,7 +60,7 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ToolOutput;
+    use crate::tools::types::ToolOutput;
     use serde_json::json;
     use std::sync::Arc;
 

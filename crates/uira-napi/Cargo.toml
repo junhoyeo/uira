@@ -15,7 +15,6 @@ uira-types = { workspace = true }
 uira-hooks = { workspace = true }
 uira-orchestration = { workspace = true }
 uira-core = { workspace = true }
-uira-tools = { workspace = true }
 uira-oxc = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }
 napi-derive = "3"
