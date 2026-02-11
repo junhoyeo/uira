@@ -24,7 +24,6 @@ const FETCH_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER: &str = "exa";
 const EXA_MCP_URL: &str = "https://mcp.exa.ai/mcp";
 const EXA_SEARCH_TIMEOUT_SECS: u64 = 25;
-#[allow(dead_code)]
 const EXA_CODE_SEARCH_TIMEOUT_SECS: u64 = 30;
 
 static STATE: Lazy<Mutex<WebState>> = Lazy::new(|| Mutex::new(WebState::new()));
@@ -210,7 +209,6 @@ struct FetchUrlOutput {
 }
 
 pub struct WebSearchTool;
-#[allow(dead_code)]
 pub struct CodeSearchTool;
 
 impl WebSearchTool {
@@ -226,7 +224,6 @@ impl Default for WebSearchTool {
 }
 
 impl CodeSearchTool {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
@@ -623,7 +620,6 @@ async fn exa_search(
     }
 }
 
-#[allow(dead_code)]
 async fn exa_code_search(query: &str, tokens_num: usize) -> Result<String, ToolError> {
     let request = ExaMcpRequest {
         jsonrpc: "2.0".to_string(),

@@ -18,7 +18,7 @@ pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use read::ReadTool;
 pub use todo::{TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool};
-pub use web_search::{FetchUrlTool, WebSearchTool};
+pub use web_search::{CodeSearchTool, FetchUrlTool, WebSearchTool};
 pub use write::WriteTool;
 
 use crate::{BoxedTool, ToolRouter};
@@ -33,6 +33,7 @@ pub fn register_builtins(router: &mut ToolRouter) {
     router.register(GrepTool::new());
     router.register(WebSearchTool::new());
     router.register(FetchUrlTool::new());
+    router.register(CodeSearchTool::new());
 }
 
 pub fn register_builtins_with_todos(router: &mut ToolRouter, store: TodoStore) {
@@ -64,5 +65,6 @@ pub fn builtin_tools() -> Vec<BoxedTool> {
         Arc::new(GrepTool::new()),
         Arc::new(WebSearchTool::new()),
         Arc::new(FetchUrlTool::new()),
+        Arc::new(CodeSearchTool::new()),
     ]
 }
