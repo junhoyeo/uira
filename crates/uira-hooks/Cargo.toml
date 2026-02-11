@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 uira-config = { workspace = true }
-uira-goals = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-events = { workspace = true }
 uira-types = { workspace = true }

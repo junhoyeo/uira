@@ -15,7 +15,6 @@ uira-context = { workspace = true }
 uira-tools = { workspace = true }
 uira-config = { workspace = true }
 uira-hooks = { workspace = true }
-uira-goals = { workspace = true }
 uira-events = { workspace = true }
 uira-permissions = { workspace = true }
 uira-telemetry = { workspace = true }

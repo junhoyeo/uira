@@ -634,8 +634,8 @@ pub struct JsGoalCheckResult {
     pub error: Option<String>,
 }
 
-impl From<uira_goals::GoalCheckResult> for JsGoalCheckResult {
-    fn from(r: uira_goals::GoalCheckResult) -> Self {
+impl From<uira_hooks::GoalCheckResult> for JsGoalCheckResult {
+    fn from(r: uira_hooks::GoalCheckResult) -> Self {
         Self {
             name: r.name,
             score: r.score,
@@ -654,8 +654,8 @@ pub struct JsVerificationResult {
     pub iteration: u32,
 }
 
-impl From<uira_goals::VerificationResult> for JsVerificationResult {
-    fn from(r: uira_goals::VerificationResult) -> Self {
+impl From<uira_hooks::VerificationResult> for JsVerificationResult {
+    fn from(r: uira_hooks::VerificationResult) -> Self {
         Self {
             all_passed: r.all_passed,
             results: r.results.into_iter().map(JsGoalCheckResult::from).collect(),
@@ -691,7 +691,7 @@ impl From<JsGoalConfig> for uira_config::schema::GoalConfig {
 
 #[napi]
 pub async fn check_goal(directory: String, goal: JsGoalConfig) -> napi::Result<JsGoalCheckResult> {
-    let runner = uira_goals::GoalRunner::new(&directory);
+    let runner = uira_hooks::GoalRunner::new(&directory);
     let goal_config: uira_config::schema::GoalConfig = goal.into();
     let result = runner.check_goal(&goal_config).await;
     Ok(JsGoalCheckResult::from(result))
@@ -702,7 +702,7 @@ pub async fn check_goals(
     directory: String,
     goals: Vec<JsGoalConfig>,
 ) -> napi::Result<JsVerificationResult> {
-    let runner = uira_goals::GoalRunner::new(&directory);
+    let runner = uira_hooks::GoalRunner::new(&directory);
     let goal_configs: Vec<uira_config::schema::GoalConfig> =
         goals.into_iter().map(|g| g.into()).collect();
     let result = runner.check_all(&goal_configs).await;
@@ -726,7 +726,7 @@ pub async fn check_goals_from_config(
         return Ok(None);
     }
 
-    let runner = uira_goals::GoalRunner::new(&directory);
+    let runner = uira_hooks::GoalRunner::new(&directory);
     let result = runner.check_all(goals).await;
     Ok(Some(JsVerificationResult::from(result)))
 }

@@ -1,4 +1,5 @@
 pub mod adapter;
+pub mod goals;
 pub mod hook;
 pub mod hooks;
 pub mod registry;
@@ -45,5 +46,4 @@ pub use hooks::{
 };
 pub use registry::{default_hooks, HookRegistry};
 pub use types::{HookEvent, HookInput, HookOutput, HookType};
-
-pub use uira_goals::{GoalCheckResult, GoalRunner, VerificationResult, VerifyOptions};
+pub use goals::*;

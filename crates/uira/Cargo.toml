@@ -14,7 +14,7 @@ uira-sdk = { workspace = true }
 uira-agents = { workspace = true }
 uira-features = { workspace = true }
 uira-config = { workspace = true }
-uira-goals = { workspace = true }
+uira-hooks = { workspace = true }
 uira-oxc = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-agent = { workspace = true }

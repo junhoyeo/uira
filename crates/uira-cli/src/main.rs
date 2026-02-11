@@ -439,8 +439,8 @@ async fn run_auth(
     command: &AuthCommands,
     _config: &CliConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_auth::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
-    use uira_auth::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
+    use uira_providers::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
+    use uira_providers::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
 
     const DEFAULT_OAUTH_PORT: u16 = 8765;
 
@@ -684,7 +684,7 @@ async fn run_config(
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_config::loader::load_config;
-    use uira_goals::GoalRunner;
+                    use uira_hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {

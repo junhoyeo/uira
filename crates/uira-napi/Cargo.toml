@@ -17,7 +17,6 @@ uira-agents = { workspace = true }
 uira-features = { workspace = true }
 uira-sdk = { workspace = true }
 uira-config = { workspace = true }
-uira-goals = { workspace = true }
 uira-tools = { workspace = true }
 uira-oxc = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt", "async"] }

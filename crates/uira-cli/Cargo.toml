@@ -16,14 +16,13 @@ uira-types = { workspace = true }
 uira-agent = { workspace = true }
 uira-agents = { workspace = true }
 uira-config = { workspace = true }
-uira-providers = { workspace = true }
+uira-providers = { workspace = true, features = ["oauth-server"] }
 uira-mcp-client = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-features = { workspace = true }
-uira-goals = { workspace = true }
+uira-hooks = { workspace = true }
 uira-telemetry = { workspace = true }
 uira-tui = { workspace = true }
-uira-auth = { workspace = true, features = ["oauth-server"] }
 uira-skills = { workspace = true }
 uira-gateway = { workspace = true }
 secrecy = "0.10"

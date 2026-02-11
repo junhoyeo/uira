@@ -13,7 +13,6 @@ members = [
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
-  "crates/uira-goals",
 # New agent harness crates
 "crates/uira-types",
 "crates/uira-providers",
@@ -25,7 +24,6 @@ members = [
 "crates/uira-telemetry",
     "crates/uira-cli",
     "crates/uira-tui",
-    "crates/uira-auth",
     "crates/uira-skills",
     "crates/uira-gateway",
     "crates/uira-channels",
@@ -46,7 +44,6 @@ uira-config = { path = "crates/uira-config" }
 uira-agents = { path = "crates/uira-agents" }
 uira-features = { path = "crates/uira-features" }
 uira-hooks = { path = "crates/uira-hooks" }
-uira-goals = { path = "crates/uira-goals" }
 uira-sdk = { path = "crates/uira-sdk" }
 
 # Internal crates - Tools
@@ -60,7 +57,6 @@ uira-providers = { path = "crates/uira-providers" }
 uira-sandbox = { path = "crates/uira-sandbox" }
 uira-context = { path = "crates/uira-context" }
 uira-agent = { path = "crates/uira-agent" }
-uira-auth = { path = "crates/uira-auth" }
 uira-events = { path = "crates/uira-events" }
 uira-permissions = { path = "crates/uira-permissions" }
 uira-telemetry = { path = "crates/uira-telemetry" }
