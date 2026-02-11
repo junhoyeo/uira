@@ -1,5 +1,5 @@
 [package]
-name = "uira"
+name = "uira-commit-hook-cli"
 description = "Lightning-fast Rust-native git hooks manager with AI harness"
 version.workspace = true
 edition.workspace = true
@@ -49,5 +49,5 @@ assert_cmd = { workspace = true }
 predicates = { workspace = true }
 
 [[bin]]
-name = "uira"
+name = "uira-commit-hook-cli"
 path = "src/main.rs"

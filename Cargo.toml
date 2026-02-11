@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/uira",
+  "crates/uira-commit-hook-cli",
   "crates/uira-napi",
   "crates/uira-orchestration",
   "crates/uira-comment-checker",

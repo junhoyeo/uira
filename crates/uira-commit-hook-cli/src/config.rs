@@ -88,7 +88,7 @@ impl Config {
             parallel: true,
             commands: vec![Command {
                 name: Some("lint".to_string()),
-                run: "uira lint {staged_files}".to_string(),
+                run: "uira-commit-hook-cli lint {staged_files}".to_string(),
                 glob: Some("**/*.{js,ts,jsx,tsx}".to_string()),
                 stage_fixed: false,
                 on_fail: default_on_fail(),

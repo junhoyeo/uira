@@ -56,7 +56,7 @@ function getBinaryPath() {
   try {
     const packagePath = require.resolve(`${packageName}/package.json`);
     const packageDir = path.dirname(packagePath);
-    const binaryName = process.platform === 'win32' ? 'uira.exe' : 'uira';
+    const binaryName = process.platform === 'win32' ? 'uira-commit-hook-cli.exe' : 'uira-commit-hook-cli';
     return path.join(packageDir, binaryName);
   } catch {
     return null;
@@ -66,7 +66,7 @@ function getBinaryPath() {
 function getLocalDevBinaryPath() {
   const packageDir = path.resolve(__dirname, '..');
   const repoRoot = path.resolve(packageDir, '..', '..');
-  const binaryName = process.platform === 'win32' ? 'uira.exe' : 'uira';
+  const binaryName = process.platform === 'win32' ? 'uira-commit-hook-cli.exe' : 'uira-commit-hook-cli';
   const releasePath = path.join(repoRoot, 'target', 'release', binaryName);
   const debugPath = path.join(repoRoot, 'target', 'debug', binaryName);
 
@@ -120,7 +120,7 @@ if (localBinary) {
 
 if (canRunLocalCargo()) {
   try {
-    execFileSync('cargo', ['run', '-p', 'uira', '--', ...args], { stdio: 'inherit' });
+    execFileSync('cargo', ['run', '-p', 'uira-commit-hook-cli', '--', ...args], { stdio: 'inherit' });
     process.exit(0);
   } catch (e) {
     if (e.status !== undefined) {

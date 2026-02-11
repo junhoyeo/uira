@@ -22,7 +22,7 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
-    "uira": "./bin/uira.js"
+    "uira-commit-hook-cli": "./bin/uira.js"
   },
   "exports": {
     ".": {

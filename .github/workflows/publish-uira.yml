@@ -169,21 +169,21 @@ jobs:
 
       - name: Build (native)
         if: "!matrix.cross"
-        run: cargo build --release -p uira --target ${{ matrix.target }}
+        run: cargo build --release -p uira-commit-hook-cli --target ${{ matrix.target }}
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release -p uira --target ${{ matrix.target }}
+        run: cross build --release -p uira-commit-hook-cli --target ${{ matrix.target }}
 
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/uira ${{ matrix.binary }}
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli ${{ matrix.binary }}
           strip ${{ matrix.binary }} || true
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
-        run: cp target/${{ matrix.target }}/release/uira.exe ${{ matrix.binary }}
+        run: cp target/${{ matrix.target }}/release/uira-commit-hook-cli.exe ${{ matrix.binary }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
