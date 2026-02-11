@@ -7,6 +7,7 @@
 //! - Ollama (local models)
 
 mod anthropic;
+pub mod auth;
 mod client;
 mod config;
 mod error;
@@ -18,6 +19,7 @@ mod opencode;
 mod traits;
 
 pub use anthropic::AnthropicClient;
+pub use auth::*;
 pub use client::ModelClientBuilder;
 pub use config::ProviderConfig;
 pub use error::ProviderError;

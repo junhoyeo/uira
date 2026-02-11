@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
-use uira_auth::CredentialStore;
+use crate::auth::CredentialStore;
 use uira_types::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
@@ -72,8 +72,8 @@ impl OpenAIClient {
     fn load_credential(config: &ProviderConfig) -> Result<CredentialSource, ProviderError> {
         if let Ok(store) = CredentialStore::load() {
             if let Some(cred) = store.get(PROVIDER_NAME) {
-                use uira_auth::secrecy::ExposeSecret as AuthExposeSecret;
-                use uira_auth::StoredCredential;
+                use crate::auth::secrecy::ExposeSecret as AuthExposeSecret;
+                use crate::auth::StoredCredential;
                 match cred {
                     StoredCredential::OAuth {
                         access_token,
@@ -243,18 +243,18 @@ impl OpenAIClient {
 
         let old_refresh_token_str = refresh_token.expose_secret().to_string();
         if let Ok(mut store) = CredentialStore::load() {
-            use uira_auth::StoredCredential;
+            use crate::auth::StoredCredential;
             store.insert(
                 PROVIDER_NAME.to_string(),
                 StoredCredential::OAuth {
-                    access_token: uira_auth::secrecy::SecretString::from(
+                    access_token: crate::auth::secrecy::SecretString::from(
                         token_response.access_token,
                     ),
                     refresh_token: token_response
                         .refresh_token
-                        .map(uira_auth::secrecy::SecretString::from)
+                        .map(crate::auth::secrecy::SecretString::from)
                         .or_else(|| {
-                            Some(uira_auth::secrecy::SecretString::from(
+                            Some(crate::auth::secrecy::SecretString::from(
                                 old_refresh_token_str,
                             ))
                         }),

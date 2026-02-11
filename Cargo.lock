@@ -20,6 +20,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "actix-cors"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daa239b93927be1ff123eebada5a3ff23e89f0124ccb8609234e5103d5a5ae6d"
+dependencies = [
+ "actix-utils",
+ "actix-web",
+ "derive_more 2.1.1",
+ "futures-util",
+ "log",
+ "once_cell",
+ "smallvec",
+]
+
+[[package]]
 name = "actix-http"
 version = "3.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2113,6 +2128,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "is-docker"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "928bae27f42bc99b60d9ac7334e3a21d10ad8f1835a4e12ec3ec0464765ed1b3"
+dependencies = [
+ "once_cell",
+]
+
+[[package]]
+name = "is-wsl"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173609498df190136aa7dea1a91db051746d339e18476eed5ca40521f02d7aa5"
+dependencies = [
+ "is-docker",
+ "once_cell",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2660,6 +2694,17 @@ checksum = "c7f86c6eef3d6df15f23bcfb6af487cbd2fed4e5581d58d5bf1f5f8b7f6727dc"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "open"
+version = "5.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43bb73a7fa3799b198970490a51174027ba0d4ec504b03cd08caf513d40024bc"
+dependencies = [
+ "is-wsl",
+ "libc",
+ "pathdiff",
 ]
 
 [[package]]
@@ -3292,6 +3337,12 @@ checksum = "07ba0ad7e047712414213ff67533e6dd477af0a4e1d14fb52343e53d30ea9397"
 dependencies = [
  "once_cell",
 ]
+
+[[package]]
+name = "pathdiff"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "percent-encoding"
@@ -4047,16 +4098,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "secrecy"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
-dependencies = [
- "serde",
- "zeroize",
-]
 
 [[package]]
 name = "secrecy"
@@ -5581,7 +5622,7 @@ dependencies = [
  "uira-comment-checker",
  "uira-config",
  "uira-features",
- "uira-goals",
+ "uira-hooks",
  "uira-oxc",
  "uira-providers",
  "uira-sandbox",
@@ -5610,7 +5651,6 @@ dependencies = [
  "uira-config",
  "uira-context",
  "uira-events",
- "uira-goals",
  "uira-hooks",
  "uira-permissions",
  "uira-providers",
@@ -5629,33 +5669,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "uira-auth"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "actix-web",
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "dirs",
- "fs2",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "secrecy 0.8.0",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "uira-types",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -5694,7 +5707,7 @@ dependencies = [
  "predicates",
  "ratatui",
  "regex",
- "secrecy 0.10.3",
+ "secrecy",
  "serde",
  "serde_json",
  "tempfile",
@@ -5704,11 +5717,10 @@ dependencies = [
  "tracing-subscriber",
  "uira-agent",
  "uira-agents",
- "uira-auth",
  "uira-config",
  "uira-features",
  "uira-gateway",
- "uira-goals",
+ "uira-hooks",
  "uira-mcp-client",
  "uira-providers",
  "uira-sandbox",
@@ -5836,21 +5848,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-goals"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "uira-config",
-]
-
-[[package]]
 name = "uira-hooks"
 version = "0.1.0"
 dependencies = [
@@ -5870,7 +5867,6 @@ dependencies = [
  "uira-comment-checker",
  "uira-config",
  "uira-events",
- "uira-goals",
  "uira-types",
 ]
 
@@ -5929,7 +5925,6 @@ dependencies = [
  "uira-agents",
  "uira-config",
  "uira-features",
- "uira-goals",
  "uira-hooks",
  "uira-oxc",
  "uira-sdk",
@@ -5965,25 +5960,36 @@ dependencies = [
 name = "uira-providers"
 version = "0.1.0"
 dependencies = [
+ "actix-cors",
+ "actix-rt",
+ "actix-web",
+ "anyhow",
  "async-stream",
  "async-trait",
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "dirs",
  "eventsource-stream",
+ "fs2",
  "futures",
  "lazy_static",
+ "open",
  "pin-project-lite",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
- "secrecy 0.10.3",
+ "secrecy",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "tracing",
- "uira-auth",
  "uira-types",
+ "url",
  "uuid",
  "wiremock",
 ]

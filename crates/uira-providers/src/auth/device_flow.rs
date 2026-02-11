@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-use crate::error::{AuthError, Result};
+use crate::{AuthError, Result};
 use crate::types::OAuthTokens;
 
 /// Response from device authorization endpoint
