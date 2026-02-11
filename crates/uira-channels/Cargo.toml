@@ -1,0 +1,30 @@
+[package]
+name = "uira-channels"
+description = "Multi-channel messaging for Uira (Slack, Telegram)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+
+# Telegram
+teloxide = { workspace = true }
+
+# Internal dependencies
+uira-protocol = { workspace = true }
+uira-events = { workspace = true }
+uira-config = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile = { workspace = true }

@@ -1,0 +1,27 @@
+[package]
+name = "uira-gateway"
+description = "WebSocket gateway for multi-session Uira agent management"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"
+
+# Internal dependencies
+uira-agent = { workspace = true }
+uira-events = { workspace = true }
+uira-protocol = { workspace = true }
+uira-config = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile = { workspace = true }

@@ -27,6 +27,9 @@ members = [
     "crates/uira-cli",
     "crates/uira-tui",
     "crates/uira-auth",
+    "crates/uira-skills",
+    "crates/uira-gateway",
+    "crates/uira-channels",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -70,6 +73,11 @@ uira-tui = { path = "crates/uira-tui" }
 uira-mcp-server = { path = "crates/uira-mcp-server" }
 uira-napi = { path = "crates/uira-napi" }
 
+# Internal crates - Expansion (gateway, channels, skills)
+uira-skills = { path = "crates/uira-skills" }
+uira-gateway = { path = "crates/uira-gateway" }
+uira-channels = { path = "crates/uira-channels" }
+
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
 
@@ -90,8 +98,16 @@ actix-web = "4"
 actix-rt = "2"
 actix-cors = "0.7"
 
+# Web framework (for gateway)
+axum = { version = "0.8", features = ["ws"] }
+tokio-tungstenite = "0.26"
+
+# Telegram bot framework
+teloxide = { version = "0.13", features = ["macros"] }
+
 # Async utilities
 async-stream = "0.3"
+async-trait = "0.1"
 futures = "0.3"
 
 # Parallel execution

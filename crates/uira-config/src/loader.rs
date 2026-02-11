@@ -142,6 +142,9 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         goals: expand_goals_settings(config.goals),
         compaction: expand_compaction_settings(config.compaction),
         permissions: config.permissions,
+        skills: config.skills,
+        gateway: config.gateway,
+        channels: config.channels,
     }
 }
 

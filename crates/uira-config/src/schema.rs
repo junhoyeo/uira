@@ -62,6 +62,18 @@ pub struct UiraConfig {
     /// Permission rules for tool execution
     #[serde(default)]
     pub permissions: PermissionsSettings,
+
+    /// Skills settings for loading SKILL.md files
+    #[serde(default)]
+    pub skills: SkillsSettings,
+
+    /// Gateway settings for WebSocket control plane
+    #[serde(default)]
+    pub gateway: GatewaySettings,
+
+    /// Channel settings for multi-channel messaging
+    #[serde(default)]
+    pub channels: ChannelSettings,
 }
 
 impl Default for UiraConfig {
@@ -80,6 +92,9 @@ impl Default for UiraConfig {
             goals: GoalsConfig::default(),
             compaction: CompactionSettings::default(),
             permissions: PermissionsSettings::default(),
+            skills: SkillsSettings::default(),
+            gateway: GatewaySettings::default(),
+            channels: ChannelSettings::default(),
         }
     }
 }
@@ -851,6 +866,128 @@ fn default_tier() -> String {
     "medium".to_string()
 }
 
+// ============================================================================
+// Skills Configuration
+// ============================================================================
+
+/// Skills settings for loading SKILL.md instruction files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillsSettings {
+    /// Whether skills loading is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Directories to scan for SKILL.md files
+    #[serde(default = "default_skills_paths")]
+    pub paths: Vec<String>,
+
+    /// List of active skill names to load
+    #[serde(default)]
+    pub active: Vec<String>,
+}
+
+impl Default for SkillsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            paths: default_skills_paths(),
+            active: Vec::new(),
+        }
+    }
+}
+
+fn default_skills_paths() -> Vec<String> {
+    vec!["~/.uira/skills".to_string(), ".uira/skills".to_string()]
+}
+
+// ============================================================================
+// Gateway Configuration
+// ============================================================================
+
+/// Gateway settings for the WebSocket control plane
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewaySettings {
+    /// Whether the gateway is enabled
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Host to bind the gateway server
+    #[serde(default = "default_gateway_host")]
+    pub host: String,
+
+    /// Port to bind the gateway server
+    #[serde(default = "default_gateway_port")]
+    pub port: u16,
+
+    /// Maximum number of concurrent sessions
+    #[serde(default = "default_max_sessions")]
+    pub max_sessions: usize,
+}
+
+impl Default for GatewaySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: default_gateway_host(),
+            port: default_gateway_port(),
+            max_sessions: default_max_sessions(),
+        }
+    }
+}
+
+fn default_gateway_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_gateway_port() -> u16 {
+    18789
+}
+
+fn default_max_sessions() -> usize {
+    10
+}
+
+// ============================================================================
+// Channel Configuration
+// ============================================================================
+
+/// Channel settings for multi-channel messaging
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChannelSettings {
+    /// Telegram channel configuration
+    #[serde(default)]
+    pub telegram: Option<TelegramChannelConfig>,
+
+    /// Slack channel configuration
+    #[serde(default)]
+    pub slack: Option<SlackChannelConfig>,
+}
+
+/// Telegram bot configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramChannelConfig {
+    /// Telegram bot token from @BotFather
+    pub bot_token: String,
+
+    /// List of allowed Telegram user IDs (empty = allow all)
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+}
+
+/// Slack bot configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackChannelConfig {
+    /// Slack bot token (xoxb-...)
+    pub bot_token: String,
+
+    /// Slack app-level token for Socket Mode (xapp-...)
+    pub app_token: String,
+
+    /// List of allowed Slack channel IDs (empty = allow all)
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1158,13 +1295,95 @@ mcp:
         let yaml = r##"
 theme: dracula
 theme_colors:
-   accent: "#ff79c6"
-   borders: "#6272a4"
+    accent: "#ff79c6"
+    borders: "#6272a4"
 "##;
 
         let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.theme, "dracula");
         assert_eq!(config.theme_colors.accent, Some("#ff79c6".to_string()));
         assert_eq!(config.theme_colors.borders, Some("#6272a4".to_string()));
+    }
+
+    #[test]
+    fn test_skills_settings_defaults() {
+        let settings = SkillsSettings::default();
+        assert!(!settings.enabled);
+        assert_eq!(settings.paths.len(), 2);
+        assert!(settings.active.is_empty());
+    }
+
+    #[test]
+    fn test_gateway_settings_defaults() {
+        let settings = GatewaySettings::default();
+        assert!(!settings.enabled);
+        assert_eq!(settings.host, "127.0.0.1");
+        assert_eq!(settings.port, 18789);
+        assert_eq!(settings.max_sessions, 10);
+    }
+
+    #[test]
+    fn test_channel_settings_defaults() {
+        let settings = ChannelSettings::default();
+        assert!(settings.telegram.is_none());
+        assert!(settings.slack.is_none());
+    }
+
+    #[test]
+    fn test_full_config_with_skills() {
+        let yaml = r#"
+skills:
+  enabled: true
+  paths:
+    - "~/.uira/skills"
+    - "./project-skills"
+  active:
+    - coding-agent
+    - debugger
+"#;
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.skills.enabled);
+        assert_eq!(config.skills.paths.len(), 2);
+        assert_eq!(config.skills.active, vec!["coding-agent", "debugger"]);
+    }
+
+    #[test]
+    fn test_full_config_with_gateway() {
+        let yaml = r#"
+gateway:
+  enabled: true
+  host: "0.0.0.0"
+  port: 9000
+  max_sessions: 20
+"#;
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.gateway.enabled);
+        assert_eq!(config.gateway.host, "0.0.0.0");
+        assert_eq!(config.gateway.port, 9000);
+        assert_eq!(config.gateway.max_sessions, 20);
+    }
+
+    #[test]
+    fn test_full_config_with_channels() {
+        let yaml = r#"
+channels:
+  telegram:
+    bot_token: "123456:ABC-DEF"
+    allowed_users:
+      - "user123"
+  slack:
+    bot_token: "xoxb-test"
+    app_token: "xapp-test"
+    allowed_channels:
+      - "C12345"
+"#;
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        let tg = config.channels.telegram.unwrap();
+        assert_eq!(tg.bot_token, "123456:ABC-DEF");
+        assert_eq!(tg.allowed_users, vec!["user123"]);
+        let slack = config.channels.slack.unwrap();
+        assert_eq!(slack.bot_token, "xoxb-test");
+        assert_eq!(slack.app_token, "xapp-test");
+        assert_eq!(slack.allowed_channels, vec!["C12345"]);
     }
 }
