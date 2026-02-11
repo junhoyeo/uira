@@ -137,12 +137,13 @@ fn is_image_error(message: &str) -> bool {
 /// Classify an API error based on status code and message content
 ///
 /// # Arguments
+/// * `provider` - Provider name (used for `Unavailable { provider }` errors)
 /// * `status` - HTTP status code
 /// * `message` - Error message from the API
 ///
 /// # Returns
 /// Appropriate `ProviderError` variant based on classification
-pub fn classify_error(status: u16, message: &str) -> ProviderError {
+pub fn classify_error(provider: &str, status: u16, message: &str) -> ProviderError {
     // Check status code first
     match status {
         // HTTP 402 - Payment Required
@@ -156,12 +157,6 @@ pub fn classify_error(status: u16, message: &str) -> ProviderError {
             return ProviderError::RateLimited {
                 retry_after_ms: 60000, // Default 60s retry
             };
-        }
-        // HTTP 529 - Overloaded (map to Unavailable)
-        529 => {
-            return ProviderError::Unavailable {
-                provider: "API".to_string(),
-            }
         }
         // HTTP 401/403 - Auth errors
         401 | 403 => {
@@ -185,7 +180,7 @@ pub fn classify_error(status: u16, message: &str) -> ProviderError {
 
     if is_overloaded(message) {
         return ProviderError::Unavailable {
-            provider: "API".to_string(),
+            provider: provider.to_string(),
         };
     }
 
@@ -219,6 +214,12 @@ pub fn classify_error(status: u16, message: &str) -> ProviderError {
         };
     }
 
+    if status >= 500 {
+        return ProviderError::Unavailable {
+            provider: provider.to_string(),
+        };
+    }
+
     // Default to InvalidResponse for unclassified errors
     ProviderError::InvalidResponse(message.to_string())
 }
@@ -226,6 +227,8 @@ pub fn classify_error(status: u16, message: &str) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PROVIDER: &str = "anthropic";
 
     #[test]
     fn test_context_overflow_detection() {
@@ -300,64 +303,67 @@ mod tests {
     #[test]
     fn test_classify_by_status_code() {
         // HTTP 402 - Payment Required
-        let err = classify_error(402, "payment required");
+        let err = classify_error(PROVIDER, 402, "payment required");
         assert!(matches!(err, ProviderError::PaymentRequired { .. }));
 
         // HTTP 429 - Rate Limited
-        let err = classify_error(429, "too many requests");
+        let err = classify_error(PROVIDER, 429, "too many requests");
         assert!(matches!(err, ProviderError::RateLimited { .. }));
 
         // HTTP 529 - Overloaded (maps to Unavailable)
-        let err = classify_error(529, "service overloaded");
+        let err = classify_error(PROVIDER, 529, "service overloaded");
+        assert!(matches!(err, ProviderError::Unavailable { .. }));
+
+        let err = classify_error(PROVIDER, 503, "internal server error");
         assert!(matches!(err, ProviderError::Unavailable { .. }));
 
         // HTTP 401 - Auth Failed
-        let err = classify_error(401, "unauthorized");
+        let err = classify_error(PROVIDER, 401, "unauthorized");
         assert!(matches!(err, ProviderError::AuthenticationFailed(_)));
     }
 
     #[test]
     fn test_classify_by_message_pattern() {
         // Context overflow
-        let err = classify_error(400, "context length exceeded");
+        let err = classify_error(PROVIDER, 400, "context length exceeded");
         assert!(matches!(err, ProviderError::ContextExceeded { .. }));
 
         // Rate limit
-        let err = classify_error(500, "rate limit exceeded");
+        let err = classify_error(PROVIDER, 500, "rate limit exceeded");
         assert!(matches!(err, ProviderError::RateLimited { .. }));
 
         // Overloaded
-        let err = classify_error(503, "overloaded_error");
+        let err = classify_error(PROVIDER, 503, "overloaded_error");
         assert!(matches!(err, ProviderError::Unavailable { .. }));
 
         // Billing
-        let err = classify_error(400, "insufficient credits");
+        let err = classify_error(PROVIDER, 400, "insufficient credits");
         assert!(matches!(err, ProviderError::PaymentRequired { .. }));
 
         // Auth
-        let err = classify_error(400, "invalid_api_key");
+        let err = classify_error(PROVIDER, 400, "invalid_api_key");
         assert!(matches!(err, ProviderError::AuthenticationFailed(_)));
 
         // Timeout
-        let err = classify_error(408, "request timeout");
+        let err = classify_error(PROVIDER, 408, "request timeout");
         assert!(matches!(err, ProviderError::Timeout { .. }));
 
         // Message ordering
-        let err = classify_error(400, "roles must alternate");
+        let err = classify_error(PROVIDER, 400, "roles must alternate");
         assert!(matches!(err, ProviderError::MessageOrderingConflict));
 
         // Tool input
-        let err = classify_error(400, "tool_use.input is required");
+        let err = classify_error(PROVIDER, 400, "tool_use.input is required");
         assert!(matches!(err, ProviderError::ToolCallInputMissing));
 
         // Image error
-        let err = classify_error(400, "image dimensions exceed maximum");
+        let err = classify_error(PROVIDER, 400, "image dimensions exceed maximum");
         assert!(matches!(err, ProviderError::ImageError { .. }));
     }
 
     #[test]
     fn test_unclassified_error() {
-        let err = classify_error(500, "unknown error");
+        let err = classify_error(PROVIDER, 499, "unknown error");
         assert!(matches!(err, ProviderError::InvalidResponse(_)));
     }
 }

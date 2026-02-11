@@ -598,7 +598,7 @@ impl ModelClient for AnthropicClient {
                 let retry_after = extract_retry_after(response.headers());
                 let body = parse_error_body(response).await;
 
-                let mut error = classify_error(status, &body);
+                let mut error = classify_error(PROVIDER_NAME, status, &body);
                 if let ProviderError::RateLimited {
                     ref mut retry_after_ms,
                 } = error
@@ -667,7 +667,7 @@ impl ModelClient for AnthropicClient {
                 let retry_after = extract_retry_after(response.headers());
                 let body = parse_error_body(response).await;
 
-                let mut error = classify_error(status, &body);
+                let mut error = classify_error(PROVIDER_NAME, status, &body);
                 if let ProviderError::RateLimited {
                     ref mut retry_after_ms,
                 } = error
@@ -690,7 +690,7 @@ impl ModelClient for AnthropicClient {
             let mut consecutive_parse_errors: usize = 0;
             let mut _received_message_stop = false;
             const MAX_CONSECUTIVE_PARSE_ERRORS: usize = 10;
-            
+
             futures::pin_mut!(byte_stream);
 
             while let Some(result) = byte_stream.next().await {
@@ -708,7 +708,7 @@ impl ModelClient for AnthropicClient {
                         continue;
                     }
                 };
-                
+
                 let text = String::from_utf8_lossy(&bytes);
                 let text = text.replace("\r\n", "\n");
                 buffer.push_str(&text);
@@ -745,21 +745,21 @@ impl ModelClient for AnthropicClient {
                             match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                                 Ok(event) => {
                                     tracing::debug!("Anthropic SSE event: {:?}", event);
-                                    
+
                                     // Track MessageStop event
                                     if matches!(event, AnthropicStreamEvent::MessageStop) {
                                         _received_message_stop = true;
                                     }
-                                    
+
                                     // Reset consecutive parse errors on successful parse
                                     consecutive_parse_errors = 0;
-                                    
+
                                     yield event.into();
                                 }
                                 Err(e) => {
                                     if !data.trim().is_empty() && !data.starts_with(':') {
                                         tracing::debug!("SSE parse error: {} for data: {}", e, data);
-                                        
+
                                         // Increment consecutive parse errors
                                         consecutive_parse_errors += 1;
                                         if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {
@@ -800,16 +800,16 @@ impl ModelClient for AnthropicClient {
                                 if matches!(event, AnthropicStreamEvent::MessageStop) {
                                     _received_message_stop = true;
                                 }
-                                
+
                                 // Reset consecutive parse errors on successful parse
                                 consecutive_parse_errors = 0;
-                                
+
                                 yield event.into();
                             }
                             Err(e) => {
                                 if !data.trim().is_empty() && !data.starts_with(':') {
                                     tracing::debug!("SSE parse error in remaining buffer: {} for data: {}", e, data);
-                                    
+
                                     // Increment consecutive parse errors
                                     consecutive_parse_errors += 1;
                                     if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {

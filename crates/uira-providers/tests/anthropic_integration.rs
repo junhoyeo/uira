@@ -14,6 +14,8 @@ use uira_providers::{
     classify_error, validate_anthropic_turns, BetaFeatures, ProviderError, RetryConfig,
 };
 
+const PROVIDER: &str = "anthropic";
+
 // ============================================================================
 // Error Classification Tests
 // ============================================================================
@@ -21,6 +23,7 @@ use uira_providers::{
 #[test]
 fn test_error_classification_context_overflow() {
     let error = classify_error(
+        PROVIDER,
         400,
         "request_too_large: your request exceeds the maximum context length",
     );
@@ -38,7 +41,7 @@ fn test_error_classification_context_overflow_variants() {
     ];
 
     for pattern in patterns {
-        let error = classify_error(400, pattern);
+        let error = classify_error(PROVIDER, 400, pattern);
         assert!(
             matches!(error, ProviderError::ContextExceeded { .. }),
             "Failed to classify as ContextExceeded: {}",
@@ -49,7 +52,7 @@ fn test_error_classification_context_overflow_variants() {
 
 #[test]
 fn test_error_classification_rate_limit() {
-    let error = classify_error(429, "rate limit exceeded");
+    let error = classify_error(PROVIDER, 429, "rate limit exceeded");
     assert!(matches!(error, ProviderError::RateLimited { .. }));
 }
 
@@ -64,7 +67,7 @@ fn test_error_classification_rate_limit_variants() {
     ];
 
     for pattern in patterns {
-        let error = classify_error(429, pattern);
+        let error = classify_error(PROVIDER, 429, pattern);
         assert!(
             matches!(error, ProviderError::RateLimited { .. }),
             "Failed to classify as RateLimited: {}",
@@ -75,7 +78,7 @@ fn test_error_classification_rate_limit_variants() {
 
 #[test]
 fn test_error_classification_overloaded() {
-    let error = classify_error(529, "overloaded_error");
+    let error = classify_error(PROVIDER, 529, "overloaded_error");
     assert!(matches!(error, ProviderError::Unavailable { .. }));
 }
 
@@ -84,7 +87,7 @@ fn test_error_classification_overloaded_variants() {
     let patterns = vec!["overloaded_error", "The service is overloaded"];
 
     for pattern in patterns {
-        let error = classify_error(503, pattern);
+        let error = classify_error(PROVIDER, 503, pattern);
         assert!(
             matches!(error, ProviderError::Unavailable { .. }),
             "Failed to classify as Unavailable: {}",
@@ -95,7 +98,7 @@ fn test_error_classification_overloaded_variants() {
 
 #[test]
 fn test_error_classification_billing() {
-    let error = classify_error(402, "payment required");
+    let error = classify_error(PROVIDER, 402, "payment required");
     assert!(matches!(error, ProviderError::PaymentRequired { .. }));
 }
 
@@ -104,7 +107,7 @@ fn test_error_classification_billing_variants() {
     let patterns = vec!["payment required", "insufficient credits", "billing issue"];
 
     for pattern in patterns {
-        let error = classify_error(400, pattern);
+        let error = classify_error(PROVIDER, 400, pattern);
         assert!(
             matches!(error, ProviderError::PaymentRequired { .. }),
             "Failed to classify as PaymentRequired: {}",
@@ -115,7 +118,7 @@ fn test_error_classification_billing_variants() {
 
 #[test]
 fn test_error_classification_auth() {
-    let error = classify_error(401, "invalid_api_key");
+    let error = classify_error(PROVIDER, 401, "invalid_api_key");
     assert!(matches!(error, ProviderError::AuthenticationFailed(_)));
 }
 
@@ -130,7 +133,7 @@ fn test_error_classification_auth_variants() {
     ];
 
     for pattern in patterns {
-        let error = classify_error(401, pattern);
+        let error = classify_error(PROVIDER, 401, pattern);
         assert!(
             matches!(error, ProviderError::AuthenticationFailed(_)),
             "Failed to classify as AuthenticationFailed: {}",
@@ -141,7 +144,7 @@ fn test_error_classification_auth_variants() {
 
 #[test]
 fn test_error_classification_timeout() {
-    let error = classify_error(408, "request timeout");
+    let error = classify_error(PROVIDER, 408, "request timeout");
     assert!(matches!(error, ProviderError::Timeout { .. }));
 }
 
@@ -150,7 +153,7 @@ fn test_error_classification_timeout_variants() {
     let patterns = vec!["Request timeout", "Connection timed out"];
 
     for pattern in patterns {
-        let error = classify_error(408, pattern);
+        let error = classify_error(PROVIDER, 408, pattern);
         assert!(
             matches!(error, ProviderError::Timeout { .. }),
             "Failed to classify as Timeout: {}",
@@ -161,7 +164,7 @@ fn test_error_classification_timeout_variants() {
 
 #[test]
 fn test_error_classification_message_ordering() {
-    let error = classify_error(400, "incorrect role information");
+    let error = classify_error(PROVIDER, 400, "incorrect role information");
     assert!(matches!(error, ProviderError::MessageOrderingConflict));
 }
 
@@ -170,7 +173,7 @@ fn test_error_classification_message_ordering_variants() {
     let patterns = vec!["incorrect role information", "Roles must alternate"];
 
     for pattern in patterns {
-        let error = classify_error(400, pattern);
+        let error = classify_error(PROVIDER, 400, pattern);
         assert!(
             matches!(error, ProviderError::MessageOrderingConflict),
             "Failed to classify as MessageOrderingConflict: {}",
@@ -181,7 +184,7 @@ fn test_error_classification_message_ordering_variants() {
 
 #[test]
 fn test_error_classification_tool_input() {
-    let error = classify_error(400, "tool_use.input is required");
+    let error = classify_error(PROVIDER, 400, "tool_use.input is required");
     assert!(matches!(error, ProviderError::ToolCallInputMissing));
 }
 
@@ -190,7 +193,7 @@ fn test_error_classification_tool_input_variants() {
     let patterns = vec!["tool_use.input is required", "tool_call.arguments required"];
 
     for pattern in patterns {
-        let error = classify_error(400, pattern);
+        let error = classify_error(PROVIDER, 400, pattern);
         assert!(
             matches!(error, ProviderError::ToolCallInputMissing),
             "Failed to classify as ToolCallInputMissing: {}",
@@ -201,7 +204,7 @@ fn test_error_classification_tool_input_variants() {
 
 #[test]
 fn test_error_classification_image_error() {
-    let error = classify_error(400, "image dimensions exceed maximum");
+    let error = classify_error(PROVIDER, 400, "image dimensions exceed maximum");
     assert!(matches!(error, ProviderError::ImageError { .. }));
 }
 
@@ -214,7 +217,7 @@ fn test_error_classification_image_error_variants() {
     ];
 
     for pattern in patterns {
-        let error = classify_error(400, pattern);
+        let error = classify_error(PROVIDER, 400, pattern);
         assert!(
             matches!(error, ProviderError::ImageError { .. }),
             "Failed to classify as ImageError: {}",
@@ -225,20 +228,20 @@ fn test_error_classification_image_error_variants() {
 
 #[test]
 fn test_error_classification_unclassified() {
-    let error = classify_error(500, "unknown error");
+    let error = classify_error(PROVIDER, 400, "unknown error");
     assert!(matches!(error, ProviderError::InvalidResponse(_)));
 }
 
 #[test]
 fn test_error_classification_status_code_priority() {
     // Status code should take priority over message pattern
-    let error = classify_error(429, "some random message");
+    let error = classify_error(PROVIDER, 429, "some random message");
     assert!(matches!(error, ProviderError::RateLimited { .. }));
 
-    let error = classify_error(402, "some random message");
+    let error = classify_error(PROVIDER, 402, "some random message");
     assert!(matches!(error, ProviderError::PaymentRequired { .. }));
 
-    let error = classify_error(529, "some random message");
+    let error = classify_error(PROVIDER, 529, "some random message");
     assert!(matches!(error, ProviderError::Unavailable { .. }));
 }
 
@@ -585,7 +588,7 @@ fn test_integration_retryable_error_classification() {
     ];
 
     for (status, message) in retryable_cases {
-        let error = classify_error(status, message);
+        let error = classify_error(PROVIDER, status, message);
         assert!(
             error.is_retryable(),
             "Error should be retryable: status={}, message={}",
@@ -607,7 +610,7 @@ fn test_integration_non_retryable_error_classification() {
     ];
 
     for (status, message) in non_retryable_cases {
-        let error = classify_error(status, message);
+        let error = classify_error(PROVIDER, status, message);
         assert!(
             !error.is_retryable(),
             "Error should not be retryable: status={}, message={}",
@@ -619,7 +622,7 @@ fn test_integration_non_retryable_error_classification() {
 
 #[test]
 fn test_integration_rate_limit_retry_after() {
-    let error = classify_error(429, "rate limit exceeded");
+    let error = classify_error(PROVIDER, 429, "rate limit exceeded");
 
     // Should be retryable
     assert!(error.is_retryable());
