@@ -17,6 +17,7 @@
 - **Streaming** - Newline-gated streaming with real-time output
 - **Ratatui TUI** - Beautiful terminal interface with approval overlays
 - **MCP Server** - LSP and AST-grep tools via Model Context Protocol
+- **Web & Code Search** - Exa web search, code context, and GitHub code search via hosted MCP endpoints
 - **Git Hooks** - Configurable pre/post commit hooks via `uira.yml`
 - **Goal Verification** - Score-based verification for persistent work loops
 - **AI-Assisted Workflows** - Typos, diagnostics, and comments with AI decision-making
@@ -230,7 +231,8 @@ Uira provides an AI-assisted workflow system that integrates with git hooks to a
 │  │                         AgentWorkflow                                     │   │
 │  │                                                                           │   │
 │  │  • Embedded agent session (same harness as uira-agent)                   │   │
-│  │  • Full tool access: Read, Edit, Grep, Glob, Write, Bash                 │   │
+│  │  • Full tool access: Read, Edit, Grep, Glob, Write, Bash,                │   │
+│  │    WebSearch, CodeSearch, GrepApp, FetchUrl                              │   │
 │  │  • Runs autonomously until <DONE/> is output                             │   │
 │  │  • Verification via re-detection (no remaining issues)                   │   │
 │  │  • Git diff-based modification tracking                                  │   │
@@ -486,6 +488,14 @@ The `uira-mcp` binary exposes development tools via Model Context Protocol:
 |------|-------------|
 | `ast_search` | Search code patterns with ast-grep |
 | `ast_replace` | Search and replace code patterns |
+
+### Search Tools
+| Tool | Endpoint | Description |
+|------|----------|-------------|
+| `web_search` | `mcp.exa.ai/mcp` | Web search with DuckDuckGo fallback |
+| `code_search` | `mcp.exa.ai/mcp` | Code examples and API references |
+| `grep_app` | `mcp.grep.app` | GitHub code search across 1M+ repos |
+| `fetch_url` | Direct HTTP | Fetch and clean web page content |
 
 ## Goal Verification
 
