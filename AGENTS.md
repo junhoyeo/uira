@@ -10,16 +10,23 @@ This document provides context for AI agents working on the Uira codebase.
 
 | Crate | Purpose |
 |-------|---------|
-| `uira-cli` | CLI entry point with session management |
-| `uira-agent` | Core agent loop, state machine, streaming |
-| `uira-tui` | Ratatui-based terminal interface |
-| `uira-protocol` | Shared types, events, protocol definitions |
-| `uira-providers` | Model provider clients (Anthropic, OpenAI) |
+| `uira-types` | Shared types, events, protocol definitions |
+| `uira-core` | Configuration loading, event system |
+| `uira-permissions` | Permission management and access control |
+| `uira-agent` | Core agent loop, state machine, streaming, context management, telemetry |
+| `uira-providers` | Model provider clients (Anthropic, OpenAI, Gemini, Ollama) with OAuth auth |
 | `uira-sandbox` | Platform-native sandboxing (macOS/Linux) |
-| `uira-tools` | LSP client, tool registry, orchestration |
+| `uira-orchestration` | Agent definitions, SDK, features, tool registry |
+| `uira-hooks` | Hook implementations and goal verification |
+| `uira-mcp-client` | MCP client for external MCP servers |
 | `uira-mcp-server` | MCP server with LSP and AST-grep tools |
-| `uira-auth` | OAuth authentication for providers |
-| `uira-context` | Context management and conversation history |
+| `uira-oxc` | OXC-powered JavaScript/TypeScript tooling |
+| `uira-comment-checker` | AI-assisted comment quality analysis |
+| `uira-gateway` | Gateway server, channel integrations (Slack, Telegram), skill definitions |
+| `uira-cli` | CLI entry point with session management |
+| `uira-tui` | Ratatui-based terminal interface |
+| `uira-commit-hook-cli` | Standalone CLI for git hooks and dev tools |
+| `uira-napi` | Node.js native addon bindings |
 
 ## Issue Labels
 

@@ -147,7 +147,7 @@ Press `/models` to open an interactive model selector:
          ┌─────────┴─────────┐
          ▼                   ▼
 ┌─────────────────┐  ┌─────────────────┐
-│ uira-providers  │  │  uira-protocol  │
+│ uira-providers  │  │   uira-types    │
 │ (Model Clients) │  │ (Types/Events)  │
 └─────────────────┘  └─────────────────┘
 ```
@@ -157,31 +157,32 @@ Press `/models` to open an interactive model selector:
 | Crate | Description |
 |-------|-------------|
 | **uira-cli** | CLI with session management and multi-provider support |
-| **uira-agent** | Core agent loop with state machine, session persistence, and streaming |
+| **uira-agent** | Core agent loop with state machine, session persistence, streaming, context management, and telemetry |
 | **uira-tui** | Ratatui-based terminal UI with approval overlay, model selector, and thinking display |
-| **uira-protocol** | Shared types, events, streaming chunks, and protocol definitions |
-| **uira-providers** | Model provider clients (Anthropic, OpenAI) with streaming support |
+| **uira-types** | Shared types, events, streaming chunks, and protocol definitions |
+| **uira-core** | Configuration loading, management, and event system |
+| **uira-providers** | Model provider clients (Anthropic, OpenAI, Gemini, Ollama) with OAuth authentication |
 | **uira-sandbox** | Platform-native sandboxing (macOS sandbox-exec, Linux Landlock) |
-| **uira-context** | Context management and conversation history |
+| **uira-permissions** | Permission management and access control |
+| **uira-orchestration** | Agent definitions, SDK, features, and tool registry |
 
 ### Tool Crates
 
 | Crate | Description |
 |-------|-------------|
 | **uira-mcp-server** | MCP server with native LSP and AST-grep integration |
-| **uira-tools** | LSP client, tool registry, and orchestration utilities |
+| **uira-mcp-client** | MCP client for connecting to external MCP servers |
 | **uira-oxc** | OXC-powered JavaScript/TypeScript linting, parsing, transformation |
+| **uira-comment-checker** | AI-assisted comment quality analysis |
 
-### Utility Crates
+### Extension Crates
 
 | Crate | Description |
 |-------|-------------|
-| **uira** | Standalone CLI for git hooks and dev tools |
-| **uira-auth** | OAuth authentication for Anthropic, OpenAI, Google |
-| **uira-config** | Configuration loading and management |
-| **uira-hooks** | Hook implementations |
-| **uira-goals** | Score-based goal verification |
-| **uira-core** | Shared types and utilities |
+| **uira-commit-hook-cli** | Standalone CLI for git hooks, typos, diagnostics, and comment review |
+| **uira-hooks** | Hook implementations and goal verification |
+| **uira-gateway** | Gateway server, channel integrations (Slack, Telegram), and skill definitions |
+| **uira-napi** | Node.js native addon bindings |
 
 ## AI Agent Harness System
 
@@ -208,21 +209,21 @@ Uira provides an AI-assisted workflow system that integrates with git hooks to a
                      │                          └────────────────┘
                      │                                   │
                      │                                   ▼
-                     │                          ┌────────────────┐
-                     │                          │  uira run      │
-                     │                          │  pre-commit    │
-                     │                          └────────────────┘
+│                          ┌─────────────────────────┐
+│                          │  uira-commit-hook-cli   │
+│                          │  run pre-commit         │
+│                          └─────────────────────────┘
                      │                                   │
                      └─────────────────┬─────────────────┘
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            uira CLI (AI Harness)                                 │
+│                    uira-commit-hook-cli (AI Harness)                             │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │  uira typos     │  │ uira diagnostics│  │  uira comments  │                  │
-│  │     --ai        │  │      --ai       │  │      --ai       │                  │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘                  │
+│  ┌──────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────┐│
+│  │ uira-commit-hook-cli │  │   uira-commit-hook-cli   │  │ uira-commit-hook-cli  ││
+│  │ typos --ai           │  │   diagnostics --ai       │  │ comments --ai         ││
+│  └──────────┬───────────┘  └────────────┬─────────────┘  └───────────┬───────────┘│
 │           │                    │                    │                           │
 │           └────────────────────┼────────────────────┘                           │
 │                                ▼                                                 │
@@ -276,18 +277,18 @@ Uira provides an AI-assisted workflow system that integrates with git hooks to a
 
 | Command | Description | AI Decisions |
 |---------|-------------|--------------|
-| `uira typos --ai` | Check and fix typos | FIX, IGNORE per typo |
-| `uira diagnostics --ai` | Fix LSP errors/warnings | FIX:HIGH, FIX:LOW, IGNORE |
-| `uira comments --ai` | Review/remove comments | REMOVE, KEEP per comment |
+| `uira-commit-hook-cli typos --ai` | Check and fix typos | FIX, IGNORE per typo |
+| `uira-commit-hook-cli diagnostics --ai` | Fix LSP errors/warnings | FIX:HIGH, FIX:LOW, IGNORE |
+| `uira-commit-hook-cli comments --ai` | Review/remove comments | REMOVE, KEEP per comment |
 
 ### Git Hook Integration
 
 ```bash
 # 1. Initialize configuration
-uira init
+uira-commit-hook-cli init
 
 # 2. Install git hooks
-uira install
+uira-commit-hook-cli install
 
 # 3. Commit normally - hooks run automatically
 git commit -m "feat: add new feature"
@@ -296,11 +297,11 @@ git commit -m "feat: add new feature"
 When you commit, the pre-commit hook executes:
 ```
 .git/hooks/pre-commit
-    └── exec uira run pre-commit
+    └── exec uira-commit-hook-cli run pre-commit
             └── Runs configured commands from uira.yml
-                    ├── uira typos --ai --stage
-                    ├── uira diagnostics --ai --stage
-                    └── uira comments --ai --stage
+                    ├── uira-commit-hook-cli typos --ai --stage
+                    ├── uira-commit-hook-cli diagnostics --ai --stage
+                    └── uira-commit-hook-cli comments --ai --stage
 ```
 
 ### Hook Configuration Example
@@ -311,15 +312,15 @@ pre-commit:
   parallel: false
   commands:
     - name: format
-      run: uira format --check
+      run: uira-commit-hook-cli format --check
     - name: typos
-      run: uira typos --ai --stage
+      run: uira-commit-hook-cli typos --ai --stage
       on_fail: stop
     - name: diagnostics
-      run: uira diagnostics --ai --staged --stage --severity error
+      run: uira-commit-hook-cli diagnostics --ai --staged --stage --severity error
       on_fail: stop
     - name: comments
-      run: uira comments --ai --staged --stage
+      run: uira-commit-hook-cli comments --ai --staged --stage
       on_fail: warn
 ```
 
