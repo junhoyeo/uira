@@ -795,6 +795,7 @@ async fn grep_app_search(
 
 fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String, ToolError> {
     let mut last_error: Option<String> = None;
+    let mut found_data_line = false;
 
     for line in response_text.split('\n') {
         if !line.starts_with("data: ") {
@@ -806,11 +807,16 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
             continue;
         }
 
-        let parsed: ExaMcpResponse = serde_json::from_str(payload).map_err(|e| {
-            ToolError::ExecutionFailed {
-                message: format!("Failed to parse {provider} SSE payload: {e}"),
+        found_data_line = true;
+
+        let parsed: ExaMcpResponse = match serde_json::from_str(payload) {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(ToolError::ExecutionFailed {
+                    message: payload.to_string(),
+                });
             }
-        })?;
+        };
 
         let result = parsed.result.ok_or_else(|| ToolError::ExecutionFailed {
             message: format!("{provider} response missing result payload"),
@@ -841,8 +847,17 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
         return Err(ToolError::ExecutionFailed { message });
     }
 
+    if !found_data_line {
+        let trimmed = response_text.trim();
+        if !trimmed.is_empty() {
+            return Err(ToolError::ExecutionFailed {
+                message: trimmed.to_string(),
+            });
+        }
+    }
+
     Err(ToolError::ExecutionFailed {
-        message: format!("Failed to parse {provider} SSE response"),
+        message: format!("{provider} returned an empty response"),
     })
 }
 
