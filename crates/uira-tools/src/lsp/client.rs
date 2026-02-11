@@ -2,7 +2,7 @@ use crate::types::{ToolError, ToolOutput};
 use async_trait::async_trait;
 use lsp_types::*;
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ struct ServerProcess {
     _next_id: i64,
     pending_responses: HashMap<i64, Value>,
     diagnostics: HashMap<String, Vec<Diagnostic>>,
-    opened_documents: HashSet<String>,
+    opened_documents: HashMap<String, i32>,
 }
 
 impl LspClientImpl {
@@ -100,7 +100,7 @@ impl LspClientImpl {
             _next_id: 1,
             pending_responses: HashMap::new(),
             diagnostics: HashMap::new(),
-            opened_documents: HashSet::new(),
+            opened_documents: HashMap::new(),
         }));
 
         // Send initialize request
@@ -340,7 +340,7 @@ impl LspClientImpl {
 
         {
             let proc = server.lock().await;
-            if proc.opened_documents.contains(&uri) {
+            if proc.opened_documents.contains_key(&uri) {
                 return Ok(());
             }
         }
@@ -368,7 +368,73 @@ impl LspClientImpl {
 
         {
             let mut proc = server.lock().await;
-            proc.opened_documents.insert(uri);
+            proc.opened_documents.insert(uri, 1);
+        }
+
+        Ok(())
+    }
+
+    async fn sync_document(
+        &self,
+        server: &Arc<Mutex<ServerProcess>>,
+        file_path: &str,
+        canonical_file: &std::path::Path,
+        language: &str,
+    ) -> Result<(), ToolError> {
+        let uri = Self::to_file_uri(file_path)?;
+
+        let text = tokio::fs::read_to_string(canonical_file)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read file for LSP request: {}", e),
+            })?;
+
+        let current_version = {
+            let proc = server.lock().await;
+            proc.opened_documents.get(&uri).copied()
+        };
+
+        match current_version {
+            Some(version) => {
+                let new_version = version + 1;
+                let notification = json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didChange",
+                    "params": {
+                        "textDocument": {
+                            "uri": uri,
+                            "version": new_version,
+                        },
+                        "contentChanges": [{
+                            "text": text,
+                        }],
+                    },
+                });
+                self.send_notification(server, notification).await?;
+                {
+                    let mut proc = server.lock().await;
+                    proc.opened_documents.insert(uri, new_version);
+                }
+            }
+            None => {
+                let notification = json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didOpen",
+                    "params": {
+                        "textDocument": {
+                            "uri": uri,
+                            "languageId": language,
+                            "version": 1,
+                            "text": text,
+                        },
+                    },
+                });
+                self.send_notification(server, notification).await?;
+                {
+                    let mut proc = server.lock().await;
+                    proc.opened_documents.insert(uri, 1);
+                }
+            }
         }
 
         Ok(())
@@ -628,10 +694,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
-        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+        self.sync_document(&server, &file_path, &canonical_file, &language)
             .await?;
-
-        // Wait for publishDiagnostics notifications from the server
         let file_uri = Self::to_file_uri(file_path.as_str())?;
         {
             let mut proc = server.lock().await;
