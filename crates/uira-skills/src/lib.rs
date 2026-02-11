@@ -1,4 +1,11 @@
 //! Skill discovery, parsing, and loading for Uira.
-//!
-//! This crate provides the ability to discover, parse, and load SKILL.md files
-//! that inject additional context into the agent's system prompt.
+
+mod discovery;
+mod error;
+mod loader;
+mod parser;
+
+pub use discovery::{discover_skills, SkillInfo};
+pub use error::SkillError;
+pub use loader::{get_context_injection, SkillLoader};
+pub use parser::{Skill, SkillMeta, SkillMetadata};
