@@ -141,8 +141,8 @@ impl Session {
         let mut context = ContextManager::new(client.max_tokens())
             .with_compaction_config(config.compaction.clone());
 
-        if let Some(ref system_prompt) = config.system_prompt {
-            if let Err(e) = context.add_message(uira_protocol::Message::system(system_prompt)) {
+        if let Some(system_prompt) = config.get_full_system_prompt() {
+            if let Err(e) = context.add_message(uira_protocol::Message::system(&system_prompt)) {
                 tracing::warn!("Failed to add system prompt: {}", e);
             }
         }
