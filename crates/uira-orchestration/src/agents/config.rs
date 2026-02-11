@@ -31,7 +31,7 @@ pub fn merge_agent_config(base: &AgentConfig, override_cfg: &AgentOverrideConfig
             Ok(mt) => merged.model = Some(mt),
             Err(e) => {
                 eprintln!(
-                    "[uira-agents] Warning: invalid model '{}' for agent '{}': {}",
+                    "[uira-orchestration] Warning: invalid model '{}' for agent '{}': {}",
                     model, base.name, e
                 );
             }

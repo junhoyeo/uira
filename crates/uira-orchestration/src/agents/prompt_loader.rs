@@ -100,7 +100,7 @@ macro_rules! include_agent_prompts {
 }
 
 pub fn default_agents_dir() -> PathBuf {
-    // crates/uira-agents -> packages/uira/claude-plugin/agents
+    // crates/uira-orchestration -> packages/uira/claude-plugin/agents
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join("packages/uira/claude-plugin/agents")

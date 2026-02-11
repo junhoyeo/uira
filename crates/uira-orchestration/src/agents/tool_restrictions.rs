@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use super::types::AgentConfig;
 
 /// Tool restrictions expressed as an allowlist.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ToolRestrictions {
     allowed: HashSet<String>,
 }
@@ -167,5 +167,46 @@ mod tests {
         let reg = ToolRestrictionsRegistry::with_default_allowlists();
         reg.apply(&mut cfg);
         assert_eq!(cfg.tools, vec!["Read".to_string(), "Grep".to_string()]);
+    }
+
+    #[test]
+    fn test_tiered_variants_inherit_base_restrictions() {
+        let reg = ToolRestrictionsRegistry::with_default_allowlists();
+
+        // Test architect variants
+        let architect_base = reg.get("architect");
+        let architect_low = reg.get("architect-low");
+        let architect_medium = reg.get("architect-medium");
+        assert!(architect_base.is_some());
+        assert_eq!(architect_base, architect_low);
+        assert_eq!(architect_base, architect_medium);
+
+        // Test executor variants
+        let executor_base = reg.get("executor");
+        let executor_low = reg.get("executor-low");
+        let executor_high = reg.get("executor-high");
+        assert!(executor_base.is_some());
+        assert_eq!(executor_base, executor_low);
+        assert_eq!(executor_base, executor_high);
+
+        // Test designer variants
+        let designer_base = reg.get("designer");
+        let designer_low = reg.get("designer-low");
+        let designer_high = reg.get("designer-high");
+        assert!(designer_base.is_some());
+        assert_eq!(designer_base, designer_low);
+        assert_eq!(designer_base, designer_high);
+
+        // Test scientist variants
+        let scientist_base = reg.get("scientist");
+        let scientist_low = reg.get("scientist-low");
+        let scientist_high = reg.get("scientist-high");
+        assert!(scientist_base.is_some());
+        assert_eq!(scientist_base, scientist_low);
+        assert_eq!(scientist_base, scientist_high);
+
+        // Test that non-existent agents return None
+        assert!(reg.get("nonexistent-agent").is_none());
+        assert!(reg.get("architect-ultra").is_none());
     }
 }

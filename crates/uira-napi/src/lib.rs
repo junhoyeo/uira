@@ -305,7 +305,7 @@ pub struct JsAgentDefinition {
 
 /// List all available agent definitions
 ///
-/// Returns all 32 agent definitions from uira-agents including:
+/// Returns all 32 agent definitions from uira-orchestration including:
 /// - Primary agents (architect, executor, explore, etc.)
 /// - Tiered variants (architect-low, architect-medium, executor-high, etc.)
 /// - Specialized agents (security-reviewer, build-fixer, etc.)

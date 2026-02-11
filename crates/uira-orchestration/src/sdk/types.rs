@@ -1,11 +1,11 @@
 //! Core types for Uira SDK
 //!
-//! Agent-related types have been moved to uira-agents and are re-exported here
+//! Agent-related types are defined in the agents module and re-exported here
 //! for backwards compatibility.
 
 use serde::{Deserialize, Serialize};
 
-// Re-export agent types from uira-agents
+// Re-export agent types from agents module
 pub use crate::agents::{
     AgentCategory, AgentCost, AgentPromptMetadata, DelegationTrigger, ModelType, RoutingTier,
 };

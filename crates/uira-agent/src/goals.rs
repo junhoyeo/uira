@@ -9,7 +9,7 @@ use uira_types::ThreadEvent;
 
 /// Goal verifier for agent execution
 ///
-/// Wraps uira-goals with event streaming and parallel execution support.
+/// Wraps uira-hooks with event streaming and parallel execution support.
 pub struct GoalVerifier {
     runner: GoalRunner,
     goals: Vec<GoalConfig>,

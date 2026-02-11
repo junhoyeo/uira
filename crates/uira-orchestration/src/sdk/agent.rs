@@ -1,6 +1,6 @@
 //! Agent configuration types for Uira SDK
 //!
-//! These types have been moved to uira-agents and are re-exported here
+//! These types are defined in the agents module and re-exported here
 //! for backwards compatibility.
 
 use serde::{Deserialize, Serialize};

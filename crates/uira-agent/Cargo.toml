@@ -9,7 +9,7 @@ repository.workspace = true
 
 [features]
 default = []
-otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic"]
+otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic", "tracing-opentelemetry"]
 
 [dependencies]
 uira-types = { workspace = true }
@@ -34,6 +34,7 @@ opentelemetry = { version = "0.21", optional = true }
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.14", optional = true }
 tonic = { version = "0.10", optional = true }
+tracing-opentelemetry = { version = "0.22", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
