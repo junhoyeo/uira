@@ -33,11 +33,8 @@ uira-types = { path = "crates/uira-types" }
 uira-core = { path = "crates/uira-core" }
 
 # Internal crates - Features
-uira-agents = { path = "crates/uira-agents" }
-uira-features = { path = "crates/uira-features" }
 uira-orchestration = { path = "crates/uira-orchestration" }
 uira-hooks = { path = "crates/uira-hooks" }
-uira-sdk = { path = "crates/uira-sdk" }
 
 # Internal crates - Tools
 uira-mcp-client = { path = "crates/uira-mcp-client" }

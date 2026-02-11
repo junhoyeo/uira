@@ -6,6 +6,8 @@
 //! - Google (Gemini)
 //! - Ollama (local models)
 
+#![allow(hidden_glob_reexports)]
+
 mod anthropic;
 pub mod auth;
 mod client;

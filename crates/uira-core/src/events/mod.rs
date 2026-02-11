@@ -1,4 +1,5 @@
 mod bus;
+#[allow(clippy::module_inception)]
 mod events;
 mod runner;
 mod subscriber;
