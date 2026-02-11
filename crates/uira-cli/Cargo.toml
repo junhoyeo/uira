@@ -25,6 +25,8 @@ uira-goals = { workspace = true }
 uira-telemetry = { workspace = true }
 uira-tui = { workspace = true }
 uira-auth = { workspace = true, features = ["oauth-server"] }
+uira-skills = { workspace = true }
+uira-gateway = { workspace = true }
 secrecy = "0.10"
 webbrowser = "1.0"
 clap = { workspace = true }

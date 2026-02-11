@@ -22,8 +22,8 @@ mod rpc;
 mod session;
 
 use commands::{
-    AuthCommands, Cli, CliMode, Commands, ConfigCommands, GoalsCommands, SessionsCommands,
-    TasksCommands,
+    AuthCommands, Cli, CliMode, Commands, ConfigCommands, GatewayCommands, GoalsCommands,
+    SessionsCommands, SkillsCommands, TasksCommands,
 };
 use config::CliConfig;
 use session::{
@@ -78,6 +78,14 @@ async fn main() {
                 init_subscriber(&telemetry_config);
                 generate_completions(*shell);
                 Ok(())
+            }
+            Some(Commands::Gateway { command }) => {
+                init_subscriber(&telemetry_config);
+                run_gateway(command).await
+            }
+            Some(Commands::Skills { command }) => {
+                init_subscriber(&telemetry_config);
+                run_skills(command).await
             }
             None => {
                 if let Some(prompt) = cli.get_prompt() {
@@ -932,6 +940,197 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
     }
 
     Ok(())
+}
+
+async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_config::loader::load_config;
+    use uira_skills::discover_skills;
+
+    let config = load_config(None)?;
+    let skills_settings = &config.skills;
+
+    match command {
+        SkillsCommands::List => {
+            println!("{}", "Discovered skills:".cyan().bold());
+            println!("{}", "─".repeat(80).dimmed());
+
+            let paths: Vec<&str> = skills_settings.paths.iter().map(|s| s.as_str()).collect();
+            let skills = discover_skills(&paths)?;
+
+            if skills.is_empty() {
+                println!("{}", "No skills found.".yellow());
+                println!(
+                    "{}",
+                    format!(
+                        "Add SKILL.md files to: {}",
+                        skills_settings.paths.join(", ")
+                    )
+                    .dimmed()
+                );
+                return Ok(());
+            }
+
+            for skill in &skills {
+                let emoji = skill
+                    .metadata
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.emoji.as_deref())
+                    .unwrap_or("📦");
+
+                let active_marker = if skills_settings.active.contains(&skill.name) {
+                    "✓".green()
+                } else {
+                    " ".normal()
+                };
+
+                println!(
+                    "{} {} {} {}",
+                    active_marker,
+                    emoji,
+                    skill.name.bold(),
+                    format!("- {}", skill.metadata.description).dimmed()
+                );
+            }
+
+            println!();
+            println!("{}", "─".repeat(80).dimmed());
+            println!(
+                "Total: {} skills ({} active)",
+                skills.len(),
+                skills_settings.active.len()
+            );
+        }
+        SkillsCommands::Show { name } => {
+            let paths: Vec<&str> = skills_settings.paths.iter().map(|s| s.as_str()).collect();
+            let skills = discover_skills(&paths)?;
+
+            let skill = skills
+                .iter()
+                .find(|s| s.name == *name)
+                .ok_or_else(|| format!("Skill not found: {}", name))?;
+
+            println!(
+                "{} {}",
+                "Skill:".cyan().bold(),
+                skill.name.yellow().bold()
+            );
+            println!("{}", "─".repeat(80).dimmed());
+
+            let content = std::fs::read_to_string(&skill.path)?;
+            println!("{}", content);
+        }
+        SkillsCommands::Install { path } => {
+            use std::path::Path;
+            use uira_skills::SkillLoader;
+
+            let source_path = Path::new(path);
+
+            if !source_path.exists() {
+                return Err(format!("Path does not exist: {}", path).into());
+            }
+
+            if !source_path.is_dir() {
+                return Err(format!("Path is not a directory: {}", path).into());
+            }
+
+            let skill_md = source_path.join("SKILL.md");
+            if !skill_md.exists() {
+                return Err(format!("SKILL.md not found in: {}", path).into());
+            }
+
+            let loader = SkillLoader::new(&[path])?;
+            if loader.discovered.is_empty() {
+                return Err(format!("No valid skill found in: {}", path).into());
+            }
+
+            let skill_info = &loader.discovered[0];
+            let metadata = &skill_info.metadata;
+
+            let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
+            let skills_dir = home_dir.join(".uira/skills");
+            std::fs::create_dir_all(&skills_dir)?;
+
+            let dest_path = skills_dir.join(&metadata.name);
+
+            if dest_path.exists() {
+                return Err(format!(
+                    "Skill already exists: {}. Remove it first to reinstall.",
+                    dest_path.display()
+                )
+                .into());
+            }
+
+            fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+                std::fs::create_dir_all(dst)?;
+                for entry in std::fs::read_dir(src)? {
+                    let entry = entry?;
+                    let ty = entry.file_type()?;
+                    let src_path = entry.path();
+                    let dst_path = dst.join(entry.file_name());
+
+                    if ty.is_dir() {
+                        copy_dir_recursive(&src_path, &dst_path)?;
+                    } else {
+                        std::fs::copy(&src_path, &dst_path)?;
+                    }
+                }
+                Ok(())
+            }
+
+            copy_dir_recursive(source_path, &dest_path)?;
+
+            println!(
+                "{} Installed skill: {}",
+                "✓".green().bold(),
+                metadata.name.yellow()
+            );
+            println!("Location: {}", dest_path.display().to_string().dimmed());
+            println!();
+            println!(
+                "{}",
+                format!(
+                    "To activate, add '{}' to the 'skills.active' list in your config.",
+                    metadata.name
+                )
+                .dimmed()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_gateway::GatewayServer;
+
+    match command {
+        GatewayCommands::Start { host, port } => {
+            let config = uira_config::loader::load_config(None).ok();
+            let gateway_settings = config
+                .as_ref()
+                .map(|c| &c.gateway)
+                .cloned()
+                .unwrap_or_default();
+
+            let bind_host = host
+                .as_deref()
+                .unwrap_or(&gateway_settings.host);
+            let bind_port = port.unwrap_or(gateway_settings.port);
+
+            println!(
+                "{}",
+                format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+                    .green()
+                    .bold()
+            );
+
+            let server = GatewayServer::new(gateway_settings.max_sessions);
+            server.start(bind_host, bind_port).await?;
+
+            Ok(())
+        }
+    }
 }
 
 async fn run_interactive(

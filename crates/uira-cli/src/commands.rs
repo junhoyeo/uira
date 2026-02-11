@@ -120,6 +120,18 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Gateway server management
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCommands,
+    },
+
+    /// Manage skills
+    Skills {
+        #[command(subcommand)]
+        command: SkillsCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -205,6 +217,35 @@ pub enum SessionsCommands {
     Delete {
         /// Session ID to delete
         session_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GatewayCommands {
+    /// Start the WebSocket gateway server
+    Start {
+        /// Host to bind to (default: from config or 127.0.0.1)
+        #[arg(long)]
+        host: Option<String>,
+        /// Port to bind to (default: from config or 18789)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SkillsCommands {
+    /// List all discovered skills
+    List,
+    /// Show details of a specific skill
+    Show {
+        /// Name of the skill to show
+        name: String,
+    },
+    /// Install a skill from a local path
+    Install {
+        /// Path to the skill directory (must contain SKILL.md)
+        path: String,
     },
 }
 
