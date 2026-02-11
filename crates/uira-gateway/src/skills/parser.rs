@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::error::SkillError;
+use super::error::SkillError;
 
 /// Additional metadata for a skill (emoji, requirements, etc.).
 #[derive(Debug, Clone, Deserialize, PartialEq)]

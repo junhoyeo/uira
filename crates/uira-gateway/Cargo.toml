@@ -10,21 +10,25 @@ repository.workspace = true
 [dependencies]
 axum = { workspace = true }
 tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["connect"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 tracing = "0.1"
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+futures-util = "0.3"
+dirs = { workspace = true }
+teloxide = { workspace = true }
 
 # Internal dependencies
 uira-agent = { workspace = true }
-uira-channels = { workspace = true }
 uira-types = { workspace = true }
 uira-core = { workspace = true }
 
 [dev-dependencies]
-async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tokio-tungstenite = { workspace = true, features = ["connect"] }
 futures-util = "0.3"

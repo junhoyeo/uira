@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::SkillError;
-use crate::parser::{parse_skill, SkillMetadata};
+use super::error::SkillError;
+use super::parser::{parse_skill, SkillMetadata};
 
 /// Information about a discovered skill before full content loading.
 #[derive(Debug, Clone)]

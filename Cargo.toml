@@ -6,7 +6,6 @@ members = [
   "crates/uira-orchestration",
   "crates/uira-comment-checker",
   "crates/uira-hooks",
-  "crates/uira-tools",
   "crates/uira-core",
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
@@ -19,9 +18,7 @@ members = [
 "crates/uira-permissions",
     "crates/uira-cli",
     "crates/uira-tui",
-    "crates/uira-skills",
     "crates/uira-gateway",
-    "crates/uira-channels",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -43,7 +40,6 @@ uira-hooks = { path = "crates/uira-hooks" }
 uira-sdk = { path = "crates/uira-sdk" }
 
 # Internal crates - Tools
-uira-tools = { path = "crates/uira-tools" }
 uira-mcp-client = { path = "crates/uira-mcp-client" }
 uira-oxc = { path = "crates/uira-oxc" }
 uira-comment-checker = { path = "crates/uira-comment-checker" }
@@ -61,9 +57,7 @@ uira-mcp-server = { path = "crates/uira-mcp-server" }
 uira-napi = { path = "crates/uira-napi" }
 
 # Internal crates - Expansion (gateway, channels, skills)
-uira-skills = { path = "crates/uira-skills" }
 uira-gateway = { path = "crates/uira-gateway" }
-uira-channels = { path = "crates/uira-channels" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

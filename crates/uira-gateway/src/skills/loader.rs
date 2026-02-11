@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::discovery::{discover_skills, SkillInfo};
-use crate::error::SkillError;
-use crate::parser::{parse_skill, Skill};
+use super::discovery::{discover_skills, SkillInfo};
+use super::error::SkillError;
+use super::parser::{parse_skill, Skill};
 
 /// Loads and manages discovered skills.
 pub struct SkillLoader {
@@ -74,8 +74,8 @@ pub fn get_context_injection(skills: &[Skill]) -> String {
 mod tests {
     use std::path::PathBuf;
 
+    use super::super::parser::{SkillMeta, SkillMetadata};
     use super::*;
-    use crate::parser::{SkillMeta, SkillMetadata};
 
     fn make_skill_md(name: &str, desc: &str) -> String {
         format!(

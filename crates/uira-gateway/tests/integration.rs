@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 
-use uira_channels::{
+use uira_gateway::channels::{
     Channel, ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
 };
 use uira_gateway::{ChannelBridge, GatewayServer, SessionManager};

@@ -954,7 +954,7 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
 
 async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_core::loader::load_config;
-    use uira_skills::discover_skills;
+    use uira_gateway::skills::discover_skills;
 
     let config = load_config(None)?;
     let skills_settings = &config.skills;
@@ -1032,7 +1032,7 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
         }
         SkillsCommands::Install { path } => {
             use std::path::Path;
-            use uira_skills::SkillLoader;
+            use uira_gateway::skills::SkillLoader;
 
             let source_path = Path::new(path);
 
