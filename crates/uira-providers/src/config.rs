@@ -17,7 +17,7 @@ pub struct ProviderConfig {
     pub max_retries: Option<u32>,
     /// Enable extended thinking mode for supported models (default: false)
     pub enable_thinking: bool,
-    /// Token budget for thinking when enabled (default: 64000)
+    /// Token budget for thinking when enabled
     pub thinking_budget: Option<u32>,
 }
 
