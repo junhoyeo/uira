@@ -2,24 +2,34 @@
 
 This document provides context for AI agents working on the Uira codebase.
 
+## Maintaining AGENTS.md Files
+
+When updating AGENTS.md files, follow these principles:
+
+- **No hardcoded counts** — Don't write "10 crates" or "5 modules"; these become outdated instantly
+- **No exhaustive lists** — Prefer dynamic commands (`ls crates/`) over maintaining complete lists
+- **Document constraints, not descriptions** — Focus on non-obvious behaviors, gotchas, and cross-crate dependencies
+- **Use nested AGENTS.md** — Place crate-specific details in `crates/{name}/AGENTS.md`, not here
+- **Verify before documenting** — Grep/read the code to confirm claims are accurate
+- **Delete outdated info** — Outdated docs are worse than no docs
+
 ## Project Overview
 
 **Uira** is a standalone, native AI coding agent built in Rust. It provides multi-provider orchestration (Anthropic, OpenAI, Gemini), platform-native sandboxing, session persistence, and a Ratatui-based terminal UI.
 
 ### Crate Structure
 
-| Crate | Purpose |
-|-------|---------|
-| `uira-cli` | CLI entry point with session management |
-| `uira-agent` | Core agent loop, state machine, streaming |
-| `uira-tui` | Ratatui-based terminal interface |
-| `uira-protocol` | Shared types, events, protocol definitions |
-| `uira-providers` | Model provider clients (Anthropic, OpenAI) |
-| `uira-sandbox` | Platform-native sandboxing (macOS/Linux) |
-| `uira-tools` | LSP client, tool registry, orchestration |
-| `uira-mcp-server` | MCP server with LSP and AST-grep tools |
-| `uira-auth` | OAuth authentication for providers |
-| `uira-context` | Context management and conversation history |
+All crates live under `crates/` and follow `uira-*` naming. Run `ls crates/` to see the full list.
+
+**Key crates:**
+- `uira-cli` — CLI entry point, session management
+- `uira-agent` — Core agent loop, state machine, streaming
+- `uira-tui` — Ratatui-based terminal interface
+- `uira-providers` — Model provider clients (see nested AGENTS.md)
+- `uira-tools` — LSP client, tool registry (see nested AGENTS.md)
+- `uira-protocol` — Shared types, events, protocol definitions
+- `uira-hooks` — Hook system for extensibility
+- `uira-mcp-server` — MCP server exposing LSP and AST-grep tools
 
 ## Issue Labels
 

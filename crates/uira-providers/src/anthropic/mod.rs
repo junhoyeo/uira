@@ -15,6 +15,20 @@ use uira_protocol::{
     StopReason, StreamChunk, StreamError, StreamMessageStart, TokenUsage, ToolSpec,
 };
 
+mod beta_features;
+mod error_classify;
+mod payload_log;
+mod response_handling;
+mod retry;
+mod turn_validation;
+
+pub use beta_features::BetaFeatures;
+pub use error_classify::classify_error;
+pub use payload_log::{PayloadLogEvent, PayloadLogger};
+pub use retry::{with_retry, RetryConfig};
+pub use turn_validation::validate_anthropic_turns;
+
+use self::response_handling::{extract_retry_after, parse_error_body};
 use crate::{
     image::normalize_image_source, traits::ModelResult, traits::ResponseStream, ModelClient,
     ProviderConfig, ProviderError,
@@ -28,8 +42,6 @@ const PROVIDER_NAME: &str = "anthropic";
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 /// OAuth client ID (same as Claude Code CLI)
 const OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-/// Required beta features for OAuth
-const OAUTH_BETA_FEATURES: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14";
 /// User agent to masquerade as Claude Code CLI
 const OAUTH_USER_AGENT: &str = "claude-cli/2.1.2 (external, cli)";
 /// Tool name prefix for OAuth requests
@@ -287,15 +299,18 @@ impl AnthropicClient {
 
         let credential = self.credential.read().await;
         match &*credential {
-            CredentialSource::OAuth { access_token, .. } => Ok(vec![
-                (
-                    "Authorization",
-                    format!("Bearer {}", access_token.expose_secret()),
-                ),
-                ("anthropic-beta", OAUTH_BETA_FEATURES.to_string()),
-                ("anthropic-product", "claude-code".to_string()),
-                ("user-agent", OAUTH_USER_AGENT.to_string()),
-            ]),
+            CredentialSource::OAuth { access_token, .. } => {
+                let beta = BetaFeatures::oauth_default().to_header_value();
+                Ok(vec![
+                    (
+                        "Authorization",
+                        format!("Bearer {}", access_token.expose_secret()),
+                    ),
+                    ("anthropic-beta", beta),
+                    ("anthropic-product", "claude-code".to_string()),
+                    ("user-agent", OAUTH_USER_AGENT.to_string()),
+                ])
+            }
             CredentialSource::ApiKey(key) => {
                 Ok(vec![("x-api-key", key.expose_secret().to_string())])
             }
@@ -339,6 +354,14 @@ impl AnthropicClient {
             system.map(SystemPrompt::Text)
         };
 
+        // CRITICAL: ThinkingConfig guard - force temperature = None when thinking enabled
+        let (thinking, temperature) = if self.config.enable_thinking {
+            let budget = self.config.thinking_budget.unwrap_or(64_000);
+            (Some(ThinkingConfig::enabled(budget)), None)
+        } else {
+            (None, self.config.temperature)
+        };
+
         Ok(AnthropicRequest {
             model: self.config.model.clone(),
             max_tokens: self.config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
@@ -353,7 +376,8 @@ impl AnthropicClient {
                 Some(tools.to_vec())
             },
             stream: Some(stream),
-            temperature: self.config.temperature,
+            temperature,
+            thinking,
         })
     }
 
@@ -447,6 +471,25 @@ impl AnthropicClient {
         })
     }
 
+    fn validated_messages_with_system(messages: &[Message]) -> Vec<Message> {
+        let mut system_messages: Vec<Message> = Vec::new();
+        let mut non_system: Vec<Message> = Vec::new();
+
+        for msg in messages {
+            if msg.role == Role::System {
+                system_messages.push(msg.clone());
+            } else {
+                non_system.push(msg.clone());
+            }
+        }
+
+        let validated = validate_anthropic_turns(&non_system);
+
+        let mut result = system_messages;
+        result.extend(validated);
+        result
+    }
+
     fn base_url(&self) -> &str {
         self.config
             .base_url
@@ -514,71 +557,75 @@ impl AnthropicClient {
 #[async_trait]
 impl ModelClient for AnthropicClient {
     async fn chat(&self, messages: &[Message], tools: &[ToolSpec]) -> ModelResult<ModelResponse> {
-        let auth_headers = self.get_auth_headers().await?;
-        let is_oauth = self.is_using_oauth().await;
-
-        let tools_for_request = if is_oauth {
-            Self::prefix_tool_names(tools)
-        } else {
-            tools.to_vec()
+        let validated_messages = Self::validated_messages_with_system(messages);
+        let retry_config = RetryConfig {
+            max_attempts: self.config.max_retries.unwrap_or(3),
+            ..RetryConfig::default()
         };
+        let logger = PayloadLogger::from_env();
 
-        let request = self.build_request(messages, &tools_for_request, false, is_oauth)?;
-        let url = if is_oauth {
-            format!("{}/v1/messages?beta=true", self.base_url())
-        } else {
-            format!("{}/v1/messages", self.base_url())
-        };
+        with_retry(&retry_config, || async {
+            let auth_headers = self.get_auth_headers().await?;
+            let is_oauth = self.is_using_oauth().await;
 
-        tracing::debug!(
-            "AnthropicClient::chat: base_url={}, full_url={}, is_oauth={}",
-            self.base_url(),
-            url,
-            is_oauth
-        );
+            let tools_for_request = if is_oauth {
+                Self::prefix_tool_names(tools)
+            } else {
+                tools.to_vec()
+            };
 
-        let mut req = self.client.post(&url);
-        for (key, value) in auth_headers {
-            req = req.header(key, value);
-        }
-        let response = req.json(&request).send().await?;
+            let request =
+                self.build_request(&validated_messages, &tools_for_request, false, is_oauth)?;
+            let url = if is_oauth {
+                format!("{}/v1/messages?beta=true", self.base_url())
+            } else {
+                format!("{}/v1/messages", self.base_url())
+            };
 
-        if !response.status().is_success() {
-            let status = response.status();
+            tracing::debug!(
+                "AnthropicClient::chat: base_url={}, full_url={}, is_oauth={}",
+                self.base_url(),
+                url,
+                is_oauth
+            );
 
-            if status.as_u16() == 429 {
-                // Parse Retry-After header if present, otherwise default to 60s
-                let retry_after_ms = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .map(|secs| secs * 1000)
-                    .unwrap_or(60000);
-                return Err(ProviderError::RateLimited { retry_after_ms });
+            if let Ok(request_json) = serde_json::to_value(&request) {
+                logger.log_request(None, PROVIDER_NAME, &self.config.model, &request_json);
             }
 
-            if status.is_server_error() {
-                return Err(ProviderError::Unavailable {
-                    provider: PROVIDER_NAME.to_string(),
-                });
+            let mut req = self.client.post(&url);
+            for (key, value) in &auth_headers {
+                req = req.header(*key, value);
+            }
+            let response = req.json(&request).send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let retry_after = extract_retry_after(response.headers());
+                let body = parse_error_body(response).await;
+
+                let mut error = classify_error(PROVIDER_NAME, status, &body);
+                if let ProviderError::RateLimited {
+                    ref mut retry_after_ms,
+                } = error
+                {
+                    if let Some(ra) = retry_after {
+                        *retry_after_ms = ra;
+                    }
+                }
+                return Err(error);
             }
 
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::InvalidResponse(format!(
-                "API error {}: {}",
-                status, body
-            )));
-        }
+            let api_response: AnthropicResponse = response.json().await?;
+            let mut model_response = self.convert_response(api_response);
 
-        let api_response: AnthropicResponse = response.json().await?;
-        let mut model_response = self.convert_response(api_response);
+            if is_oauth {
+                Self::strip_tool_prefix_from_response(&mut model_response);
+            }
 
-        if is_oauth {
-            Self::strip_tool_prefix_from_response(&mut model_response);
-        }
-
-        Ok(model_response)
+            Ok(model_response)
+        })
+        .await
     }
 
     async fn chat_stream(
@@ -586,63 +633,81 @@ impl ModelClient for AnthropicClient {
         messages: &[Message],
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream> {
-        let auth_headers = self.get_auth_headers().await?;
-        let is_oauth = self.is_using_oauth().await;
-
-        let tools_for_request = if is_oauth {
-            Self::prefix_tool_names(tools)
-        } else {
-            tools.to_vec()
+        let validated_messages = Self::validated_messages_with_system(messages);
+        let retry_config = RetryConfig {
+            max_attempts: self.config.max_retries.unwrap_or(3),
+            ..RetryConfig::default()
         };
+        let logger = PayloadLogger::from_env();
 
-        let request = self.build_request(messages, &tools_for_request, true, is_oauth)?;
-        let url = if is_oauth {
-            format!("{}/v1/messages?beta=true", self.base_url())
-        } else {
-            format!("{}/v1/messages", self.base_url())
-        };
+        let (response, is_oauth) = with_retry(&retry_config, || async {
+            let auth_headers = self.get_auth_headers().await?;
+            let is_oauth = self.is_using_oauth().await;
 
-        let mut req = self.client.post(&url);
-        for (key, value) in auth_headers {
-            req = req.header(key, value);
-        }
-        let response = req.json(&request).send().await?;
+            let tools_for_request = if is_oauth {
+                Self::prefix_tool_names(tools)
+            } else {
+                tools.to_vec()
+            };
 
-        if !response.status().is_success() {
-            let status = response.status();
+            let request =
+                self.build_request(&validated_messages, &tools_for_request, true, is_oauth)?;
+            let url = if is_oauth {
+                format!("{}/v1/messages?beta=true", self.base_url())
+            } else {
+                format!("{}/v1/messages", self.base_url())
+            };
 
-            if status.as_u16() == 429 {
-                let retry_after_ms = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .map(|secs| secs * 1000)
-                    .unwrap_or(60000);
-                return Err(ProviderError::RateLimited { retry_after_ms });
+            if let Ok(request_json) = serde_json::to_value(&request) {
+                logger.log_request(None, PROVIDER_NAME, &self.config.model, &request_json);
             }
 
-            if status.is_server_error() {
-                return Err(ProviderError::Unavailable {
-                    provider: PROVIDER_NAME.to_string(),
-                });
+            let mut req = self.client.post(&url);
+            for (key, value) in &auth_headers {
+                req = req.header(*key, value);
+            }
+            let response = req.json(&request).send().await?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let retry_after = extract_retry_after(response.headers());
+                let body = parse_error_body(response).await;
+
+                let mut error = classify_error(PROVIDER_NAME, status, &body);
+                if let ProviderError::RateLimited {
+                    ref mut retry_after_ms,
+                } = error
+                {
+                    if let Some(ra) = retry_after {
+                        *retry_after_ms = ra;
+                    }
+                }
+                return Err(error);
             }
 
-            let body = response.text().await.unwrap_or_default();
-            return Err(ProviderError::InvalidResponse(format!(
-                "API error {}: {}",
-                status, body
-            )));
-        }
+            Ok((response, is_oauth))
+        })
+        .await?;
 
         tracing::debug!("Starting SSE stream from Anthropic API");
         let byte_stream = response.bytes_stream();
         let stream = async_stream::try_stream! {
             let mut buffer = String::new();
+            let mut consecutive_parse_errors: usize = 0;
+            const MAX_CONSECUTIVE_PARSE_ERRORS: usize = 10;
+
             futures::pin_mut!(byte_stream);
 
             while let Some(result) = byte_stream.next().await {
-                let bytes = result.map_err(|e| ProviderError::StreamError(e.to_string()))?;
+                let bytes = match result {
+                    Ok(b) => b,
+                    Err(e) => {
+                        // Network error mid-stream - NO RETRY per Metis decision
+                        tracing::warn!("SSE network error (no retry mid-stream): {}", e);
+                        Err(ProviderError::StreamError(e.to_string()))?
+                    }
+                };
+
                 let text = String::from_utf8_lossy(&bytes);
                 let text = text.replace("\r\n", "\n");
                 buffer.push_str(&text);
@@ -655,8 +720,8 @@ impl ModelClient for AnthropicClient {
 
                 // Process complete SSE events (separated by double newline)
                 while let Some(pos) = buffer.find("\n\n") {
-                    let event_text = buffer[..pos].to_string();
-                    buffer = buffer[pos + 2..].to_string();
+                    let event_text: String = buffer.drain(..pos + 2).collect();
+                    let event_text = &event_text[..event_text.len() - 2];
 
                     // Parse each line in the event
                     for line in event_text.lines() {
@@ -678,11 +743,18 @@ impl ModelClient for AnthropicClient {
                             match serde_json::from_str::<AnthropicStreamEvent>(&data) {
                                 Ok(event) => {
                                     tracing::debug!("Anthropic SSE event: {:?}", event);
+                                    consecutive_parse_errors = 0;
                                     yield event.into();
                                 }
                                 Err(e) => {
                                     if !data.trim().is_empty() && !data.starts_with(':') {
                                         tracing::debug!("SSE parse error: {} for data: {}", e, data);
+                                        consecutive_parse_errors += 1;
+                                        if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {
+                                            Err(ProviderError::StreamError(
+                                                format!("Too many consecutive parse errors: {}", consecutive_parse_errors)
+                                            ))?;
+                                        }
                                     }
                                 }
                             }
@@ -709,8 +781,22 @@ impl ModelClient for AnthropicClient {
                             yield StreamChunk::MessageStop;
                             return;
                         }
-                        if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(&data) {
-                            yield event.into();
+                        match serde_json::from_str::<AnthropicStreamEvent>(&data) {
+                            Ok(event) => {
+                                consecutive_parse_errors = 0;
+                                yield event.into();
+                            }
+                            Err(e) => {
+                                if !data.trim().is_empty() && !data.starts_with(':') {
+                                    tracing::debug!("SSE parse error in remaining buffer: {} for data: {}", e, data);
+                                    consecutive_parse_errors += 1;
+                                    if consecutive_parse_errors > MAX_CONSECUTIVE_PARSE_ERRORS {
+                                        Err(ProviderError::StreamError(
+                                            format!("Too many consecutive parse errors: {}", consecutive_parse_errors)
+                                        ))?;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -791,6 +877,22 @@ impl AnthropicClient {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ThinkingConfig {
+    #[serde(rename = "type")]
+    thinking_type: &'static str,
+    budget_tokens: u32,
+}
+
+impl ThinkingConfig {
+    pub(crate) fn enabled(budget_tokens: u32) -> Self {
+        Self {
+            thinking_type: "enabled",
+            budget_tokens,
+        }
+    }
+}
+
 // API request/response types
 #[derive(Debug, Serialize)]
 struct AnthropicRequest {
@@ -805,6 +907,8 @@ struct AnthropicRequest {
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ThinkingConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1040,6 +1144,7 @@ impl From<AnthropicStreamEvent> for StreamChunk {
 #[cfg(test)]
 mod tests {
     use super::AnthropicClient;
+    use super::ThinkingConfig;
 
     #[test]
     fn normalize_tool_input_keeps_object() {
@@ -1071,6 +1176,19 @@ mod tests {
         assert_eq!(
             AnthropicClient::normalize_tool_input(&value),
             serde_json::json!({"value": [1, 2, 3]})
+        );
+    }
+
+    #[test]
+    fn thinking_config_serializes_correctly() {
+        let config = ThinkingConfig::enabled(64000);
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "enabled",
+                "budget_tokens": 64000
+            })
         );
     }
 }

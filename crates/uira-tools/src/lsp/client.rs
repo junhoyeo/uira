@@ -28,8 +28,8 @@ struct ServerProcess {
     reader: BufReader<ChildStdout>,
     _next_id: i64,
     pending_responses: HashMap<i64, Value>,
-    /// Stored diagnostics from textDocument/publishDiagnostics notifications
     diagnostics: HashMap<String, Vec<Diagnostic>>,
+    opened_documents: HashMap<String, i32>,
 }
 
 impl LspClientImpl {
@@ -120,6 +120,7 @@ impl LspClientImpl {
             _next_id: 1,
             pending_responses: HashMap::new(),
             diagnostics: HashMap::new(),
+            opened_documents: HashMap::new(),
         }));
 
         // Send initialize request
@@ -348,6 +349,117 @@ impl LspClientImpl {
         Ok(canonical_file)
     }
 
+    async fn ensure_document_opened(
+        &self,
+        server: &Arc<Mutex<ServerProcess>>,
+        file_path: &str,
+        canonical_file: &std::path::Path,
+        language: &str,
+    ) -> Result<(), ToolError> {
+        let uri = Self::to_file_uri(file_path)?;
+
+        {
+            let proc = server.lock().await;
+            if proc.opened_documents.contains_key(&uri) {
+                return Ok(());
+            }
+        }
+
+        let text = tokio::fs::read_to_string(canonical_file)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read file for LSP request: {}", e),
+            })?;
+
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language,
+                    "version": 1,
+                    "text": text,
+                },
+            },
+        });
+
+        self.send_notification(server, notification).await?;
+
+        {
+            let mut proc = server.lock().await;
+            proc.opened_documents.insert(uri, 1);
+        }
+
+        Ok(())
+    }
+
+    async fn sync_document(
+        &self,
+        server: &Arc<Mutex<ServerProcess>>,
+        file_path: &str,
+        canonical_file: &std::path::Path,
+        language: &str,
+    ) -> Result<(), ToolError> {
+        let uri = Self::to_file_uri(file_path)?;
+
+        let text = tokio::fs::read_to_string(canonical_file)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read file for LSP request: {}", e),
+            })?;
+
+        let current_version = {
+            let proc = server.lock().await;
+            proc.opened_documents.get(&uri).copied()
+        };
+
+        match current_version {
+            Some(version) => {
+                let new_version = version + 1;
+                let notification = json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didChange",
+                    "params": {
+                        "textDocument": {
+                            "uri": uri,
+                            "version": new_version,
+                        },
+                        "contentChanges": [{
+                            "text": text,
+                        }],
+                    },
+                });
+                self.send_notification(server, notification).await?;
+                {
+                    let mut proc = server.lock().await;
+                    proc.opened_documents.insert(uri, new_version);
+                }
+            }
+            None => {
+                let notification = json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didOpen",
+                    "params": {
+                        "textDocument": {
+                            "uri": uri,
+                            "languageId": language,
+                            "version": 1,
+                            "text": text,
+                        },
+                    },
+                });
+                self.send_notification(server, notification).await?;
+                {
+                    let mut proc = server.lock().await;
+                    proc.opened_documents.insert(uri, 1);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn poll_for_diagnostics(
         &self,
         process: &Arc<Mutex<ServerProcess>>,
@@ -447,6 +559,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let position = super::utils::to_lsp_position(line, character);
         let request = json!({
@@ -501,6 +615,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let position = super::utils::to_lsp_position(line, character);
         let request = json!({
@@ -546,6 +662,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let (method, request_params) = if scope == "workspace" {
             let query = params["query"].as_str().unwrap_or("");
@@ -596,28 +714,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
-
-        // Open document to get diagnostics
-        let notification = json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": Self::to_file_uri(&file_path)?,
-                    "languageId": language,
-                    "version": 1,
-                    "text": tokio::fs::read_to_string(&canonical_file)
-                        .await
-                        .map_err(|e| ToolError::ExecutionFailed {
-                            message: format!("Failed to read file for diagnostics: {}", e),
-                        })?,
-                },
-            },
-        });
-
-        self.send_notification(&server, notification).await?;
-
-        // Wait for publishDiagnostics notifications from the server
+        self.sync_document(&server, &file_path, &canonical_file, &language)
+            .await?;
         let file_uri = Self::to_file_uri(file_path.as_str())?;
         {
             let mut proc = server.lock().await;
@@ -682,6 +780,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let position = super::utils::to_lsp_position(line, character);
         let request = json!({
@@ -740,6 +840,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let position = super::utils::to_lsp_position(line, character);
         let request = json!({
@@ -793,6 +895,8 @@ impl LspClient for LspClientImpl {
                 })?;
 
         let server = self.get_or_start_server(&language).await?;
+        self.ensure_document_opened(&server, &file_path, &canonical_file, &language)
+            .await?;
 
         let position = super::utils::to_lsp_position(line, character);
         let request = json!({

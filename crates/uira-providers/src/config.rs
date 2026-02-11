@@ -13,6 +13,12 @@ pub struct ProviderConfig {
     pub max_tokens: Option<usize>,
     pub temperature: Option<f32>,
     pub timeout_seconds: Option<u64>,
+    /// Maximum number of retry attempts for failed requests (default: 3)
+    pub max_retries: Option<u32>,
+    /// Enable extended thinking mode for supported models (default: false)
+    pub enable_thinking: bool,
+    /// Token budget for thinking when enabled
+    pub thinking_budget: Option<u32>,
 }
 
 impl Default for ProviderConfig {
@@ -25,6 +31,9 @@ impl Default for ProviderConfig {
             max_tokens: None,
             temperature: None,
             timeout_seconds: Some(120),
+            max_retries: Some(3),
+            enable_thinking: false,
+            thinking_budget: None,
         }
     }
 }
@@ -77,6 +86,17 @@ impl ProviderConfig {
 
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
+        self
+    }
+
+    pub fn with_max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = Some(max_retries);
+        self
+    }
+
+    pub fn with_thinking(mut self, budget: u32) -> Self {
+        self.enable_thinking = true;
+        self.thinking_budget = Some(budget);
         self
     }
 }

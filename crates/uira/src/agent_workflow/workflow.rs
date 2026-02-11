@@ -104,6 +104,9 @@ impl AgentWorkflow {
             max_tokens: None,
             temperature: None,
             timeout_seconds: Some(120),
+            max_retries: Some(3),
+            enable_thinking: false,
+            thinking_budget: None,
         };
 
         let client = ModelClientBuilder::new()
