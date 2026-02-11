@@ -2,7 +2,7 @@ use crate::types::{ToolError, ToolOutput};
 use async_trait::async_trait;
 use lsp_types::*;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -28,8 +28,8 @@ struct ServerProcess {
     reader: BufReader<ChildStdout>,
     _next_id: i64,
     pending_responses: HashMap<i64, Value>,
-    /// Stored diagnostics from textDocument/publishDiagnostics notifications
     diagnostics: HashMap<String, Vec<Diagnostic>>,
+    opened_documents: HashSet<String>,
 }
 
 impl LspClientImpl {
@@ -100,6 +100,7 @@ impl LspClientImpl {
             _next_id: 1,
             pending_responses: HashMap::new(),
             diagnostics: HashMap::new(),
+            opened_documents: HashSet::new(),
         }));
 
         // Send initialize request
@@ -335,24 +336,42 @@ impl LspClientImpl {
         canonical_file: &std::path::Path,
         language: &str,
     ) -> Result<(), ToolError> {
+        let uri = Self::to_file_uri(file_path)?;
+
+        {
+            let proc = server.lock().await;
+            if proc.opened_documents.contains(&uri) {
+                return Ok(());
+            }
+        }
+
+        let text = tokio::fs::read_to_string(canonical_file)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to read file for LSP request: {}", e),
+            })?;
+
         let notification = json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
-                    "uri": Self::to_file_uri(file_path)?,
+                    "uri": uri,
                     "languageId": language,
                     "version": 1,
-                    "text": tokio::fs::read_to_string(canonical_file)
-                        .await
-                        .map_err(|e| ToolError::ExecutionFailed {
-                            message: format!("Failed to read file for LSP request: {}", e),
-                        })?,
+                    "text": text,
                 },
             },
         });
 
-        self.send_notification(server, notification).await
+        self.send_notification(server, notification).await?;
+
+        {
+            let mut proc = server.lock().await;
+            proc.opened_documents.insert(uri);
+        }
+
+        Ok(())
     }
 
     async fn poll_for_diagnostics(
