@@ -13,7 +13,7 @@
 //! ## Usage
 //!
 //! ```rust,no_run
-//! use uira_orchestration::rate_limit_wait::{DaemonConfig, start_daemon, get_daemon_status};
+//! use uira_orchestration::features::rate_limit_wait::{DaemonConfig, start_daemon, get_daemon_status};
 //!
 //! # async fn example() {
 //! // Start the rate limit monitor daemon
