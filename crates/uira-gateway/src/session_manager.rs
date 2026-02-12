@@ -23,6 +23,7 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     pub created_at: DateTime<Utc>,
     pub config: SessionConfig,
+    pub skill_context: Option<String>,
 }
 
 struct ManagedSession {
@@ -62,6 +63,7 @@ impl SessionManager {
             id: id.clone(),
             status: SessionStatus::Active,
             created_at: Utc::now(),
+            skill_context: config.skill_context.clone(),
             config,
         };
 
@@ -113,6 +115,12 @@ impl SessionManager {
     /// Get the number of active sessions.
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
+    }
+
+    /// Get the config for a specific session (for testing/inspection).
+    pub async fn get_session_config(&self, session_id: &str) -> Option<SessionConfig> {
+        let sessions = self.sessions.read().await;
+        sessions.get(session_id).map(|s| s.info.config.clone())
     }
 
     /// Check if a session exists.

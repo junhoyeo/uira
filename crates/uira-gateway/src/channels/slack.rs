@@ -502,6 +502,7 @@ mod tests {
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let channel = SlackChannel::new(config);
         assert_eq!(channel.channel_type(), ChannelType::Slack);
@@ -513,6 +514,7 @@ mod tests {
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let channel = SlackChannel::new(config);
         let caps = channel.capabilities();
@@ -526,6 +528,7 @@ mod tests {
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let mut channel = SlackChannel::new(config);
         assert!(channel.take_message_receiver().is_some());

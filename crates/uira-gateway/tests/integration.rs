@@ -17,6 +17,7 @@ use tokio_tungstenite::tungstenite;
 use uira_gateway::channels::{
     Channel, ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
 };
+use uira_gateway::channel_bridge::ChannelSkillConfig;
 use uira_gateway::{ChannelBridge, GatewayServer, SessionManager};
 
 // ---------------------------------------------------------------------------
@@ -336,6 +337,51 @@ async fn test_multiple_channels_simultaneous_routing() {
     assert!(tg_alice.starts_with("gw_ses_"));
     assert!(slack_alice.starts_with("gw_ses_"));
     assert!(slack_bob.starts_with("gw_ses_"));
+
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn test_channel_bridge_skill_injection() {
+    let sm = Arc::new(SessionManager::new(100));
+    let mut skill_config = ChannelSkillConfig::new();
+    skill_config.add_channel_skills(
+        "telegram",
+        vec!["telegram-helper".to_string(), "triage".to_string()],
+        "<skill name=\"telegram-helper\">content</skill>".to_string(),
+    );
+    let mut bridge = ChannelBridge::with_skill_config(sm.clone(), skill_config);
+
+    let channel = MockChannel::new(ChannelType::Telegram);
+    let tx = channel.sender();
+    bridge.register_channel(Box::new(channel)).await.unwrap();
+
+    tx.send(make_channel_message(
+        "skill-user",
+        "hello with skills",
+        ChannelType::Telegram,
+    ))
+    .await
+    .unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    let session_id = bridge
+        .get_session_for_sender("telegram", "skill-user")
+        .await
+        .expect("session should be created for skill-user");
+    let config = sm
+        .get_session_config(&session_id)
+        .await
+        .expect("session config should be available");
+
+    assert_eq!(
+        config.skills,
+        vec!["telegram-helper".to_string(), "triage".to_string()]
+    );
+    assert_eq!(
+        config.skill_context,
+        Some("<skill name=\"telegram-helper\">content</skill>".to_string())
+    );
 
     bridge.stop().await;
 }
