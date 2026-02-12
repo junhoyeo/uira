@@ -1002,6 +1002,9 @@ pub struct TelegramChannelConfig {
     /// List of allowed Telegram user IDs (empty = allow all)
     #[serde(default)]
     pub allowed_users: Vec<String>,
+
+    #[serde(default)]
+    pub active_skills: Vec<String>,
 }
 
 /// Slack bot configuration
@@ -1016,6 +1019,9 @@ pub struct SlackChannelConfig {
     /// List of allowed Slack channel IDs (empty = allow all)
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+
+    #[serde(default)]
+    pub active_skills: Vec<String>,
 }
 
 #[cfg(test)]
