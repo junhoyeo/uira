@@ -30,6 +30,7 @@ lazy_static = "1"
 anyhow = { workspace = true }
 url = "2.5"
 sha2 = "0.10"
+hex = "0.4"
 rand = "0.8"
 dirs = { workspace = true }
 fs2 = "0.4"

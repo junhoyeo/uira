@@ -145,6 +145,7 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         skills: config.skills,
         gateway: config.gateway,
         channels: config.channels,
+        providers: expand_providers_settings(config.providers),
     }
 }
 
@@ -273,6 +274,15 @@ fn expand_env_string(s: &str) -> String {
     }
 
     result
+}
+
+fn expand_providers_settings(
+    mut settings: crate::schema::ProvidersSettings,
+) -> crate::schema::ProvidersSettings {
+    if let Some(ref path) = settings.anthropic.payload_log.path {
+        settings.anthropic.payload_log.path = Some(expand_env_string(path));
+    }
+    settings
 }
 
 #[cfg(test)]

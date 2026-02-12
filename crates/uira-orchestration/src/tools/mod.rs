@@ -20,8 +20,9 @@ pub use approval_cache::{
 };
 pub use builtins::{
     builtin_tools, create_builtin_router, register_builtins, register_builtins_with_todos,
-    register_builtins_without_todos, BashTool, EditTool, FetchUrlTool, GlobTool, GrepTool,
-    ReadTool, TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, WebSearchTool, WriteTool,
+    register_builtins_without_todos, BashTool, CodeSearchTool, EditTool, FetchUrlTool, GlobTool,
+    GrepAppTool, GrepTool, ReadTool, TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool,
+    WebSearchTool, WriteTool,
 };
 pub use comment_hook::CommentChecker;
 pub use lsp::{LspClient, LspClientImpl, LspServerConfig};

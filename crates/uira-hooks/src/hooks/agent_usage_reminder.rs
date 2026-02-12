@@ -137,6 +137,9 @@ lazy_static! {
         "context7_query-docs",
         "websearch_web_search_exa",
         "context7_get-library-docs",
+        "web_search",
+        "code_search",
+        "grep_app",
     ]);
 
     /// Agent tools that indicate agent usage

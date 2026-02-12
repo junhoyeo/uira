@@ -14,13 +14,19 @@ use crate::tools::{Tool, ToolContext, ToolError};
 
 const DEFAULT_LIMIT: usize = 5;
 const MAX_LIMIT: usize = 10;
+const DEFAULT_NUM_RESULTS: usize = 8;
 const CACHE_TTL_SECS: u64 = 3600;
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_REQUESTS: usize = 10;
 const FETCH_DEFAULT_MAX_CHARS: usize = 10000;
 const FETCH_MAX_CHARS: usize = 50000;
 const FETCH_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-const DEFAULT_PROVIDER: &str = "duckduckgo";
+const DEFAULT_PROVIDER: &str = "exa";
+const EXA_MCP_URL: &str = "https://mcp.exa.ai/mcp";
+const EXA_SEARCH_TIMEOUT_SECS: u64 = 25;
+const EXA_CODE_SEARCH_TIMEOUT_SECS: u64 = 30;
+const GREP_APP_MCP_URL: &str = "https://mcp.grep.app";
+const GREP_APP_TIMEOUT_SECS: u64 = 25;
 
 static STATE: Lazy<Mutex<WebState>> = Lazy::new(|| Mutex::new(WebState::new()));
 
@@ -64,6 +70,8 @@ impl WebState {
 
 struct CachedResults {
     results: Vec<SearchResult>,
+    output: Option<String>,
+    provider: String,
     expires_at: Instant,
 }
 
@@ -121,6 +129,14 @@ struct WebSearchInput {
     limit: Option<usize>,
     #[serde(default)]
     mode: Option<String>,
+    #[serde(default)]
+    num_results: Option<usize>,
+    #[serde(default)]
+    search_type: Option<String>,
+    #[serde(default)]
+    livecrawl: Option<String>,
+    #[serde(default)]
+    context_max_chars: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -136,7 +152,55 @@ struct WebSearchOutput {
     mode: String,
     cached: bool,
     provider: String,
+    output: Option<String>,
     results: Vec<SearchResult>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct CodeSearchInput {
+    query: String,
+    #[serde(default)]
+    tokens_num: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct ExaMcpRequest {
+    jsonrpc: String,
+    id: u32,
+    method: String,
+    params: ExaMcpParams,
+}
+
+#[derive(Serialize)]
+struct ExaMcpParams {
+    name: String,
+    arguments: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct McpResponse {
+    result: Option<McpResult>,
+    error: Option<McpError>,
+}
+
+#[derive(Deserialize)]
+struct McpResult {
+    content: Vec<McpContent>,
+    #[serde(default, rename = "isError")]
+    is_error: bool,
+}
+
+#[derive(Deserialize)]
+struct McpError {
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct McpContent {
+    #[serde(rename = "type")]
+    content_type: String,
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,6 +220,40 @@ struct FetchUrlOutput {
 }
 
 pub struct WebSearchTool;
+pub struct CodeSearchTool;
+pub struct GrepAppTool;
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct GrepAppInput {
+    query: String,
+    #[serde(default)]
+    language: Option<Vec<String>>,
+    #[serde(default)]
+    repo: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default, rename = "matchCase")]
+    match_case: Option<bool>,
+    #[serde(default, rename = "matchWholeWords")]
+    match_whole_words: Option<bool>,
+    #[serde(default, rename = "useRegexp")]
+    use_regexp: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct GrepAppMcpRequest {
+    jsonrpc: String,
+    id: u32,
+    method: String,
+    params: GrepAppMcpParams,
+}
+
+#[derive(Serialize)]
+struct GrepAppMcpParams {
+    name: String,
+    arguments: serde_json::Value,
+}
 
 impl WebSearchTool {
     pub fn new() -> Self {
@@ -169,6 +267,30 @@ impl Default for WebSearchTool {
     }
 }
 
+impl CodeSearchTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for CodeSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GrepAppTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for GrepAppTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Tool for WebSearchTool {
     fn name(&self) -> &str {
@@ -176,7 +298,7 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web for up-to-date documentation snippets."
+        "Search the web using Exa hosted MCP for up-to-date documentation snippets, with DuckDuckGo fallback support."
     }
 
     fn schema(&self) -> JsonSchema {
@@ -189,6 +311,26 @@ impl Tool for WebSearchTool {
             .property(
                 "mode",
                 JsonSchema::string().description("Search mode: 'fast' (cached) or 'live'"),
+            )
+            .property(
+                "num_results",
+                JsonSchema::number().description("Number of search results to return (default: 8)"),
+            )
+            .property(
+                "search_type",
+                JsonSchema::string()
+                    .description("Search type: 'auto' (default), 'fast', or 'deep'"),
+            )
+            .property(
+                "livecrawl",
+                JsonSchema::string()
+                    .description("Live crawl mode: 'fallback' (default) or 'preferred'"),
+            )
+            .property(
+                "context_max_chars",
+                JsonSchema::number().description(
+                    "Maximum characters for context optimized for LLMs (default: provider default)",
+                ),
             )
             .required(&["query"])
     }
@@ -223,11 +365,11 @@ impl Tool for WebSearchTool {
                     .to_string(),
             });
         }
-        if runtime.provider != DEFAULT_PROVIDER {
+        if runtime.provider != "exa" && runtime.provider != "duckduckgo" {
             return Err(ToolError::ExecutionFailed {
                 message: format!(
-                    "Unsupported web_search provider '{}'; only '{}' is currently implemented",
-                    runtime.provider, DEFAULT_PROVIDER
+                    "Unsupported web_search provider '{}'; supported providers are 'exa' and 'duckduckgo'",
+                    runtime.provider
                 ),
             });
         }
@@ -252,7 +394,31 @@ impl Tool for WebSearchTool {
             });
         }
 
-        let key = format!("{query}:{limit}");
+        let num_results = input
+            .num_results
+            .unwrap_or(DEFAULT_NUM_RESULTS)
+            .clamp(1, MAX_LIMIT);
+        let search_type = input.search_type.unwrap_or_else(|| "auto".to_string());
+        if search_type != "auto" && search_type != "fast" && search_type != "deep" {
+            return Err(ToolError::InvalidInput {
+                message: "search_type must be one of: 'auto', 'fast', 'deep'".to_string(),
+            });
+        }
+        let livecrawl = input.livecrawl.unwrap_or_else(|| "fallback".to_string());
+        if livecrawl != "fallback" && livecrawl != "preferred" {
+            return Err(ToolError::InvalidInput {
+                message: "livecrawl must be either 'fallback' or 'preferred'".to_string(),
+            });
+        }
+
+        let key = if runtime.provider == "exa" {
+            format!(
+                "exa:{query}:{num_results}:{search_type}:{livecrawl}:{}",
+                input.context_max_chars.unwrap_or(0)
+            )
+        } else {
+            format!("duckduckgo:{query}:{limit}")
+        };
 
         {
             let mut state = STATE.lock().await;
@@ -264,7 +430,8 @@ impl Tool for WebSearchTool {
                         query: query.to_string(),
                         mode,
                         cached: true,
-                        provider: "duckduckgo".to_string(),
+                        provider: cached.provider.clone(),
+                        output: cached.output.clone(),
                         results: cached.results.clone(),
                     };
                     return serde_json::to_value(out)
@@ -282,12 +449,43 @@ impl Tool for WebSearchTool {
             state.request_times.push_back(Instant::now());
         }
 
-        let results = duckduckgo_search(query, limit).await?;
+        let provider = runtime.provider.clone();
+        let (results, output, effective_provider) = if provider == "exa" {
+            match exa_search(
+                query,
+                num_results,
+                &search_type,
+                &livecrawl,
+                input.context_max_chars,
+            )
+            .await
+            {
+                Ok(text) => {
+                    if text.trim().is_empty() {
+                        (Vec::new(), Some("No search results found".to_string()), "exa")
+                    } else {
+                        (Vec::new(), Some(text), "exa")
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Exa web search failed for query '{}': {}. Falling back to DuckDuckGo.",
+                        query,
+                        err
+                    );
+                    (duckduckgo_search(query, limit).await?, None, "duckduckgo")
+                }
+            }
+        } else {
+            (duckduckgo_search(query, limit).await?, None, "duckduckgo")
+        };
+
         let out = WebSearchOutput {
             query: query.to_string(),
             mode: mode.clone(),
             cached: false,
-            provider: "duckduckgo".to_string(),
+            provider: effective_provider.to_string(),
+            output,
             results: results.clone(),
         };
 
@@ -297,6 +495,8 @@ impl Tool for WebSearchTool {
                 key,
                 CachedResults {
                     results,
+                    output: out.output.clone(),
+                    provider: effective_provider.to_string(),
                     expires_at: Instant::now() + Duration::from_secs(runtime.cache_ttl_secs),
                 },
             );
@@ -308,6 +508,508 @@ impl Tool for WebSearchTool {
                 message: format!("Failed to serialize output: {}", e),
             })
     }
+}
+
+#[async_trait]
+impl Tool for CodeSearchTool {
+    fn name(&self) -> &str {
+        "code_search"
+    }
+
+    fn description(&self) -> &str {
+        "Search and get relevant code context for programming tasks using Exa Code API. Provides high-quality code examples, documentation, and API references for libraries, SDKs, and frameworks."
+    }
+
+    fn schema(&self) -> JsonSchema {
+        JsonSchema::object()
+            .property("query", JsonSchema::string().description("Code search query"))
+            .property(
+                "tokens_num",
+                JsonSchema::number().description(
+                    "Number of tokens to return (1000-50000, default: 5000)",
+                ),
+            )
+            .required(&["query"])
+    }
+
+    fn approval_requirement(&self, input: &serde_json::Value) -> ApprovalRequirement {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<unknown>");
+        ApprovalRequirement::NeedsApproval {
+            reason: format!("Search code context for: {query}"),
+        }
+    }
+
+    fn sandbox_preference(&self) -> SandboxPreference {
+        SandboxPreference::Forbid
+    }
+
+    fn supports_parallel(&self) -> bool {
+        false
+    }
+
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let runtime = load_runtime_config(&ctx.cwd);
+        if !runtime.enabled {
+            return Err(ToolError::ExecutionFailed {
+                message: "code_search is disabled by uira.yml tools.web_search.enabled=false"
+                    .to_string(),
+            });
+        }
+
+        let input: CodeSearchInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
+                message: e.to_string(),
+            })?;
+
+        let query = input.query.trim();
+        if query.is_empty() {
+            return Err(ToolError::InvalidInput {
+                message: "query must not be empty".to_string(),
+            });
+        }
+
+        let tokens_num = input.tokens_num.unwrap_or(5000);
+        if !(1000..=50000).contains(&tokens_num) {
+            return Err(ToolError::InvalidInput {
+                message: "tokens_num must be between 1000 and 50000".to_string(),
+            });
+        }
+
+        {
+            let mut state = STATE.lock().await;
+            state.cleanup(runtime.rate_limit_window_secs);
+            state.check_rate_limit(
+                runtime.rate_limit_max_requests,
+                runtime.rate_limit_window_secs,
+            )?;
+            state.request_times.push_back(Instant::now());
+        }
+
+        let output = exa_code_search(query, tokens_num).await?;
+        Ok(ToolOutput::json(serde_json::json!({
+            "query": query,
+            "tokens_num": tokens_num,
+            "provider": "exa",
+            "output": output
+        })))
+    }
+}
+
+#[async_trait]
+impl Tool for GrepAppTool {
+    fn name(&self) -> &str {
+        "grep_app"
+    }
+
+    fn description(&self) -> &str {
+        "Find real-world code examples from over a million public GitHub repositories. Searches for literal code patterns (like grep), not keywords. Use actual code that would appear in files. Filter by language, repository, or file path."
+    }
+
+    fn schema(&self) -> JsonSchema {
+        JsonSchema::object()
+            .property(
+                "query",
+                JsonSchema::string().description(
+                    "The literal code pattern to search for (e.g., 'useState(', 'export function'). Use actual code that would appear in files, not keywords or questions.",
+                ),
+            )
+            .property(
+                "language",
+                JsonSchema::array(JsonSchema::string()).description(
+                    "Filter by programming language. Examples: ['TypeScript', 'TSX'], ['Python'], ['Rust']",
+                ),
+            )
+            .property(
+                "repo",
+                JsonSchema::string().description(
+                    "Filter by repository. Examples: 'facebook/react', 'vercel/ai'. Can match partial names like 'vercel/'",
+                ),
+            )
+            .property(
+                "path",
+                JsonSchema::string().description(
+                    "Filter by file path. Examples: 'src/components/Button.tsx', '/route.ts'",
+                ),
+            )
+            .property(
+                "matchCase",
+                JsonSchema::boolean().description("Whether the search should be case sensitive (default: false)"),
+            )
+            .property(
+                "matchWholeWords",
+                JsonSchema::boolean().description("Whether to match whole words only (default: false)"),
+            )
+            .property(
+                "useRegexp",
+                JsonSchema::boolean().description(
+                    "Whether to interpret the query as a regular expression (default: false). Prefix with '(?s)' to match across multiple lines.",
+                ),
+            )
+            .required(&["query"])
+    }
+
+    fn approval_requirement(&self, input: &serde_json::Value) -> ApprovalRequirement {
+        let query = input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<unknown>");
+        ApprovalRequirement::NeedsApproval {
+            reason: format!("Search GitHub code for: {query}"),
+        }
+    }
+
+    fn sandbox_preference(&self) -> SandboxPreference {
+        SandboxPreference::Forbid
+    }
+
+    fn supports_parallel(&self) -> bool {
+        false
+    }
+
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let runtime = load_runtime_config(&ctx.cwd);
+        if !runtime.enabled {
+            return Err(ToolError::ExecutionFailed {
+                message: "grep_app is disabled by uira.yml tools.web_search.enabled=false"
+                    .to_string(),
+            });
+        }
+
+        let input: GrepAppInput =
+            serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
+                message: e.to_string(),
+            })?;
+
+        let query = input.query.trim();
+        if query.is_empty() {
+            return Err(ToolError::InvalidInput {
+                message: "query must not be empty".to_string(),
+            });
+        }
+
+        {
+            let mut state = STATE.lock().await;
+            state.cleanup(runtime.rate_limit_window_secs);
+            state.check_rate_limit(
+                runtime.rate_limit_max_requests,
+                runtime.rate_limit_window_secs,
+            )?;
+            state.request_times.push_back(Instant::now());
+        }
+
+        let output = grep_app_search(
+            query,
+            input.language.as_deref(),
+            input.repo.as_deref(),
+            input.path.as_deref(),
+            input.match_case.unwrap_or(false),
+            input.match_whole_words.unwrap_or(false),
+            input.use_regexp.unwrap_or(false),
+        )
+        .await?;
+
+        Ok(ToolOutput::json(serde_json::json!({
+            "query": query,
+            "provider": "grep.app",
+            "output": output
+        })))
+    }
+}
+
+async fn grep_app_search(
+    query: &str,
+    language: Option<&[String]>,
+    repo: Option<&str>,
+    path: Option<&str>,
+    match_case: bool,
+    match_whole_words: bool,
+    use_regexp: bool,
+) -> Result<String, ToolError> {
+    let mut args = serde_json::json!({
+        "query": query,
+        "matchCase": match_case,
+        "matchWholeWords": match_whole_words,
+        "useRegexp": use_regexp,
+    });
+
+    if let Some(lang) = language {
+        args["language"] = serde_json::json!(lang);
+    }
+    if let Some(r) = repo {
+        args["repo"] = serde_json::json!(r);
+    }
+    if let Some(p) = path {
+        args["path"] = serde_json::json!(p);
+    }
+
+    let request = GrepAppMcpRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "tools/call".to_string(),
+        params: GrepAppMcpParams {
+            name: "searchGitHub".to_string(),
+            arguments: args,
+        },
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(GREP_APP_TIMEOUT_SECS))
+        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .build()
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to initialize grep.app HTTP client: {e}"),
+        })?;
+
+    let response = client
+        .post(GREP_APP_MCP_URL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                ToolError::ExecutionFailed {
+                    message: "grep.app search request timed out".to_string(),
+                }
+            } else {
+                ToolError::ExecutionFailed {
+                    message: format!("grep.app search request failed: {e}"),
+                }
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ToolError::ExecutionFailed {
+            message: format!("grep.app search returned HTTP {}", response.status()),
+        });
+    }
+
+    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
+        message: format!("Failed to read grep.app response body: {e}"),
+    })?;
+
+    parse_mcp_sse_response(&response_text, "grep.app")
+}
+
+fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String, ToolError> {
+    let mut last_error: Option<String> = None;
+    let mut found_data_line = false;
+
+    for line in response_text.split('\n') {
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let payload = line.trim_start_matches("data: ").trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+
+        found_data_line = true;
+
+        let parsed: McpResponse = match serde_json::from_str(payload) {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(ToolError::ExecutionFailed {
+                    message: payload.to_string(),
+                });
+            }
+        };
+
+        if let Some(err) = parsed.error {
+            return Err(ToolError::ExecutionFailed {
+                message: err.message,
+            });
+        }
+
+        let result = parsed.result.ok_or_else(|| ToolError::ExecutionFailed {
+            message: format!("{provider} response missing result payload"),
+        })?;
+
+        let first = result.content.first().ok_or_else(|| ToolError::ExecutionFailed {
+            message: format!("{provider} response contained no content"),
+        })?;
+
+        if first.content_type != "text" {
+            last_error = Some(format!(
+                "Unexpected {provider} content type '{}' in SSE response",
+                first.content_type
+            ));
+            continue;
+        }
+
+        if result.is_error {
+            return Err(ToolError::ExecutionFailed {
+                message: first.text.clone(),
+            });
+        }
+
+        if first.text.trim().is_empty() {
+            return Err(ToolError::ExecutionFailed {
+                message: format!("{provider} response contained no content"),
+            });
+        }
+
+        return Ok(first.text.clone());
+    }
+
+    if let Some(message) = last_error {
+        return Err(ToolError::ExecutionFailed { message });
+    }
+
+    if !found_data_line {
+        let trimmed = response_text.trim();
+        if !trimmed.is_empty() {
+            return Err(ToolError::ExecutionFailed {
+                message: trimmed.to_string(),
+            });
+        }
+    }
+
+    Err(ToolError::ExecutionFailed {
+        message: format!("{provider} returned an empty response"),
+    })
+}
+
+async fn exa_search(
+    query: &str,
+    num_results: usize,
+    search_type: &str,
+    livecrawl: &str,
+    context_max_chars: Option<usize>,
+) -> Result<String, ToolError> {
+    let mut args = serde_json::json!({
+        "query": query,
+        "numResults": num_results,
+        "type": search_type,
+        "livecrawl": livecrawl,
+    });
+    if let Some(max_chars) = context_max_chars {
+        args["contextMaxCharacters"] = serde_json::json!(max_chars);
+    }
+
+    let request = ExaMcpRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "tools/call".to_string(),
+        params: ExaMcpParams {
+            name: "web_search_exa".to_string(),
+            arguments: args,
+        },
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(EXA_SEARCH_TIMEOUT_SECS))
+        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .build()
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to initialize Exa HTTP client: {e}"),
+        })?;
+
+    let response = client
+        .post(EXA_MCP_URL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                ToolError::ExecutionFailed {
+                    message: "Exa web search request timed out".to_string(),
+                }
+            } else {
+                ToolError::ExecutionFailed {
+                    message: format!("Exa web search request failed: {e}"),
+                }
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ToolError::ExecutionFailed {
+            message: format!("Exa web search returned HTTP {}", response.status()),
+        });
+    }
+
+    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
+        message: format!("Failed to read Exa web search response body: {e}"),
+    })?;
+
+    match parse_mcp_sse_response(&response_text, "Exa") {
+        Ok(text) => Ok(text),
+        Err(ToolError::ExecutionFailed { message })
+            if message == "Exa response contained no content" =>
+        {
+            Ok("No search results found".to_string())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+async fn exa_code_search(query: &str, tokens_num: usize) -> Result<String, ToolError> {
+    let request = ExaMcpRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "tools/call".to_string(),
+        params: ExaMcpParams {
+            name: "get_code_context_exa".to_string(),
+            arguments: serde_json::json!({
+                "query": query,
+                "tokensNum": tokens_num,
+            }),
+        },
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(EXA_CODE_SEARCH_TIMEOUT_SECS))
+        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .build()
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to initialize Exa HTTP client: {e}"),
+        })?;
+
+    let response = client
+        .post(EXA_MCP_URL)
+        .header("accept", "application/json, text/event-stream")
+        .header("content-type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                ToolError::ExecutionFailed {
+                    message: "Exa code search request timed out".to_string(),
+                }
+            } else {
+                ToolError::ExecutionFailed {
+                    message: format!("Exa code search request failed: {e}"),
+                }
+            }
+        })?;
+
+    if !response.status().is_success() {
+        return Err(ToolError::ExecutionFailed {
+            message: format!("Exa code search returned HTTP {}", response.status()),
+        });
+    }
+
+    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
+        message: format!("Failed to read Exa code search response body: {e}"),
+    })?;
+
+    parse_mcp_sse_response(&response_text, "Exa")
 }
 
 pub struct FetchUrlTool;
