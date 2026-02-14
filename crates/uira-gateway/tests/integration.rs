@@ -19,12 +19,16 @@ use uira_gateway::channels::{
 };
 use uira_gateway::channel_bridge::ChannelSkillConfig;
 use uira_gateway::{ChannelBridge, GatewayServer, SessionManager};
+use uira_core::schema::GatewaySettings;
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
 async fn start_test_server() -> String {
+    unsafe {
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+    }
     let server = GatewayServer::new(10);
     let app = server.router();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -35,6 +39,17 @@ async fn start_test_server() -> String {
     });
 
     format!("ws://127.0.0.1:{}", addr.port())
+}
+
+fn test_session_manager(max_sessions: usize) -> Arc<SessionManager> {
+    Arc::new(SessionManager::new_with_settings(
+        max_sessions,
+        GatewaySettings {
+            provider: "ollama".to_string(),
+            model: "llama3.1".to_string(),
+            ..GatewaySettings::default()
+        },
+    ))
 }
 
 async fn connect(
@@ -192,7 +207,7 @@ async fn test_websocket_full_lifecycle() {
 
 #[tokio::test]
 async fn test_channel_bridge_routing_and_affinity() {
-    let sm = Arc::new(SessionManager::new(100));
+    let sm = test_session_manager(100);
     let mut bridge = ChannelBridge::new(sm.clone());
 
     // Create a Telegram mock channel and grab sender before registering
@@ -263,7 +278,7 @@ async fn test_channel_bridge_routing_and_affinity() {
 
 #[tokio::test]
 async fn test_multiple_channels_simultaneous_routing() {
-    let sm = Arc::new(SessionManager::new(100));
+    let sm = test_session_manager(100);
     let mut bridge = ChannelBridge::new(sm.clone());
 
     // Create Telegram channel
@@ -343,7 +358,7 @@ async fn test_multiple_channels_simultaneous_routing() {
 
 #[tokio::test]
 async fn test_channel_bridge_skill_injection() {
-    let sm = Arc::new(SessionManager::new(100));
+    let sm = test_session_manager(100);
     let mut skill_config = ChannelSkillConfig::new();
     skill_config.add_channel_skills(
         "telegram",

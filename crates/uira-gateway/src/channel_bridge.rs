@@ -237,6 +237,7 @@ mod tests {
     use chrono::Utc;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
+    use uira_core::schema::GatewaySettings;
     use crate::channels::{
         ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
     };
@@ -311,9 +312,20 @@ mod tests {
         }
     }
 
+    fn test_session_manager(max_sessions: usize) -> Arc<SessionManager> {
+        Arc::new(SessionManager::new_with_settings(
+            max_sessions,
+            GatewaySettings {
+                provider: "ollama".to_string(),
+                model: "llama3.1".to_string(),
+                ..GatewaySettings::default()
+            },
+        ))
+    }
+
     #[tokio::test]
     async fn test_register_channel_and_route_message() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut bridge = ChannelBridge::new(sm.clone());
 
         let channel = MockChannel::new(ChannelType::Telegram);
@@ -339,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_same_sender_reuses_session() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut bridge = ChannelBridge::new(sm.clone());
 
         let channel = MockChannel::new(ChannelType::Slack);
@@ -370,7 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_different_senders_get_different_sessions() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut bridge = ChannelBridge::new(sm.clone());
 
         let channel = MockChannel::new(ChannelType::Telegram);
@@ -405,7 +417,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_channel_bridge_with_skill_config() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut skill_config = ChannelSkillConfig::new();
         skill_config.add_channel_skills(
             "telegram",
@@ -440,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_different_channels_get_different_skills() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut skill_config = ChannelSkillConfig::new();
         skill_config.add_channel_skills(
             "telegram",
@@ -503,7 +515,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_channel_without_skills_gets_default_config() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut skill_config = ChannelSkillConfig::new();
         skill_config.add_channel_skills(
             "telegram",
@@ -535,7 +547,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_clears_all_state() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let mut bridge = ChannelBridge::new(sm.clone());
 
         let channel = MockChannel::new(ChannelType::Telegram);
@@ -565,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_session_for_unknown_sender_returns_none() {
-        let sm = Arc::new(SessionManager::new(100));
+        let sm = test_session_manager(100);
         let bridge = ChannelBridge::new(sm);
 
         assert!(bridge
