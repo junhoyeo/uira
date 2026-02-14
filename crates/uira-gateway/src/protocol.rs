@@ -18,17 +18,36 @@ pub enum GatewayMessage {
     DestroySession {
         session_id: String,
     },
+    SendOutbound {
+        channel_type: String,
+        recipient: String,
+        text: String,
+    },
 }
 
 /// Outbound messages to WebSocket clients
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayResponse {
-    SessionCreated { session_id: String },
-    SessionsList { sessions: Vec<SessionInfoResponse> },
-    MessageSent { session_id: String },
-    SessionDestroyed { session_id: String },
-    Error { message: String },
+    SessionCreated {
+        session_id: String,
+    },
+    SessionsList {
+        sessions: Vec<SessionInfoResponse>,
+    },
+    MessageSent {
+        session_id: String,
+    },
+    SessionDestroyed {
+        session_id: String,
+    },
+    OutboundSent {
+        channel_type: String,
+        recipient: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
