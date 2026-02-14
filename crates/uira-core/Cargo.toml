@@ -1,6 +1,6 @@
 [package]
 name = "uira-core"
-description = "Core types and traits for Uira AI harness"
+description = "Merged config and events modules for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,9 +8,18 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+tokio = { workspace = true, features = ["sync"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+json5 = { workspace = true }
 thiserror = { workspace = true }
-tempfile = "3"
+anyhow = { workspace = true }
+tracing = "0.1"
+async-trait = "0.1"
+parking_lot = "0.12"
+uira-types = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

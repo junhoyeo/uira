@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use uira_protocol::{TodoItem, TodoPriority, TodoStatus};
+use uira_types::{TodoItem, TodoPriority, TodoStatus};
 
 /// Lenient deserialization struct for backward-compatible parsing of todo files
 /// written by Claude Code (`~/.claude/todos/`) which use optional fields.

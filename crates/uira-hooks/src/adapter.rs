@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::hook::HookContext;
 use crate::registry::HookRegistry;
 use crate::types::{HookEvent, HookInput, HookOutput, Message};
-use uira_events::{
+use uira_core::{
     Event, EventCategory, EventHandler, HandlerResult, SessionEndReason, SubscriptionFilter,
 };
 

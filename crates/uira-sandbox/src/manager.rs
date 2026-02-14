@@ -3,7 +3,7 @@
 #[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use uira_protocol::SandboxPreference;
+use uira_types::SandboxPreference;
 
 use crate::{SandboxError, SandboxPolicy, SandboxType};
 

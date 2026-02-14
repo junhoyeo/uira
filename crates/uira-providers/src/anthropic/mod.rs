@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
-use uira_auth::CredentialStore;
-use uira_protocol::{
+use crate::auth::CredentialStore;
+use uira_types::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamError, StreamMessageStart, TokenUsage, ToolSpec,
 };
@@ -94,24 +94,44 @@ impl AnthropicClient {
         })
     }
 
+    /// Detect if a key is an OAuth access token by its prefix.
+    /// OAuth tokens from Anthropic use the `sk-ant-oat01-` prefix.
+    fn is_oauth_token(key: &str) -> bool {
+        key.starts_with("sk-ant-oat01-")
+    }
+
+    /// Wrap a key string as the correct credential source based on its format.
+    fn credential_from_key(key: SecretString) -> CredentialSource {
+        if Self::is_oauth_token(key.expose_secret()) {
+            tracing::debug!("Detected OAuth access token from key prefix");
+            CredentialSource::OAuth {
+                access_token: key,
+                refresh_token: None,
+                expires_at: None,
+            }
+        } else {
+            CredentialSource::ApiKey(key)
+        }
+    }
+
     fn load_credential(config: &ProviderConfig) -> Result<CredentialSource, ProviderError> {
-        // First check for API key (higher priority for reliability)
+        // First check for API key / OAuth token (higher priority for reliability)
         if let Some(api_key) = &config.api_key {
-            tracing::debug!("Using API key from config");
-            return Ok(CredentialSource::ApiKey(api_key.clone()));
+            tracing::debug!("Using credential from config");
+            return Ok(Self::credential_from_key(api_key.clone()));
         }
 
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            tracing::debug!("Using API key from ANTHROPIC_API_KEY env var");
-            return Ok(CredentialSource::ApiKey(SecretString::from(key)));
+            tracing::debug!("Using credential from ANTHROPIC_API_KEY env var");
+            return Ok(Self::credential_from_key(SecretString::from(key)));
         }
 
         // Fall back to stored credentials (OAuth or stored API key)
         tracing::debug!("No API key found, checking stored credentials");
         if let Ok(store) = CredentialStore::load() {
             if let Some(cred) = store.get(PROVIDER_NAME) {
-                use uira_auth::secrecy::ExposeSecret as AuthExposeSecret;
-                use uira_auth::StoredCredential;
+                use crate::auth::secrecy::ExposeSecret as AuthExposeSecret;
+                use crate::auth::StoredCredential;
                 match cred {
                     StoredCredential::OAuth {
                         access_token,
@@ -267,19 +287,19 @@ impl AnthropicClient {
 
         let old_refresh_token_str = refresh_token.expose_secret().to_string();
         if let Ok(mut store) = CredentialStore::load() {
-            use uira_auth::StoredCredential;
+            use crate::auth::StoredCredential;
             store.insert(
                 PROVIDER_NAME.to_string(),
                 StoredCredential::OAuth {
-                    access_token: uira_auth::secrecy::SecretString::from(
+                    access_token: crate::auth::secrecy::SecretString::from(
                         token_response.access_token,
                     ),
                     refresh_token: token_response
                         .refresh_token
                         .clone()
-                        .map(uira_auth::secrecy::SecretString::from)
+                        .map(crate::auth::secrecy::SecretString::from)
                         .or_else(|| {
-                            Some(uira_auth::secrecy::SecretString::from(
+                            Some(crate::auth::secrecy::SecretString::from(
                                 old_refresh_token_str.clone(),
                             ))
                         }),
@@ -956,7 +976,7 @@ enum AnthropicContent {
         is_error: bool,
     },
     Image {
-        source: uira_protocol::ImageSource,
+        source: uira_types::ImageSource,
     },
     Thinking {
         thinking: String,

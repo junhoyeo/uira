@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use uira_protocol::{ReviewDecision, SandboxPreference};
+use uira_types::{ReviewDecision, SandboxPreference};
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxPolicy;
 

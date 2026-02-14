@@ -1,9 +1,5 @@
-mod atomic_write;
-mod event;
-mod result;
-mod types;
+pub mod config;
+pub mod events;
 
-pub use atomic_write::{atomic_write, atomic_write_secure};
-pub use event::*;
-pub use result::*;
-pub use types::*;
+pub use config::*;
+pub use events::*;

@@ -1,32 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/uira",
-  "crates/uira-core",
+  "crates/uira-commit-hook-cli",
   "crates/uira-napi",
-  "crates/uira-sdk",
+  "crates/uira-orchestration",
   "crates/uira-comment-checker",
   "crates/uira-hooks",
-  "crates/uira-features",
-  "crates/uira-agents",
-  "crates/uira-tools",
-  "crates/uira-config",
+  "crates/uira-core",
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
-  "crates/uira-goals",
 # New agent harness crates
-"crates/uira-protocol",
+"crates/uira-types",
 "crates/uira-providers",
 "crates/uira-sandbox",
-"crates/uira-context",
 "crates/uira-agent",
-"crates/uira-events",
 "crates/uira-permissions",
-"crates/uira-telemetry",
     "crates/uira-cli",
     "crates/uira-tui",
-    "crates/uira-auth",
+    "crates/uira-gateway",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -37,19 +29,14 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
+uira-types = { path = "crates/uira-types" }
 uira-core = { path = "crates/uira-core" }
-uira-protocol = { path = "crates/uira-protocol" }
-uira-config = { path = "crates/uira-config" }
 
 # Internal crates - Features
-uira-agents = { path = "crates/uira-agents" }
-uira-features = { path = "crates/uira-features" }
+uira-orchestration = { path = "crates/uira-orchestration" }
 uira-hooks = { path = "crates/uira-hooks" }
-uira-goals = { path = "crates/uira-goals" }
-uira-sdk = { path = "crates/uira-sdk" }
 
 # Internal crates - Tools
-uira-tools = { path = "crates/uira-tools" }
 uira-mcp-client = { path = "crates/uira-mcp-client" }
 uira-oxc = { path = "crates/uira-oxc" }
 uira-comment-checker = { path = "crates/uira-comment-checker" }
@@ -57,18 +44,17 @@ uira-comment-checker = { path = "crates/uira-comment-checker" }
 # Internal crates - Agent harness
 uira-providers = { path = "crates/uira-providers" }
 uira-sandbox = { path = "crates/uira-sandbox" }
-uira-context = { path = "crates/uira-context" }
 uira-agent = { path = "crates/uira-agent" }
-uira-auth = { path = "crates/uira-auth" }
-uira-events = { path = "crates/uira-events" }
 uira-permissions = { path = "crates/uira-permissions" }
-uira-telemetry = { path = "crates/uira-telemetry" }
 
 # Internal crates - Applications
 uira-cli = { path = "crates/uira-cli" }
 uira-tui = { path = "crates/uira-tui" }
 uira-mcp-server = { path = "crates/uira-mcp-server" }
 uira-napi = { path = "crates/uira-napi" }
+
+# Internal crates - Expansion (gateway, channels, skills)
+uira-gateway = { path = "crates/uira-gateway" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -90,8 +76,16 @@ actix-web = "4"
 actix-rt = "2"
 actix-cors = "0.7"
 
+# Web framework (for gateway)
+axum = { version = "0.8", features = ["ws"] }
+tokio-tungstenite = "0.26"
+
+# Telegram bot framework
+teloxide = { version = "0.13", features = ["macros"] }
+
 # Async utilities
 async-stream = "0.3"
+async-trait = "0.1"
 futures = "0.3"
 
 # Parallel execution

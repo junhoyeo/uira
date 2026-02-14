@@ -8,10 +8,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 uira-agent = { workspace = true }
 uira-providers = { workspace = true }
-uira-events = { workspace = true }
+uira-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

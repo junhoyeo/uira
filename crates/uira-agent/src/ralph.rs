@@ -7,11 +7,11 @@ use crate::events::EventSender;
 use crate::goals::GoalVerifier;
 use chrono::Utc;
 use std::path::Path;
-use uira_goals::VerificationResult;
+use uira_hooks::VerificationResult;
 use uira_hooks::hooks::circuit_breaker::CircuitBreakerConfig;
 use uira_hooks::hooks::ralph::{RalphHook, RalphOptions, RalphState};
-use uira_protocol::{ThreadEvent, TodoStatus};
-use uira_tools::TodoStore;
+use uira_types::{ThreadEvent, TodoStatus};
+use uira_orchestration::TodoStore;
 
 /// Ralph mode configuration
 pub struct RalphConfig {

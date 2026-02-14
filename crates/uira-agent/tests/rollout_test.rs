@@ -6,7 +6,7 @@ use uira_agent::rollout::{
     extract_messages, get_last_turn, get_total_usage, EventWrapper, RolloutItem, RolloutRecorder,
     SessionMetaLine,
 };
-use uira_protocol::{Message, ThreadEvent, TokenUsage};
+use uira_types::{Message, ThreadEvent, TokenUsage};
 
 fn make_test_meta() -> SessionMetaLine {
     SessionMetaLine::new(

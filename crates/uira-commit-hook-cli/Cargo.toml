@@ -1,0 +1,53 @@
+[package]
+name = "uira-commit-hook-cli"
+description = "Lightning-fast Rust-native git hooks manager with AI harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+uira-orchestration = { workspace = true }
+uira-core = { workspace = true }
+uira-hooks = { workspace = true }
+uira-oxc = { workspace = true }
+uira-comment-checker = { workspace = true }
+uira-agent = { workspace = true }
+uira-providers = { workspace = true }
+uira-types = { workspace = true }
+uira-sandbox = { workspace = true }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# CLI and serialization
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+colored = { workspace = true }
+rayon = { workspace = true }
+oxc = { workspace = true }
+reqwest = { workspace = true }
+toml = { workspace = true }
+regex = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+globset = "0.4"
+typos = "0.10"
+typos-dict = "0.13"
+unicase = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+
+[[bin]]
+name = "uira-commit-hook-cli"
+path = "src/main.rs"

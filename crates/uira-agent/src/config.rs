@@ -1,15 +1,15 @@
 //! Agent configuration
 
+use crate::context::{CompactionConfig, CompactionStrategy};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_config::schema::{
+use uira_core::schema::{
     CompactionSettings, GoalConfig, NamedMcpServerConfig, PermissionActionConfig,
     PermissionRuleConfig,
 };
-use uira_context::{CompactionConfig, CompactionStrategy};
 use uira_permissions::{ConfigAction, ConfigRule};
-use uira_protocol::{SandboxPreference, ToolSpec};
 use uira_sandbox::SandboxPolicy;
+use uira_types::{SandboxPreference, ToolSpec};
 
 /// Configuration for the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +89,10 @@ pub struct AgentConfig {
     /// Discovered MCP tool specs (namespaced as mcp__<server>__<tool>)
     #[serde(default)]
     pub external_mcp_tool_specs: Vec<ToolSpec>,
+
+    /// Additional context to inject into the system prompt (e.g., skills content)
+    #[serde(default)]
+    pub additional_context: Vec<String>,
 }
 
 fn default_system_prompt_option() -> Option<String> {
@@ -166,6 +170,7 @@ impl Default for AgentConfig {
             cache_directory: None,
             external_mcp_servers: Vec::new(),
             external_mcp_tool_specs: Vec::new(),
+            additional_context: Vec::new(),
         }
     }
 }
@@ -246,6 +251,29 @@ impl AgentConfig {
         self.external_mcp_servers = servers;
         self.external_mcp_tool_specs = tool_specs;
         self
+    }
+
+    pub fn with_additional_context(mut self, context: Vec<String>) -> Self {
+        self.additional_context = context;
+        self
+    }
+
+    pub fn get_full_system_prompt(&self) -> Option<String> {
+        let base_prompt = self.system_prompt.as_ref()?;
+
+        if self.additional_context.is_empty() {
+            return Some(base_prompt.clone());
+        }
+
+        let mut full_prompt = base_prompt.clone();
+        full_prompt.push_str("\n\n");
+
+        for ctx in &self.additional_context {
+            full_prompt.push_str(ctx);
+            full_prompt.push_str("\n\n");
+        }
+
+        Some(full_prompt)
     }
 
     pub fn to_permission_config_rules(&self) -> Vec<ConfigRule> {
@@ -391,5 +419,44 @@ mod tests {
             config.compaction.strategy,
             CompactionStrategy::None
         ));
+    }
+
+    #[test]
+    fn test_additional_context_in_system_prompt() {
+        let mut config = AgentConfig::default();
+        config.additional_context = vec![
+            "<skill name=\"test\">\nTest content\n</skill>".to_string(),
+            "<skill name=\"another\">\nAnother skill\n</skill>".to_string(),
+        ];
+
+        let prompt = config
+            .get_full_system_prompt()
+            .expect("Should have system prompt");
+        assert!(prompt.contains("<skill name=\"test\">"));
+        assert!(prompt.contains("Test content"));
+        assert!(prompt.contains("<skill name=\"another\">"));
+        assert!(prompt.contains("Another skill"));
+        assert!(prompt.contains("You are an AI coding assistant"));
+    }
+
+    #[test]
+    fn test_empty_additional_context() {
+        let config = AgentConfig::default();
+        let prompt = config
+            .get_full_system_prompt()
+            .expect("Should have system prompt");
+
+        assert!(!prompt.is_empty());
+        assert!(!prompt.contains("<skill"));
+        assert!(prompt.contains("You are an AI coding assistant"));
+    }
+
+    #[test]
+    fn test_with_additional_context_builder() {
+        let config =
+            AgentConfig::new().with_additional_context(vec!["<skill>Test</skill>".to_string()]);
+
+        assert_eq!(config.additional_context.len(), 1);
+        assert_eq!(config.additional_context[0], "<skill>Test</skill>");
     }
 }

@@ -4,11 +4,12 @@
 use std::collections::HashMap;
 
 use napi_derive::napi;
-use uira_agents::{get_agent_definitions_with_config, AgentModelConfig};
-use uira_core::HookOutput;
-use uira_features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
-use uira_features::keywords::KeywordDetector;
-use uira_features::model_routing::{
+use uira_orchestration::definitions::AgentModelConfig;
+use uira_orchestration::get_agent_definitions_with_config;
+use uira_types::HookOutput;
+use uira_orchestration::features::builtin_skills::{get_builtin_skill, list_builtin_skill_names};
+use uira_orchestration::features::keywords::KeywordDetector;
+use uira_orchestration::features::model_routing::{
     analyze_task_complexity, route_task, RoutingConfigOverrides, RoutingContext,
 };
 use uira_hooks::{default_hooks, HookContext, HookEvent, HookInput};
@@ -304,7 +305,7 @@ pub struct JsAgentDefinition {
 
 /// List all available agent definitions
 ///
-/// Returns all 32 agent definitions from uira-agents including:
+/// Returns all 32 agent definitions from uira-orchestration including:
 /// - Primary agents (architect, executor, explore, etc.)
 /// - Tiered variants (architect-low, architect-medium, executor-high, etc.)
 /// - Specialized agents (security-reviewer, build-fixer, etc.)
@@ -319,9 +320,10 @@ pub fn list_agents() -> Vec<JsAgentDefinition> {
         .into_iter()
         .map(|(name, config)| {
             let tier = match config.model {
-                Some(uira_sdk::ModelType::Haiku) => "LOW",
-                Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => "MEDIUM",
-                Some(uira_sdk::ModelType::Opus) => "HIGH",
+                Some(uira_orchestration::ModelType::Haiku) => "LOW",
+                Some(uira_orchestration::ModelType::Sonnet)
+                | Some(uira_orchestration::ModelType::Inherit) => "MEDIUM",
+                Some(uira_orchestration::ModelType::Opus) => "HIGH",
                 None => "MEDIUM",
             };
 
@@ -353,9 +355,10 @@ pub fn get_agent(name: String) -> Option<JsAgentDefinition> {
 
     agents.get(&name).map(|config| {
         let tier = match config.model {
-            Some(uira_sdk::ModelType::Haiku) => "LOW",
-            Some(uira_sdk::ModelType::Sonnet) | Some(uira_sdk::ModelType::Inherit) => "MEDIUM",
-            Some(uira_sdk::ModelType::Opus) => "HIGH",
+            Some(uira_orchestration::ModelType::Haiku) => "LOW",
+            Some(uira_orchestration::ModelType::Sonnet)
+            | Some(uira_orchestration::ModelType::Inherit) => "MEDIUM",
+            Some(uira_orchestration::ModelType::Opus) => "HIGH",
             None => "MEDIUM",
         };
 
@@ -634,8 +637,8 @@ pub struct JsGoalCheckResult {
     pub error: Option<String>,
 }
 
-impl From<uira_goals::GoalCheckResult> for JsGoalCheckResult {
-    fn from(r: uira_goals::GoalCheckResult) -> Self {
+impl From<uira_hooks::GoalCheckResult> for JsGoalCheckResult {
+    fn from(r: uira_hooks::GoalCheckResult) -> Self {
         Self {
             name: r.name,
             score: r.score,
@@ -654,8 +657,8 @@ pub struct JsVerificationResult {
     pub iteration: u32,
 }
 
-impl From<uira_goals::VerificationResult> for JsVerificationResult {
-    fn from(r: uira_goals::VerificationResult) -> Self {
+impl From<uira_hooks::VerificationResult> for JsVerificationResult {
+    fn from(r: uira_hooks::VerificationResult) -> Self {
         Self {
             all_passed: r.all_passed,
             results: r.results.into_iter().map(JsGoalCheckResult::from).collect(),
@@ -675,7 +678,7 @@ pub struct JsGoalConfig {
     pub description: Option<String>,
 }
 
-impl From<JsGoalConfig> for uira_config::schema::GoalConfig {
+impl From<JsGoalConfig> for uira_core::schema::GoalConfig {
     fn from(g: JsGoalConfig) -> Self {
         Self {
             name: g.name,
@@ -691,8 +694,8 @@ impl From<JsGoalConfig> for uira_config::schema::GoalConfig {
 
 #[napi]
 pub async fn check_goal(directory: String, goal: JsGoalConfig) -> napi::Result<JsGoalCheckResult> {
-    let runner = uira_goals::GoalRunner::new(&directory);
-    let goal_config: uira_config::schema::GoalConfig = goal.into();
+    let runner = uira_hooks::GoalRunner::new(&directory);
+    let goal_config: uira_core::schema::GoalConfig = goal.into();
     let result = runner.check_goal(&goal_config).await;
     Ok(JsGoalCheckResult::from(result))
 }
@@ -702,8 +705,8 @@ pub async fn check_goals(
     directory: String,
     goals: Vec<JsGoalConfig>,
 ) -> napi::Result<JsVerificationResult> {
-    let runner = uira_goals::GoalRunner::new(&directory);
-    let goal_configs: Vec<uira_config::schema::GoalConfig> =
+    let runner = uira_hooks::GoalRunner::new(&directory);
+    let goal_configs: Vec<uira_core::schema::GoalConfig> =
         goals.into_iter().map(|g| g.into()).collect();
     let result = runner.check_all(&goal_configs).await;
     Ok(JsVerificationResult::from(result))
@@ -718,7 +721,7 @@ pub async fn check_goals_from_config(
         return Ok(None);
     }
 
-    let config = uira_config::load_config(Some(&config_path))
+    let config = uira_core::load_config(Some(&config_path))
         .map_err(|e| napi::Error::from_reason(format!("Failed to load config: {}", e)))?;
 
     let goals = &config.goals.goals;
@@ -726,7 +729,7 @@ pub async fn check_goals_from_config(
         return Ok(None);
     }
 
-    let runner = uira_goals::GoalRunner::new(&directory);
+    let runner = uira_hooks::GoalRunner::new(&directory);
     let result = runner.check_all(goals).await;
     Ok(Some(JsVerificationResult::from(result)))
 }
@@ -738,7 +741,7 @@ pub fn list_goals_from_config(directory: String) -> napi::Result<Vec<JsGoalConfi
         return Ok(vec![]);
     }
 
-    let config = uira_config::load_config(Some(&config_path))
+    let config = uira_core::load_config(Some(&config_path))
         .map_err(|e| napi::Error::from_reason(format!("Failed to load config: {}", e)))?;
 
     Ok(config
@@ -761,7 +764,7 @@ pub fn list_goals_from_config(directory: String) -> napi::Result<Vec<JsGoalConfi
 // Comment Checker Bindings
 // ============================================================================
 
-use uira_tools::CommentChecker;
+use uira_orchestration::CommentChecker;
 
 #[napi(js_name = "CommentChecker")]
 pub struct JsCommentChecker {

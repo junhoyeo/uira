@@ -6,8 +6,8 @@ use futures::StreamExt;
 use mock_client::MockModelClient;
 use std::sync::Arc;
 use uira_agent::{Agent, AgentConfig, AgentLoopError};
-use uira_protocol::{AgentState, ContentBlock, Message, ThreadEvent};
-use uira_tools::AgentExecutor;
+use uira_types::{AgentState, ContentBlock, Message, ThreadEvent};
+use uira_orchestration::AgentExecutor;
 
 struct MockSubagentExecutor;
 

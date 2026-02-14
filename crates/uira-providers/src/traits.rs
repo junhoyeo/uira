@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
-use uira_protocol::{Message, ModelResponse, StreamChunk, ToolSpec};
+use uira_types::{Message, ModelResponse, StreamChunk, ToolSpec};
 
 use crate::ProviderError;
 

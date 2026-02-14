@@ -1,7 +1,7 @@
 //! Agent loop error types
 
 use thiserror::Error;
-use uira_protocol::AgentError;
+use uira_types::AgentError;
 
 #[derive(Debug, Error)]
 pub enum AgentLoopError {
@@ -12,7 +12,7 @@ pub enum AgentLoopError {
     Provider(#[from] uira_providers::ProviderError),
 
     #[error("context error: {0}")]
-    Context(#[from] uira_context::ContextError),
+    Context(#[from] crate::context::ContextError),
 
     #[error("sandbox error: {0}")]
     Sandbox(#[from] uira_sandbox::SandboxError),

@@ -1,7 +1,7 @@
 //! Model client builder
 
 use std::sync::Arc;
-use uira_protocol::Provider;
+use uira_types::Provider;
 
 use crate::{
     AnthropicClient, GeminiClient, OllamaClient, OpenAIClient, OpenCodeClient, ProviderConfig,

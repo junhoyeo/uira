@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use uira_agent::RolloutRecorder;
-use uira_protocol::{Message, TokenUsage};
+use uira_types::{Message, TokenUsage};
 
 /// Stored session metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]

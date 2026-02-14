@@ -6,15 +6,17 @@ use colored::Colorize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
-use uira_agent::{Agent, AgentConfig, ExecutorConfig, RecursiveAgentExecutor};
-use uira_agents::{get_agent_definitions, ModelRegistry};
-use uira_protocol::ExecutionResult;
+use uira_agent::{
+    init_subscriber, init_tui_subscriber, Agent, AgentConfig, ExecutorConfig,
+    RecursiveAgentExecutor, TelemetryConfig,
+};
+use uira_orchestration::{get_agent_definitions, ModelRegistry};
+use uira_types::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
-use uira_telemetry::{init_subscriber, init_tui_subscriber, TelemetryConfig};
 
 mod commands;
 mod config;
@@ -22,8 +24,8 @@ mod rpc;
 mod session;
 
 use commands::{
-    AuthCommands, Cli, CliMode, Commands, ConfigCommands, GoalsCommands, SessionsCommands,
-    TasksCommands,
+    AuthCommands, Cli, CliMode, Commands, ConfigCommands, GatewayCommands, GoalsCommands,
+    SessionsCommands, SkillsCommands, TasksCommands,
 };
 use config::CliConfig;
 use session::{
@@ -79,6 +81,14 @@ async fn main() {
                 generate_completions(*shell);
                 Ok(())
             }
+            Some(Commands::Gateway { command }) => {
+                init_subscriber(&telemetry_config);
+                run_gateway(command).await
+            }
+            Some(Commands::Skills { command }) => {
+                init_subscriber(&telemetry_config);
+                run_skills(command).await
+            }
             None => {
                 if let Some(prompt) = cli.get_prompt() {
                     init_subscriber(&telemetry_config);
@@ -102,7 +112,7 @@ async fn run_rpc(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error
         return Err("RPC mode does not support subcommands or prompt arguments".into());
     }
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -130,9 +140,9 @@ async fn run_exec(
     json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use futures::StreamExt;
-    use uira_protocol::{Item, ThreadEvent};
+    use uira_types::{Item, ThreadEvent};
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -297,10 +307,10 @@ async fn run_resume(
 
             for msg in messages_to_show {
                 let role = match msg.role {
-                    uira_protocol::Role::User => "User".green(),
-                    uira_protocol::Role::Assistant => "Assistant".blue(),
-                    uira_protocol::Role::System => "System".yellow(),
-                    uira_protocol::Role::Tool => "Tool".magenta(),
+                    uira_types::Role::User => "User".green(),
+                    uira_types::Role::Assistant => "Assistant".blue(),
+                    uira_types::Role::System => "System".yellow(),
+                    uira_types::Role::Tool => "Tool".magenta(),
                 };
                 let content = get_message_text(&msg.content);
                 println!("{}: {}", role.bold(), content);
@@ -431,8 +441,8 @@ async fn run_auth(
     command: &AuthCommands,
     _config: &CliConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_auth::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
-    use uira_auth::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
+    use uira_providers::providers::{AnthropicAuth, GoogleAuth, OpenAIAuth};
+    use uira_providers::{AuthProvider, CredentialStore, OAuthCallbackServer, StoredCredential};
 
     const DEFAULT_OAUTH_PORT: u16 = 8765;
 
@@ -675,8 +685,8 @@ async fn run_config(
 }
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_config::loader::load_config;
-    use uira_goals::GoalRunner;
+    use uira_core::loader::load_config;
+                    use uira_hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {
@@ -802,7 +812,7 @@ async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Er
 }
 
 async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_features::background_agent::{BackgroundManager, BackgroundTaskConfig};
+    use uira_orchestration::background_agent::{BackgroundManager, BackgroundTaskConfig};
 
     let config = BackgroundTaskConfig::default();
     let manager = BackgroundManager::new(config);
@@ -821,20 +831,22 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
 
             for task in tasks {
                 let status_str = match task.status {
-                    uira_features::background_agent::BackgroundTaskStatus::Queued => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Queued => {
                         "queued".yellow()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Pending => {
                         "pending".yellow()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Running => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Running => {
                         "running".cyan()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                         "completed".green()
                     }
-                    uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
-                    uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
+                        "error".red()
+                    }
+                    uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                         "cancelled".dimmed()
                     }
                 };
@@ -880,16 +892,22 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
             println!("{}: {}", "Agent".cyan(), task.agent.cyan());
 
             let status_str = match task.status {
-                uira_features::background_agent::BackgroundTaskStatus::Queued => "queued".yellow(),
-                uira_features::background_agent::BackgroundTaskStatus::Pending => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Queued => {
+                    "queued".yellow()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Pending => {
                     "pending".yellow()
                 }
-                uira_features::background_agent::BackgroundTaskStatus::Running => "running".cyan(),
-                uira_features::background_agent::BackgroundTaskStatus::Completed => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Running => {
+                    "running".cyan()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                     "completed".green()
                 }
-                uira_features::background_agent::BackgroundTaskStatus::Error => "error".red(),
-                uira_features::background_agent::BackgroundTaskStatus::Cancelled => {
+                uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
+                    "error".red()
+                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                     "cancelled".dimmed()
                 }
             };
@@ -934,6 +952,197 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_core::loader::load_config;
+    use uira_gateway::skills::discover_skills;
+
+    let config = load_config(None)?;
+    let skills_settings = &config.skills;
+
+    match command {
+        SkillsCommands::List => {
+            println!("{}", "Discovered skills:".cyan().bold());
+            println!("{}", "─".repeat(80).dimmed());
+
+            let paths: Vec<&str> = skills_settings.paths.iter().map(|s| s.as_str()).collect();
+            let skills = discover_skills(&paths)?;
+
+            if skills.is_empty() {
+                println!("{}", "No skills found.".yellow());
+                println!(
+                    "{}",
+                    format!(
+                        "Add SKILL.md files to: {}",
+                        skills_settings.paths.join(", ")
+                    )
+                    .dimmed()
+                );
+                return Ok(());
+            }
+
+            for skill in &skills {
+                let emoji = skill
+                    .metadata
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.emoji.as_deref())
+                    .unwrap_or("📦");
+
+                let active_marker = if skills_settings.active.contains(&skill.name) {
+                    "✓".green()
+                } else {
+                    " ".normal()
+                };
+
+                println!(
+                    "{} {} {} {}",
+                    active_marker,
+                    emoji,
+                    skill.name.bold(),
+                    format!("- {}", skill.metadata.description).dimmed()
+                );
+            }
+
+            println!();
+            println!("{}", "─".repeat(80).dimmed());
+            println!(
+                "Total: {} skills ({} active)",
+                skills.len(),
+                skills_settings.active.len()
+            );
+        }
+        SkillsCommands::Show { name } => {
+            let paths: Vec<&str> = skills_settings.paths.iter().map(|s| s.as_str()).collect();
+            let skills = discover_skills(&paths)?;
+
+            let skill = skills
+                .iter()
+                .find(|s| s.name == *name)
+                .ok_or_else(|| format!("Skill not found: {}", name))?;
+
+            println!(
+                "{} {}",
+                "Skill:".cyan().bold(),
+                skill.name.yellow().bold()
+            );
+            println!("{}", "─".repeat(80).dimmed());
+
+            let content = std::fs::read_to_string(&skill.path)?;
+            println!("{}", content);
+        }
+        SkillsCommands::Install { path } => {
+            use std::path::Path;
+            use uira_gateway::skills::SkillLoader;
+
+            let source_path = Path::new(path);
+
+            if !source_path.exists() {
+                return Err(format!("Path does not exist: {}", path).into());
+            }
+
+            if !source_path.is_dir() {
+                return Err(format!("Path is not a directory: {}", path).into());
+            }
+
+            let skill_md = source_path.join("SKILL.md");
+            if !skill_md.exists() {
+                return Err(format!("SKILL.md not found in: {}", path).into());
+            }
+
+            let loader = SkillLoader::new(&[path])?;
+            if loader.discovered.is_empty() {
+                return Err(format!("No valid skill found in: {}", path).into());
+            }
+
+            let skill_info = &loader.discovered[0];
+            let metadata = &skill_info.metadata;
+
+            let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
+            let skills_dir = home_dir.join(".uira/skills");
+            std::fs::create_dir_all(&skills_dir)?;
+
+            let dest_path = skills_dir.join(&metadata.name);
+
+            if dest_path.exists() {
+                return Err(format!(
+                    "Skill already exists: {}. Remove it first to reinstall.",
+                    dest_path.display()
+                )
+                .into());
+            }
+
+            fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+                std::fs::create_dir_all(dst)?;
+                for entry in std::fs::read_dir(src)? {
+                    let entry = entry?;
+                    let ty = entry.file_type()?;
+                    let src_path = entry.path();
+                    let dst_path = dst.join(entry.file_name());
+
+                    if ty.is_dir() {
+                        copy_dir_recursive(&src_path, &dst_path)?;
+                    } else {
+                        std::fs::copy(&src_path, &dst_path)?;
+                    }
+                }
+                Ok(())
+            }
+
+            copy_dir_recursive(source_path, &dest_path)?;
+
+            println!(
+                "{} Installed skill: {}",
+                "✓".green().bold(),
+                metadata.name.yellow()
+            );
+            println!("Location: {}", dest_path.display().to_string().dimmed());
+            println!();
+            println!(
+                "{}",
+                format!(
+                    "To activate, add '{}' to the 'skills.active' list in your config.",
+                    metadata.name
+                )
+                .dimmed()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error::Error>> {
+    use uira_gateway::GatewayServer;
+
+    match command {
+        GatewayCommands::Start { host, port } => {
+            let config = uira_core::loader::load_config(None).ok();
+            let gateway_settings = config
+                .as_ref()
+                .map(|c| &c.gateway)
+                .cloned()
+                .unwrap_or_default();
+
+            let bind_host = host
+                .as_deref()
+                .unwrap_or(&gateway_settings.host);
+            let bind_port = port.unwrap_or(gateway_settings.port);
+
+            println!(
+                "{}",
+                format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+                    .green()
+                    .bold()
+            );
+
+            let server = GatewayServer::new(gateway_settings.max_sessions);
+            server.start(bind_host, bind_port).await?;
+
+            Ok(())
+        }
+    }
+}
+
 async fn run_interactive(
     cli: &Cli,
     config: &CliConfig,
@@ -947,7 +1156,7 @@ async fn run_interactive(
     use ratatui::Terminal;
     use std::io::stdout;
 
-    let uira_config = uira_config::loader::load_config(None).ok();
+    let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
@@ -1002,7 +1211,7 @@ async fn run_interactive(
 }
 
 fn build_agent_model_overrides(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> std::collections::HashMap<String, String> {
     let mut overrides = std::collections::HashMap::new();
     if let Some(config) = uira_config {
@@ -1016,7 +1225,7 @@ fn build_agent_model_overrides(
 }
 
 fn build_theme_overrides(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> uira_tui::ThemeOverrides {
     uira_tui::ThemeOverrides {
         bg: uira_config.and_then(|cfg| cfg.theme_colors.bg.clone()),
@@ -1032,12 +1241,12 @@ fn build_theme_overrides(
 fn create_client(
     cli: &Cli,
     config: &CliConfig,
-    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
+    agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
     registry: &ModelRegistry,
     agent_model_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
     use secrecy::SecretString;
-    use uira_protocol::Provider;
+    use uira_types::Provider;
 
     let provider = cli
         .provider
@@ -1138,10 +1347,10 @@ fn create_client(
 fn create_agent_config(
     cli: &Cli,
     _config: &CliConfig,
-    agent_defs: &std::collections::HashMap<String, uira_agents::types::AgentConfig>,
-    uira_config: Option<&uira_config::schema::UiraConfig>,
-    external_mcp_servers: Vec<uira_config::schema::NamedMcpServerConfig>,
-    external_mcp_specs: Vec<uira_protocol::ToolSpec>,
+    agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
+    external_mcp_servers: Vec<uira_core::schema::NamedMcpServerConfig>,
+    external_mcp_specs: Vec<uira_types::ToolSpec>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
@@ -1188,11 +1397,11 @@ fn create_agent_config(
 }
 
 async fn prepare_external_mcp(
-    uira_config: Option<&uira_config::schema::UiraConfig>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> Result<
     (
-        Vec<uira_config::schema::NamedMcpServerConfig>,
-        Vec<uira_protocol::ToolSpec>,
+        Vec<uira_core::schema::NamedMcpServerConfig>,
+        Vec<uira_types::ToolSpec>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -1228,9 +1437,9 @@ async fn prepare_external_mcp(
     let specs = discovered
         .into_iter()
         .map(|tool| {
-            let schema = serde_json::from_value::<uira_protocol::JsonSchema>(tool.input_schema)
-                .unwrap_or_else(|_| uira_protocol::JsonSchema::object());
-            uira_protocol::ToolSpec::new(tool.namespaced_name, tool.description, schema)
+            let schema = serde_json::from_value::<uira_types::JsonSchema>(tool.input_schema)
+                .unwrap_or_else(|_| uira_types::JsonSchema::object());
+            uira_types::ToolSpec::new(tool.namespaced_name, tool.description, schema)
         })
         .collect::<Vec<_>>();
 
@@ -1265,19 +1474,19 @@ fn generate_completions(shell: Shell) {
 }
 
 /// Extract text content from a message content
-fn get_message_text(content: &uira_protocol::MessageContent) -> String {
+fn get_message_text(content: &uira_types::MessageContent) -> String {
     match content {
-        uira_protocol::MessageContent::Text(t) => t.clone(),
-        uira_protocol::MessageContent::Blocks(blocks) => blocks
+        uira_types::MessageContent::Text(t) => t.clone(),
+        uira_types::MessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                uira_protocol::ContentBlock::Text { text } => Some(text.as_str()),
-                uira_protocol::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                uira_types::ContentBlock::Text { text } => Some(text.as_str()),
+                uira_types::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
-        uira_protocol::MessageContent::ToolCalls(calls) => calls
+        uira_types::MessageContent::ToolCalls(calls) => calls
             .iter()
             .map(|c| format!("Tool: {} ({})", c.name, c.id))
             .collect::<Vec<_>>()

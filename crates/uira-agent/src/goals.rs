@@ -3,13 +3,13 @@
 use crate::events::EventSender;
 use futures::future::join_all;
 use std::path::Path;
-use uira_config::schema::GoalConfig;
-use uira_goals::{GoalCheckResult, GoalRunner, VerificationResult};
-use uira_protocol::ThreadEvent;
+use uira_core::schema::GoalConfig;
+use uira_hooks::{GoalCheckResult, GoalRunner, VerificationResult};
+use uira_types::ThreadEvent;
 
 /// Goal verifier for agent execution
 ///
-/// Wraps uira-goals with event streaming and parallel execution support.
+/// Wraps uira-hooks with event streaming and parallel execution support.
 pub struct GoalVerifier {
     runner: GoalRunner,
     goals: Vec<GoalConfig>,

@@ -12,19 +12,16 @@ name = "uira-agent"
 path = "src/main.rs"
 
 [dependencies]
-uira-protocol = { workspace = true }
+uira-types = { workspace = true }
 uira-agent = { workspace = true }
-uira-agents = { workspace = true }
-uira-config = { workspace = true }
 uira-core = { workspace = true }
-uira-providers = { workspace = true }
+uira-providers = { workspace = true, features = ["oauth-server"] }
 uira-mcp-client = { workspace = true }
 uira-sandbox = { workspace = true }
-uira-features = { workspace = true }
-uira-goals = { workspace = true }
-uira-telemetry = { workspace = true }
+uira-orchestration = { workspace = true }
+uira-hooks = { workspace = true }
 uira-tui = { workspace = true }
-uira-auth = { workspace = true, features = ["oauth-server"] }
+uira-gateway = { workspace = true }
 secrecy = "0.10"
 webbrowser = "1.0"
 clap = { workspace = true }

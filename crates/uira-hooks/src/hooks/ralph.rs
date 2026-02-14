@@ -700,7 +700,7 @@ impl RalphHook {
         text: &str,
         promise: &str,
         todo_counts: Option<(usize, usize)>,
-        goals_result: Option<&uira_goals::VerificationResult>,
+    goals_result: Option<&crate::VerificationResult>,
     ) -> CompletionSignals {
         let mut signals = CompletionSignals::default();
 
@@ -797,13 +797,13 @@ impl RalphHook {
 
     pub async fn check_goals_from_config(
         directory: &str,
-    ) -> Option<uira_goals::VerificationResult> {
+) -> Option<crate::VerificationResult> {
         let config_path = std::path::Path::new(directory).join("uira.yml");
         if !config_path.exists() {
             return None;
         }
 
-        let config = uira_config::load_config(Some(&config_path)).ok()?;
+        let config = uira_core::load_config(Some(&config_path)).ok()?;
 
         if !config.goals.auto_verify {
             return None;
@@ -815,14 +815,14 @@ impl RalphHook {
             return None;
         }
 
-        let runner = uira_goals::GoalRunner::new(directory);
+    let runner = crate::GoalRunner::new(directory);
         Some(runner.check_all(goals).await)
     }
 
     pub fn build_verification_feedback(
         signals: &CompletionSignals,
         state: &RalphState,
-        goals_result: &Option<uira_goals::VerificationResult>,
+    goals_result: &Option<crate::VerificationResult>,
     ) -> String {
         let mut feedback = Vec::new();
 
@@ -1475,9 +1475,9 @@ More output"#;
             ..Default::default()
         };
 
-        let goals_result = uira_goals::VerificationResult {
+    let goals_result = crate::VerificationResult {
             all_passed: false,
-            results: vec![uira_goals::GoalCheckResult {
+        results: vec![crate::GoalCheckResult {
                 name: "pixel-match".to_string(),
                 score: 85.0,
                 target: 99.0,
@@ -1520,9 +1520,9 @@ More output"#;
 
     #[test]
     fn test_detect_completion_signals_with_goals_passing() {
-        let goals_result = uira_goals::VerificationResult {
+    let goals_result = crate::VerificationResult {
             all_passed: true,
-            results: vec![uira_goals::GoalCheckResult {
+        results: vec![crate::GoalCheckResult {
                 name: "test".to_string(),
                 score: 100.0,
                 target: 95.0,

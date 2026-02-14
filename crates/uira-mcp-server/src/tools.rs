@@ -9,11 +9,11 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
 use uira_oxc::{LintRule, Linter, Severity};
-use uira_tools::{LspClient, LspClientImpl, ToolContent, ToolOutput};
+use uira_orchestration::{LspClient, LspClientImpl, ToolContent, ToolOutput};
 use walkdir::WalkDir;
 
-use uira_config::load_config;
-use uira_features::background_agent::{
+use uira_core::load_config;
+use uira_orchestration::background_agent::{
     get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
     LaunchInput,
 };

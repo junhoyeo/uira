@@ -4,7 +4,7 @@ use futures::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
-use uira_protocol::ThreadEvent;
+use uira_types::ThreadEvent;
 
 /// Stream of agent events
 pub struct EventStream {

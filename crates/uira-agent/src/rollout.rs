@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use uira_protocol::{Message, MessageId, SessionId, ThreadEvent, TokenUsage};
+use uira_types::{Message, MessageId, SessionId, ThreadEvent, TokenUsage};
 
 /// Items that can be recorded to the rollout
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,7 +488,7 @@ pub fn get_total_usage(items: &[RolloutItem]) -> TokenUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uira_protocol::Role;
+    use uira_types::Role;
 
     #[test]
     fn test_rollout_item_serialization() {

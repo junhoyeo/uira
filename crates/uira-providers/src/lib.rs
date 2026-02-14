@@ -6,7 +6,10 @@
 //! - Google (Gemini)
 //! - Ollama (local models)
 
+#![allow(hidden_glob_reexports)]
+
 mod anthropic;
+pub mod auth;
 mod client;
 mod config;
 mod error;
@@ -22,6 +25,7 @@ pub use anthropic::validate_anthropic_turns;
 pub use anthropic::AnthropicClient;
 pub use anthropic::BetaFeatures;
 pub use anthropic::{with_retry, PayloadLogEvent, PayloadLogger, RetryConfig};
+pub use auth::*;
 pub use client::ModelClientBuilder;
 pub use config::ProviderConfig;
 pub use error::ProviderError;

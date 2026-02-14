@@ -10,7 +10,7 @@ use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use uira_protocol::{
+use uira_types::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,
 };

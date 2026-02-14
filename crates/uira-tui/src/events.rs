@@ -1,6 +1,6 @@
 //! TUI events
 
-use uira_protocol::{ThreadEvent, TodoItem};
+use uira_types::{ThreadEvent, TodoItem};
 
 #[derive(Debug)]
 pub enum AppEvent {

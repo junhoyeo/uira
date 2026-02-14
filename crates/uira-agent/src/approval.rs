@@ -3,7 +3,7 @@
 //! Provides bi-directional approval communication between Agent and TUI.
 
 use tokio::sync::{mpsc, oneshot};
-use uira_protocol::ReviewDecision;
+use uira_types::ReviewDecision;
 
 /// A pending approval request that the agent is waiting on
 #[derive(Debug)]
@@ -128,7 +128,7 @@ pub enum ApprovalError {
     Timeout,
 }
 
-pub use uira_tools::{
+pub use uira_orchestration::{
     ApprovalCache, ApprovalCacheFile, ApprovalKey, CacheDecision, CachedApproval,
 };
 

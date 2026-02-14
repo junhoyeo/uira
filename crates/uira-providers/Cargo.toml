@@ -8,8 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-uira-protocol = { workspace = true }
-uira-auth = { workspace = true }
+uira-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -28,10 +27,24 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { workspace = true }
 regex = "1"
 lazy_static = "1"
+anyhow = { workspace = true }
+url = "2.5"
 sha2 = "0.10"
 hex = "0.4"
-dirs = "5.0"
+rand = "0.8"
+dirs = { workspace = true }
+fs2 = "0.4"
+open = "5"
+actix-web = { workspace = true, optional = true }
+actix-rt = { workspace = true, optional = true }
+actix-cors = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 wiremock = "0.6"
+tempfile = { workspace = true }
+tokio-test = "0.4"
+
+[features]
+default = ["oauth-server"]
+oauth-server = ["actix-web", "actix-rt", "actix-cors"]

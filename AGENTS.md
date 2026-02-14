@@ -19,17 +19,25 @@ When updating AGENTS.md files, follow these principles:
 
 ### Crate Structure
 
-All crates live under `crates/` and follow `uira-*` naming. Run `ls crates/` to see the full list.
-
-**Key crates:**
-- `uira-cli` — CLI entry point, session management
-- `uira-agent` — Core agent loop, state machine, streaming
-- `uira-tui` — Ratatui-based terminal interface
-- `uira-providers` — Model provider clients (see nested AGENTS.md)
-- `uira-tools` — LSP client, tool registry (see nested AGENTS.md)
-- `uira-protocol` — Shared types, events, protocol definitions
-- `uira-hooks` — Hook system for extensibility
-- `uira-mcp-server` — MCP server exposing LSP and AST-grep tools
+| Crate | Purpose |
+|-------|---------|
+| `uira-types` | Shared types, events, protocol definitions |
+| `uira-core` | Configuration loading, event system |
+| `uira-permissions` | Permission management and access control |
+| `uira-agent` | Core agent loop, state machine, streaming, context management, telemetry |
+| `uira-providers` | Model provider clients (Anthropic, OpenAI, Gemini, Ollama) with OAuth auth |
+| `uira-sandbox` | Platform-native sandboxing (macOS/Linux) |
+| `uira-orchestration` | Agent definitions, SDK, features, tool registry |
+| `uira-hooks` | Hook implementations and goal verification |
+| `uira-mcp-client` | MCP client for external MCP servers |
+| `uira-mcp-server` | MCP server with LSP and AST-grep tools |
+| `uira-oxc` | OXC-powered JavaScript/TypeScript tooling |
+| `uira-comment-checker` | AI-assisted comment quality analysis |
+| `uira-gateway` | Gateway server, channel integrations (Slack, Telegram), skill definitions |
+| `uira-cli` | CLI entry point with session management |
+| `uira-tui` | Ratatui-based terminal interface |
+| `uira-commit-hook-cli` | Standalone CLI for git hooks and dev tools |
+| `uira-napi` | Node.js native addon bindings |
 
 ## Issue Labels
 
