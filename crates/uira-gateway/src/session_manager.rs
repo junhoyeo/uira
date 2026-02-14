@@ -48,7 +48,7 @@ struct ManagedSession {
 pub struct SessionManager {
     sessions: Arc<RwLock<HashMap<String, ManagedSession>>>,
     max_sessions: usize,
-    settings: GatewaySettings,
+    settings: Arc<std::sync::RwLock<GatewaySettings>>,
     next_id: Arc<AtomicU64>,
     reaper_started: Arc<AtomicBool>,
     reaper_interval: Duration,
@@ -65,7 +65,7 @@ impl SessionManager {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             max_sessions,
-            settings,
+            settings: Arc::new(std::sync::RwLock::new(settings)),
             next_id: Arc::new(AtomicU64::new(1)),
             reaper_started: Arc::new(AtomicBool::new(false)),
             reaper_interval: Duration::from_secs(60),
@@ -83,12 +83,18 @@ impl SessionManager {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             max_sessions,
-            settings,
+            settings: Arc::new(std::sync::RwLock::new(settings)),
             next_id: Arc::new(AtomicU64::new(1)),
             reaper_started: Arc::new(AtomicBool::new(false)),
             reaper_interval: Duration::from_secs(60),
             test_model_client: Some(test_model_client),
         }
+    }
+
+    /// Update the default configuration used for new sessions.
+    /// Existing sessions are not affected.
+    pub fn update_default_config(&self, settings: GatewaySettings) {
+        *self.settings.write().unwrap() = settings;
     }
 
     /// Create a new session. Returns the session ID.
@@ -157,7 +163,7 @@ impl SessionManager {
     }
 
     pub fn start_reaper(&self) {
-        let Some(idle_timeout_secs) = self.settings.idle_timeout_secs else {
+        let Some(idle_timeout_secs) = self.settings.read().unwrap().idle_timeout_secs else {
             return;
         };
 
@@ -351,15 +357,16 @@ impl SessionManager {
         &self,
         config: &SessionConfig,
     ) -> Result<ProviderConfig, GatewayError> {
+        let settings = self.settings.read().unwrap();
         let provider_name = config
             .provider
             .as_deref()
-            .unwrap_or(self.settings.provider.as_str());
+            .unwrap_or(settings.provider.as_str());
         let provider = parse_provider(provider_name)?;
         let model = config
             .model
             .clone()
-            .unwrap_or_else(|| self.settings.model.clone());
+            .unwrap_or_else(|| settings.model.clone());
 
         let mut provider_config = ProviderConfig {
             provider,
@@ -378,18 +385,19 @@ impl SessionManager {
     }
 
     fn build_agent_config(&self, config: &SessionConfig) -> AgentConfig {
+        let settings = self.settings.read().unwrap();
         let mut agent_config = AgentConfig::new().full_auto();
 
         let model = config
             .model
             .clone()
-            .unwrap_or_else(|| self.settings.model.clone());
+            .unwrap_or_else(|| settings.model.clone());
         agent_config = agent_config.with_model(model);
 
         let working_directory = config
             .working_directory
             .as_ref()
-            .or(self.settings.working_directory.as_ref());
+            .or(settings.working_directory.as_ref());
         if let Some(path) = working_directory {
             agent_config = agent_config.with_working_directory(path);
         }
@@ -772,5 +780,48 @@ mod tests {
             h.await.unwrap();
         }
         assert_eq!(manager.session_count().await, 10);
+    }
+
+    #[tokio::test]
+    async fn test_update_default_config_affects_new_sessions() {
+        let manager = SessionManager::new_with_test_client(
+            10,
+            test_settings(),
+            Arc::new(MockModelClient::new("ok")),
+        );
+
+        let mut new_settings = test_settings();
+        new_settings.model = "gpt-4".to_string();
+        manager.update_default_config(new_settings);
+
+        assert_eq!(manager.settings.read().unwrap().model, "gpt-4");
+
+        let id = manager
+            .create_session(SessionConfig::default())
+            .await
+            .unwrap();
+        assert!(manager.has_session(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_update_default_config_does_not_affect_existing_sessions() {
+        let manager = SessionManager::new_with_test_client(
+            10,
+            test_settings(),
+            Arc::new(MockModelClient::new("ok")),
+        );
+
+        let config = SessionConfig {
+            model: Some("llama3.1".to_string()),
+            ..SessionConfig::default()
+        };
+        let id = manager.create_session(config).await.unwrap();
+
+        let mut new_settings = test_settings();
+        new_settings.model = "gpt-4".to_string();
+        manager.update_default_config(new_settings);
+
+        let session_config = manager.get_session_config(&id).await.unwrap();
+        assert_eq!(session_config.model, Some("llama3.1".to_string()));
     }
 }
