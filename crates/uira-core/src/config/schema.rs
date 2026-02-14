@@ -952,6 +952,26 @@ pub struct GatewaySettings {
     /// Maximum number of concurrent sessions
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
+
+    /// Default model for gateway sessions
+    #[serde(default = "default_gateway_model")]
+    pub model: String,
+
+    /// Default provider for gateway sessions
+    #[serde(default = "default_gateway_provider")]
+    pub provider: String,
+
+    /// Optional authentication token for gateway access
+    #[serde(default)]
+    pub auth_token: Option<String>,
+
+    /// Idle timeout in seconds before a session is cleaned up
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_secs: Option<u64>,
+
+    /// Working directory for gateway-spawned sessions
+    #[serde(default)]
+    pub working_directory: Option<String>,
 }
 
 impl Default for GatewaySettings {
@@ -961,6 +981,11 @@ impl Default for GatewaySettings {
             host: default_gateway_host(),
             port: default_gateway_port(),
             max_sessions: default_max_sessions(),
+            model: default_gateway_model(),
+            provider: default_gateway_provider(),
+            auth_token: None,
+            idle_timeout_secs: default_idle_timeout(),
+            working_directory: None,
         }
     }
 }
@@ -975,6 +1000,18 @@ fn default_gateway_port() -> u16 {
 
 fn default_max_sessions() -> usize {
     10
+}
+
+fn default_gateway_model() -> String {
+    "claude-sonnet-4-20250514".to_string()
+}
+
+fn default_gateway_provider() -> String {
+    "anthropic".to_string()
+}
+
+fn default_idle_timeout() -> Option<u64> {
+    Some(1800)
 }
 
 // ============================================================================
@@ -1356,6 +1393,11 @@ theme_colors:
         assert_eq!(settings.host, "127.0.0.1");
         assert_eq!(settings.port, 18789);
         assert_eq!(settings.max_sessions, 10);
+        assert_eq!(settings.model, "claude-sonnet-4-20250514");
+        assert_eq!(settings.provider, "anthropic");
+        assert!(settings.auth_token.is_none());
+        assert_eq!(settings.idle_timeout_secs, Some(1800));
+        assert!(settings.working_directory.is_none());
     }
 
     #[test]
