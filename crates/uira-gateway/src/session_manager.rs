@@ -111,6 +111,9 @@ impl SessionManager {
         let agent_config = self.build_agent_config(&config);
 
         let agent = Agent::new(agent_config, client);
+        let agent = agent
+            .with_rollout()
+            .map_err(|e| GatewayError::SessionCreationFailed(e.to_string()))?;
         let (agent, event_stream) = agent.with_event_stream();
         let agent_control = agent.control().cancel_signal();
         let (mut agent, agent_input_tx, _approval_rx, _command_tx) = agent.with_interactive();
@@ -477,6 +480,57 @@ mod tests {
 
         assert!(manager.has_session(&id).await);
         assert!(!manager.has_session("nonexistent").await);
+    }
+
+    #[tokio::test]
+    async fn test_session_creates_rollout_file() {
+        use std::io::{BufRead, BufReader};
+        use uira_agent::RolloutRecorder;
+
+        // Record existing rollout files before session creation
+        let existing_files: std::collections::HashSet<std::path::PathBuf> =
+            RolloutRecorder::list_rollouts()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(path, _)| path)
+                .collect();
+
+        let manager = SessionManager::new_with_settings(10, test_settings());
+        let client = Arc::new(MockModelClient::new("ok"));
+        let _id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        // Find the new rollout file
+        let all_files = RolloutRecorder::list_rollouts().unwrap();
+        let new_files: Vec<_> = all_files
+            .into_iter()
+            .filter(|(path, _)| !existing_files.contains(path))
+            .collect();
+
+        assert!(
+            !new_files.is_empty(),
+            "Expected a new rollout file to be created"
+        );
+
+        let (rollout_path, _meta) = &new_files[0];
+        assert!(rollout_path.exists());
+
+        // Read the first line and verify it's valid JSON with type "session_meta"
+        let file = std::fs::File::open(rollout_path).unwrap();
+        let mut reader = BufReader::new(file);
+        let mut first_line = String::new();
+        reader.read_line(&mut first_line).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(&first_line).unwrap();
+        assert_eq!(parsed["type"], "session_meta");
+        assert!(parsed["thread_id"].is_string());
+        assert!(parsed["model"].is_string());
+        assert!(parsed["provider"].is_string());
+
+        // Cleanup: remove the test rollout file
+        let _ = std::fs::remove_file(rollout_path);
     }
 
     #[tokio::test]
