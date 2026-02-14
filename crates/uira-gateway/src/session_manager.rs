@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tokio::task::JoinHandle;
 use tokio::sync::{mpsc, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 use uira_agent::{Agent, AgentConfig, EventStream};
@@ -48,6 +48,8 @@ pub struct SessionManager {
     max_sessions: usize,
     settings: GatewaySettings,
     next_id: Arc<AtomicU64>,
+    #[cfg(test)]
+    test_model_client: Option<Arc<dyn ModelClient>>,
 }
 
 impl SessionManager {
@@ -61,11 +63,35 @@ impl SessionManager {
             max_sessions,
             settings,
             next_id: Arc::new(AtomicU64::new(1)),
+            #[cfg(test)]
+            test_model_client: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_test_client(
+        max_sessions: usize,
+        settings: GatewaySettings,
+        test_model_client: Arc<dyn ModelClient>,
+    ) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            max_sessions,
+            settings,
+            next_id: Arc::new(AtomicU64::new(1)),
+            test_model_client: Some(test_model_client),
         }
     }
 
     /// Create a new session. Returns the session ID.
     pub async fn create_session(&self, config: SessionConfig) -> Result<String, GatewayError> {
+        #[cfg(test)]
+        if let Some(test_model_client) = &self.test_model_client {
+            return self
+                .create_session_with_client(config, test_model_client.clone())
+                .await;
+        }
+
         let client = self.build_model_client(&config)?;
         self.create_session_with_client(config, client).await
     }
@@ -158,13 +184,20 @@ impl SessionManager {
     /// List all active sessions.
     pub async fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.read().await;
-        let mut infos: Vec<SessionInfo> = sessions.values().map(|session| session.info.clone()).collect();
+        let mut infos: Vec<SessionInfo> = sessions
+            .values()
+            .map(|session| session.info.clone())
+            .collect();
         infos.sort_by(|a, b| a.id.cmp(&b.id));
         infos
     }
 
     /// Send a message to a specific session.
-    pub async fn send_message(&self, session_id: &str, message: String) -> Result<(), GatewayError> {
+    pub async fn send_message(
+        &self,
+        session_id: &str,
+        message: String,
+    ) -> Result<(), GatewayError> {
         let sender = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -204,7 +237,10 @@ impl SessionManager {
         self.sessions.read().await.contains_key(session_id)
     }
 
-    fn build_model_client(&self, config: &SessionConfig) -> Result<Arc<dyn ModelClient>, GatewayError> {
+    fn build_model_client(
+        &self,
+        config: &SessionConfig,
+    ) -> Result<Arc<dyn ModelClient>, GatewayError> {
         let provider_config = self.build_provider_config(config)?;
         ModelClientBuilder::new()
             .with_config(provider_config)
@@ -212,7 +248,10 @@ impl SessionManager {
             .map_err(|error| GatewayError::SessionCreationFailed(error.to_string()))
     }
 
-    fn build_provider_config(&self, config: &SessionConfig) -> Result<ProviderConfig, GatewayError> {
+    fn build_provider_config(
+        &self,
+        config: &SessionConfig,
+    ) -> Result<ProviderConfig, GatewayError> {
         let provider_name = config
             .provider
             .as_deref()
@@ -320,7 +359,10 @@ mod tests {
         let manager = SessionManager::new_with_settings(10, test_settings());
         let client = Arc::new(MockModelClient::new("ok"));
         let id = manager
-            .create_session_with_client(SessionConfig::default(), client.clone() as Arc<dyn ModelClient>)
+            .create_session_with_client(
+                SessionConfig::default(),
+                client.clone() as Arc<dyn ModelClient>,
+            )
             .await
             .unwrap();
         let mut event_stream = manager.take_event_stream(&id).await.unwrap();
@@ -332,7 +374,8 @@ mod tests {
 
         let mut observed_agent_activity = false;
         for _ in 0..20 {
-            if let Ok(Some(event)) = timeout(Duration::from_millis(100), event_stream.next()).await {
+            if let Ok(Some(event)) = timeout(Duration::from_millis(100), event_stream.next()).await
+            {
                 match event {
                     ThreadEvent::TurnStarted { .. }
                     | ThreadEvent::ContentDelta { .. }
@@ -388,7 +431,9 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_nonexistent_session() {
         let manager = SessionManager::new_with_settings(10, test_settings());
-        let result = manager.send_message("nonexistent", "hello".to_string()).await;
+        let result = manager
+            .send_message("nonexistent", "hello".to_string())
+            .await;
         assert!(matches!(result, Err(GatewayError::SessionNotFound(_))));
     }
 
@@ -442,9 +487,12 @@ mod tests {
             let m = manager.clone();
             handles.push(tokio::spawn(async move {
                 let client = Arc::new(MockModelClient::new("ok"));
-                m.create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
-                    .await
-                    .unwrap()
+                m.create_session_with_client(
+                    SessionConfig::default(),
+                    client as Arc<dyn ModelClient>,
+                )
+                .await
+                .unwrap()
             }));
         }
         for h in handles {

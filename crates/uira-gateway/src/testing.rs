@@ -12,9 +12,7 @@ use uira_types::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUs
 
 use crate::channels::channel::Channel;
 use crate::channels::error::ChannelError;
-use crate::channels::types::{
-    ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType,
-};
+use crate::channels::types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 pub struct MockModelClient {
     response_text: String,
@@ -46,6 +44,10 @@ impl MockModelClient {
     pub fn call_count(&self) -> usize {
         self.call_count.load(Ordering::SeqCst)
     }
+
+    fn take_error(&self) -> Option<ProviderError> {
+        self.error.lock().unwrap().take()
+    }
 }
 
 #[async_trait]
@@ -61,12 +63,9 @@ impl ModelClient for MockModelClient {
             tokio::time::sleep(delay).await;
         }
 
-        {
-            let mut err_guard = self.error.lock().unwrap();
-            if let Some(err) = err_guard.take() {
-                // ProviderError is not Clone, so error mode is single-use
-                return Err(err);
-            }
+        if let Some(err) = self.take_error() {
+            // ProviderError is not Clone, so error mode is single-use
+            return Err(err);
         }
 
         Ok(ModelResponse {
@@ -85,6 +84,16 @@ impl ModelClient for MockModelClient {
         _messages: &[uira_types::Message],
         _tools: &[uira_types::ToolSpec],
     ) -> ModelResult<ResponseStream> {
+        self.call_count.fetch_add(1, Ordering::SeqCst);
+
+        if let Some(delay) = self.delay {
+            tokio::time::sleep(delay).await;
+        }
+
+        if let Some(err) = self.take_error() {
+            return Err(err);
+        }
+
         let text = self.response_text.clone();
         let chunks: Vec<Result<StreamChunk, ProviderError>> = vec![
             Ok(StreamChunk::ContentBlockDelta {
@@ -216,9 +225,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_model_client_error_mode() {
-        let client = MockModelClient::new("ignored").with_error(
-            ProviderError::InvalidResponse("test error".to_string()),
-        );
+        let client = MockModelClient::new("ignored")
+            .with_error(ProviderError::InvalidResponse("test error".to_string()));
 
         let result = client.chat(&[], &[]).await;
         assert!(result.is_err());
