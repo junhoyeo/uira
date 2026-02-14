@@ -1,10 +1,12 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
-use axum::Router;
+use axum::{Json, Router};
+use serde::Serialize;
 use tokio::net::TcpListener;
 
 use crate::error::GatewayError;
@@ -14,6 +16,15 @@ use crate::session_manager::SessionManager;
 struct AppState {
     session_manager: Arc<SessionManager>,
     auth_token: Option<String>,
+    start_time: Instant,
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    uptime_secs: u64,
+    active_sessions: usize,
+    version: &'static str,
 }
 
 pub struct GatewayServer {
@@ -40,9 +51,11 @@ impl GatewayServer {
         let state = Arc::new(AppState {
             session_manager: self.session_manager.clone(),
             auth_token: self.auth_token.clone(),
+            start_time: Instant::now(),
         });
         Router::new()
             .route("/ws", axum::routing::any(ws_handler))
+            .route("/health", axum::routing::get(health_handler))
             .with_state(state)
     }
 
@@ -61,6 +74,17 @@ impl GatewayServer {
 
         Ok(())
     }
+}
+
+async fn health_handler(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
+    let active_sessions = state.session_manager.session_count().await;
+    let uptime_secs = state.start_time.elapsed().as_secs();
+    Json(HealthResponse {
+        status: "ok",
+        uptime_secs,
+        active_sessions,
+        version: env!("CARGO_PKG_VERSION"),
+    })
 }
 
 async fn ws_handler(
@@ -349,6 +373,138 @@ mod tests {
 
         let resp = send_and_recv(&mut ws, r#"{"type": "list_sessions"}"#).await;
         assert_eq!(resp["type"], "sessions_list");
+    }
+
+    // -- Health endpoint tests -----------------------------------------------
+
+    async fn start_http_test_server() -> String {
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        }
+        let server = GatewayServer::new(10);
+        let app = server.router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    #[tokio::test]
+    async fn test_health_returns_200_with_correct_fields() {
+        let base_url = start_http_test_server().await;
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("{}/health", base_url))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["status"], "ok");
+        assert!(body["uptime_secs"].is_u64());
+        assert_eq!(body["active_sessions"], 0);
+        assert!(body["version"].is_string());
+        assert!(!body["version"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_health_reflects_session_count() {
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        }
+        let server = GatewayServer::new(10);
+        let app = server.router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base_url = format!("http://127.0.0.1:{}", addr.port());
+        let ws_url = format!("ws://127.0.0.1:{}", addr.port());
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        // Create a session via WebSocket
+        let (mut ws, _) =
+            tokio_tungstenite::connect_async(format!("{}/ws", ws_url))
+                .await
+                .unwrap();
+
+        use futures_util::SinkExt;
+        ws.send(tungstenite::Message::Text(
+            r#"{"type": "create_session"}"#.into(),
+        ))
+        .await
+        .unwrap();
+
+        let resp_msg = ws.next().await.unwrap().unwrap();
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&resp_msg.into_text().unwrap()).unwrap();
+        assert_eq!(resp_json["type"], "session_created");
+
+        // Health should now show 1 active session
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("{}/health", base_url))
+            .send()
+            .await
+            .unwrap();
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["active_sessions"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_health_uptime_increases() {
+        let base_url = start_http_test_server().await;
+        let client = reqwest::Client::new();
+
+        let resp1 = client
+            .get(format!("{}/health", base_url))
+            .send()
+            .await
+            .unwrap();
+        let body1: serde_json::Value = resp1.json().await.unwrap();
+        let uptime1 = body1["uptime_secs"].as_u64().unwrap();
+
+        // Sleep briefly then check uptime hasn't gone backwards
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let resp2 = client
+            .get(format!("{}/health", base_url))
+            .send()
+            .await
+            .unwrap();
+        let body2: serde_json::Value = resp2.json().await.unwrap();
+        let uptime2 = body2["uptime_secs"].as_u64().unwrap();
+
+        assert!(uptime2 >= uptime1);
+    }
+
+    #[tokio::test]
+    async fn test_health_no_auth_required() {
+        // Start a server WITH auth configured — health should still work
+        let server = GatewayServer::new(10).with_auth_token(Some("secret".into()));
+        let app = server.router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!("http://127.0.0.1:{}/health", addr.port()))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["status"], "ok");
     }
 
     // -- Existing tests ----------------------------------------------------
