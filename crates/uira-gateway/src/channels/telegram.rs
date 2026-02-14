@@ -276,6 +276,7 @@ mod tests {
 
     fn test_config() -> TelegramChannelConfig {
         TelegramChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "test:fake-token".to_string(),
             allowed_users: Vec::new(),
             active_skills: Vec::new(),

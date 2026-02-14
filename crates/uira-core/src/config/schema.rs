@@ -1021,22 +1021,30 @@ fn default_idle_timeout() -> Option<u64> {
 /// Channel settings for multi-channel messaging
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChannelSettings {
-    /// Telegram channel configuration
     #[serde(default)]
     pub telegram: Option<TelegramChannelConfig>,
 
-    /// Slack channel configuration
+    #[serde(default)]
+    pub telegram_accounts: Vec<TelegramChannelConfig>,
+
     #[serde(default)]
     pub slack: Option<SlackChannelConfig>,
+
+    #[serde(default)]
+    pub slack_accounts: Vec<SlackChannelConfig>,
 }
 
-/// Telegram bot configuration
+fn default_account_id() -> String {
+    "default".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramChannelConfig {
-    /// Telegram bot token from @BotFather
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+
     pub bot_token: String,
 
-    /// List of allowed Telegram user IDs (empty = allow all)
     #[serde(default)]
     pub allowed_users: Vec<String>,
 
@@ -1044,16 +1052,15 @@ pub struct TelegramChannelConfig {
     pub active_skills: Vec<String>,
 }
 
-/// Slack bot configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackChannelConfig {
-    /// Slack bot token (xoxb-...)
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+
     pub bot_token: String,
 
-    /// Slack app-level token for Socket Mode (xapp-...)
     pub app_token: String,
 
-    /// List of allowed Slack channel IDs (empty = allow all)
     #[serde(default)]
     pub allowed_channels: Vec<String>,
 

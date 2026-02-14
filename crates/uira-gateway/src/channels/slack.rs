@@ -499,6 +499,7 @@ mod tests {
     #[test]
     fn test_slack_channel_type() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
@@ -511,6 +512,7 @@ mod tests {
     #[test]
     fn test_slack_capabilities() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
@@ -525,6 +527,7 @@ mod tests {
     #[test]
     fn test_take_message_receiver() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],

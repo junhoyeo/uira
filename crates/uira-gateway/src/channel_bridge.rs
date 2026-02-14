@@ -93,13 +93,15 @@ impl ChannelSkillConfig {
 
 /// Routes messages between Channel implementations and the SessionManager.
 ///
-/// Maintains a `(channel_type, sender_id) -> session_id` mapping so that
-/// each unique sender is automatically associated with a persistent session.
+/// Maintains a `(channel_type, account_id, sender_id) -> session_id` mapping so that
+/// each unique sender on each account is automatically associated with a persistent session.
+/// Multiple accounts of the same channel type (e.g., two Telegram bots) are supported
+/// by keying channels on `(channel_type, account_id)`.
 pub struct ChannelBridge {
     session_manager: Arc<SessionManager>,
-    sender_sessions: Arc<RwLock<HashMap<(String, String), String>>>,
-    session_routes: Arc<RwLock<HashMap<String, (String, String)>>>,
-    channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
+    sender_sessions: Arc<RwLock<HashMap<(String, String, String), String>>>,
+    session_routes: Arc<RwLock<HashMap<String, (String, String, String)>>>,
+    channels: Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
     channel_handles: Vec<JoinHandle<()>>,
     response_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     skill_config: Arc<ChannelSkillConfig>,
@@ -129,8 +131,8 @@ impl ChannelBridge {
     fn spawn_response_delivery_task(
         session_id: String,
         mut event_stream: EventStream,
-        channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
-        session_routes: Arc<RwLock<HashMap<String, (String, String)>>>,
+        channels: Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
+        session_routes: Arc<RwLock<HashMap<String, (String, String, String)>>>,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut pending_text = String::new();
@@ -184,8 +186,8 @@ impl ChannelBridge {
     async fn flush_response(
         session_id: &str,
         pending_text: &mut String,
-        channels: &Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
-        session_routes: &Arc<RwLock<HashMap<String, (String, String)>>>,
+        channels: &Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
+        session_routes: &Arc<RwLock<HashMap<String, (String, String, String)>>>,
     ) {
         if pending_text.is_empty() {
             return;
@@ -199,8 +201,8 @@ impl ChannelBridge {
     async fn deliver_to_channel(
         session_id: &str,
         content: String,
-        channels: &Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
-        session_routes: &Arc<RwLock<HashMap<String, (String, String)>>>,
+        channels: &Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
+        session_routes: &Arc<RwLock<HashMap<String, (String, String, String)>>>,
     ) {
         if content.is_empty() {
             return;
@@ -211,20 +213,23 @@ impl ChannelBridge {
             routes.get(session_id).cloned()
         };
 
-        let Some((channel_type, sender_id)) = route else {
+        let Some((channel_type, account_id, sender_id)) = route else {
             error!(session_id = %session_id, "Missing channel route for session response");
             return;
         };
 
         let channel = {
             let channels_guard = channels.read().await;
-            channels_guard.get(&channel_type).cloned()
+            channels_guard
+                .get(&(channel_type.clone(), account_id.clone()))
+                .cloned()
         };
 
         let Some(channel) = channel else {
             error!(
                 session_id = %session_id,
                 channel_type = %channel_type,
+                account_id = %account_id,
                 "Missing channel for session response"
             );
             return;
@@ -239,21 +244,18 @@ impl ChannelBridge {
             error!(
                 session_id = %session_id,
                 channel_type = %channel_type,
+                account_id = %account_id,
                 error = %e,
                 "Failed to send session response to channel"
             );
         }
     }
 
-    /// Register a channel and start listening for inbound messages.
-    ///
-    /// 1. Starts the channel
-    /// 2. Takes the message receiver
-    /// 3. Spawns a tokio task that routes each inbound message to the
-    ///    appropriate session, auto-creating sessions for new senders
+    /// Register a channel with an account identifier and start listening for inbound messages.
     pub async fn register_channel(
         &mut self,
         mut channel: Box<dyn Channel>,
+        account_id: String,
     ) -> Result<(), GatewayError> {
         let channel_type = channel.channel_type().to_string();
         channel
@@ -268,7 +270,7 @@ impl ChannelBridge {
         let channel: Arc<dyn Channel> = Arc::from(channel);
         {
             let mut channels = self.channels.write().await;
-            channels.insert(channel_type, channel);
+            channels.insert((channel_type.clone(), account_id.clone()), channel);
         }
 
         let session_manager = self.session_manager.clone();
@@ -277,11 +279,17 @@ impl ChannelBridge {
         let channels = self.channels.clone();
         let response_handles = self.response_handles.clone();
         let skill_config = self.skill_config.clone();
+        let account_id = account_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut rx = rx;
             while let Some(msg) = rx.recv().await {
-                let key = (msg.channel_type.to_string(), msg.sender.clone());
+                let channel_type_str = msg.channel_type.to_string();
+                let key = (
+                    channel_type_str.clone(),
+                    account_id.clone(),
+                    msg.sender.clone(),
+                );
 
                 let session_id = {
                     let read_guard = sender_sessions.read().await;
@@ -291,12 +299,14 @@ impl ChannelBridge {
                 let (session_id, is_new_session) = match session_id {
                     Some(id) => (id, false),
                     None => {
-                        let session_config = skill_config.session_config_for_channel(&key.0);
+                        let session_config =
+                            skill_config.session_config_for_channel(&channel_type_str);
                         match session_manager.create_session(session_config).await {
                             Ok(id) => {
                                 info!(
                                     channel_type = %key.0,
-                                    sender = %key.1,
+                                    account_id = %key.1,
+                                    sender = %key.2,
                                     session_id = %id,
                                     "Created new session for sender"
                                 );
@@ -307,7 +317,8 @@ impl ChannelBridge {
                             Err(e) => {
                                 error!(
                                     channel_type = %key.0,
-                                    sender = %key.1,
+                                    account_id = %key.1,
+                                    sender = %key.2,
                                     error = %e,
                                     "Failed to create session for sender"
                                 );
@@ -365,11 +376,19 @@ impl ChannelBridge {
         Ok(())
     }
 
-    /// Returns the session_id for a given sender, if one exists.
-    pub async fn get_session_for_sender(&self, channel_type: &str, sender: &str) -> Option<String> {
+    pub async fn get_session_for_sender(
+        &self,
+        channel_type: &str,
+        account_id: &str,
+        sender: &str,
+    ) -> Option<String> {
         let guard = self.sender_sessions.read().await;
         guard
-            .get(&(channel_type.to_string(), sender.to_string()))
+            .get(&(
+                channel_type.to_string(),
+                account_id.to_string(),
+                sender.to_string(),
+            ))
             .cloned()
     }
 
@@ -551,7 +570,7 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -564,7 +583,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let session_id = bridge
-            .get_session_for_sender("telegram", "user1")
+            .get_session_for_sender("telegram", "default", "user1")
             .await
             .unwrap();
         assert!(session_id.starts_with("gw_ses_"));
@@ -581,7 +600,7 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Slack);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message("user_a", "msg1", ChannelType::Slack))
             .await
@@ -596,7 +615,7 @@ mod tests {
         assert_eq!(sm.session_count().await, 1);
 
         let sid = bridge
-            .get_session_for_sender("slack", "user_a")
+            .get_session_for_sender("slack", "default", "user_a")
             .await
             .unwrap();
         assert!(sid.starts_with("gw_ses_"));
@@ -612,7 +631,7 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message("alice", "hi", ChannelType::Telegram))
             .await
@@ -627,11 +646,11 @@ mod tests {
         assert_eq!(sm.session_count().await, 2);
 
         let sid_alice = bridge
-            .get_session_for_sender("telegram", "alice")
+            .get_session_for_sender("telegram", "default", "alice")
             .await
             .unwrap();
         let sid_bob = bridge
-            .get_session_for_sender("telegram", "bob")
+            .get_session_for_sender("telegram", "default", "bob")
             .await
             .unwrap();
         assert_ne!(sid_alice, sid_bob);
@@ -653,7 +672,7 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -665,7 +684,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let session_id = bridge
-            .get_session_for_sender("telegram", "user1")
+            .get_session_for_sender("telegram", "default", "user1")
             .await
             .unwrap();
         let config = sm.get_session_config(&session_id).await.unwrap();
@@ -699,12 +718,12 @@ mod tests {
 
         let tg_channel = MockChannel::new(ChannelType::Telegram);
         let tg_tx = tg_channel.sender();
-        bridge.register_channel(Box::new(tg_channel)).await.unwrap();
+        bridge.register_channel(Box::new(tg_channel), "default".to_string()).await.unwrap();
 
         let slack_channel = MockChannel::new(ChannelType::Slack);
         let slack_tx = slack_channel.sender();
         bridge
-            .register_channel(Box::new(slack_channel))
+            .register_channel(Box::new(slack_channel), "default".to_string())
             .await
             .unwrap();
 
@@ -723,11 +742,11 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         let tg_session = bridge
-            .get_session_for_sender("telegram", "alice")
+            .get_session_for_sender("telegram", "default", "alice")
             .await
             .unwrap();
         let slack_session = bridge
-            .get_session_for_sender("slack", "alice")
+            .get_session_for_sender("slack", "default", "alice")
             .await
             .unwrap();
 
@@ -765,7 +784,7 @@ mod tests {
         let slack_channel = MockChannel::new(ChannelType::Slack);
         let slack_tx = slack_channel.sender();
         bridge
-            .register_channel(Box::new(slack_channel))
+            .register_channel(Box::new(slack_channel), "default".to_string())
             .await
             .unwrap();
 
@@ -776,7 +795,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let session_id = bridge
-            .get_session_for_sender("slack", "user-a")
+            .get_session_for_sender("slack", "default", "user-a")
             .await
             .unwrap();
         let config = sm.get_session_config(&session_id).await.unwrap();
@@ -794,7 +813,7 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -806,7 +825,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         assert!(bridge
-            .get_session_for_sender("telegram", "user1")
+            .get_session_for_sender("telegram", "default", "user1")
             .await
             .is_some());
         assert_eq!(bridge.channel_handles.len(), 1);
@@ -814,7 +833,7 @@ mod tests {
         bridge.stop().await;
 
         assert!(bridge
-            .get_session_for_sender("telegram", "user1")
+            .get_session_for_sender("telegram", "default", "user1")
             .await
             .is_none());
         assert!(bridge.channel_handles.is_empty());
@@ -826,7 +845,7 @@ mod tests {
         let bridge = ChannelBridge::new(sm);
 
         assert!(bridge
-            .get_session_for_sender("telegram", "nobody")
+            .get_session_for_sender("telegram", "default", "nobody")
             .await
             .is_none());
     }
@@ -840,7 +859,7 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -868,7 +887,7 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "user_err",
@@ -894,7 +913,7 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages();
 
-        bridge.register_channel(Box::new(channel)).await.unwrap();
+        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
         tx.send(make_channel_message(
             "alice",
@@ -914,15 +933,129 @@ mod tests {
         assert_eq!(bob_count, 1);
 
         let alice_session = bridge
-            .get_session_for_sender("telegram", "alice")
+            .get_session_for_sender("telegram", "default", "alice")
             .await
             .unwrap();
         let bob_session = bridge
-            .get_session_for_sender("telegram", "bob")
+            .get_session_for_sender("telegram", "default", "bob")
             .await
             .unwrap();
         assert_ne!(alice_session, bob_session);
         assert_eq!(sm.session_count().await, 2);
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_two_mock_channels_same_type_registered() {
+        let sm = test_session_manager(100);
+        let mut bridge = ChannelBridge::new(sm.clone());
+
+        let chan_a = MockChannel::new(ChannelType::Telegram);
+        let tx_a = chan_a.sender();
+        bridge
+            .register_channel(Box::new(chan_a), "bot-a".to_string())
+            .await
+            .unwrap();
+
+        let chan_b = MockChannel::new(ChannelType::Telegram);
+        let _tx_b = chan_b.sender();
+        bridge
+            .register_channel(Box::new(chan_b), "bot-b".to_string())
+            .await
+            .unwrap();
+
+        tx_a.send(make_channel_message("alice", "hi", ChannelType::Telegram))
+            .await
+            .unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let session = bridge
+            .get_session_for_sender("telegram", "bot-a", "alice")
+            .await;
+        assert!(session.is_some());
+        assert!(session.unwrap().starts_with("gw_ses_"));
+        assert_eq!(sm.session_count().await, 1);
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_account_messages_routed_correctly() {
+        let sm = test_session_manager(100);
+        let mut bridge = ChannelBridge::new(sm.clone());
+
+        let chan_a = MockChannel::new(ChannelType::Telegram);
+        let tx_a = chan_a.sender();
+        bridge
+            .register_channel(Box::new(chan_a), "bot-a".to_string())
+            .await
+            .unwrap();
+
+        let chan_b = MockChannel::new(ChannelType::Telegram);
+        let tx_b = chan_b.sender();
+        bridge
+            .register_channel(Box::new(chan_b), "bot-b".to_string())
+            .await
+            .unwrap();
+
+        tx_a.send(make_channel_message("alice", "msg-a", ChannelType::Telegram))
+            .await
+            .unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        tx_b.send(make_channel_message("alice", "msg-b", ChannelType::Telegram))
+            .await
+            .unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let session_a = bridge
+            .get_session_for_sender("telegram", "bot-a", "alice")
+            .await
+            .unwrap();
+        let session_b = bridge
+            .get_session_for_sender("telegram", "bot-b", "alice")
+            .await
+            .unwrap();
+
+        assert_ne!(session_a, session_b);
+        assert_eq!(sm.session_count().await, 2);
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_multi_account_responses_routed_to_correct_channel() {
+        let sm =
+            test_session_manager_with_mock_client(MockModelClient::new("multi-account reply"));
+        let mut bridge = ChannelBridge::new(sm.clone());
+
+        let chan_a = MockChannel::new(ChannelType::Telegram);
+        let tx_a = chan_a.sender();
+        let sent_a = chan_a.sent_messages();
+        bridge
+            .register_channel(Box::new(chan_a), "bot-a".to_string())
+            .await
+            .unwrap();
+
+        let chan_b = MockChannel::new(ChannelType::Telegram);
+        let _tx_b = chan_b.sender();
+        let sent_b = chan_b.sent_messages();
+        bridge
+            .register_channel(Box::new(chan_b), "bot-b".to_string())
+            .await
+            .unwrap();
+
+        tx_a.send(make_channel_message("alice", "hello", ChannelType::Telegram))
+            .await
+            .unwrap();
+
+        let messages_a = wait_for_sent_message_count(&sent_a, 1).await;
+        assert_eq!(messages_a[0].recipient, "alice");
+        assert_eq!(messages_a[0].content.trim_end(), "multi-account reply");
+
+        let messages_b = sent_b.lock().unwrap().clone();
+        assert!(messages_b.is_empty());
 
         bridge.stop().await;
     }

@@ -213,7 +213,7 @@ async fn test_channel_bridge_routing_and_affinity() {
     // Create a Telegram mock channel and grab sender before registering
     let channel = MockChannel::new(ChannelType::Telegram);
     let tx = channel.sender();
-    bridge.register_channel(Box::new(channel)).await.unwrap();
+    bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
     // Send first message from user1
     tx.send(make_channel_message(
@@ -227,7 +227,7 @@ async fn test_channel_bridge_routing_and_affinity() {
 
     // Assert: session was auto-created for user1
     let session_id = bridge
-        .get_session_for_sender("telegram", "user1")
+        .get_session_for_sender("telegram", "default", "user1")
         .await
         .expect("user1 should have a session");
     assert!(session_id.starts_with("gw_ses_"));
@@ -246,7 +246,7 @@ async fn test_channel_bridge_routing_and_affinity() {
     // Still only 1 session (affinity)
     assert_eq!(sm.session_count().await, 1);
     let same_session = bridge
-        .get_session_for_sender("telegram", "user1")
+        .get_session_for_sender("telegram", "default", "user1")
         .await
         .unwrap();
     assert_eq!(session_id, same_session);
@@ -264,7 +264,7 @@ async fn test_channel_bridge_routing_and_affinity() {
     // Now 2 sessions
     assert_eq!(sm.session_count().await, 2);
     let user2_session = bridge
-        .get_session_for_sender("telegram", "user2")
+        .get_session_for_sender("telegram", "default", "user2")
         .await
         .expect("user2 should have a session");
     assert_ne!(session_id, user2_session);
@@ -284,13 +284,13 @@ async fn test_multiple_channels_simultaneous_routing() {
     // Create Telegram channel
     let tg_channel = MockChannel::new(ChannelType::Telegram);
     let tg_tx = tg_channel.sender();
-    bridge.register_channel(Box::new(tg_channel)).await.unwrap();
+    bridge.register_channel(Box::new(tg_channel), "default".to_string()).await.unwrap();
 
     // Create Slack channel
     let slack_channel = MockChannel::new(ChannelType::Slack);
     let slack_tx = slack_channel.sender();
     bridge
-        .register_channel(Box::new(slack_channel))
+        .register_channel(Box::new(slack_channel), "default".to_string())
         .await
         .unwrap();
 
@@ -331,15 +331,15 @@ async fn test_multiple_channels_simultaneous_routing() {
 
     // Each sender has the correct session
     let tg_alice = bridge
-        .get_session_for_sender("telegram", "alice")
+        .get_session_for_sender("telegram", "default", "alice")
         .await
         .expect("telegram/alice should have a session");
     let slack_alice = bridge
-        .get_session_for_sender("slack", "alice")
+        .get_session_for_sender("slack", "default", "alice")
         .await
         .expect("slack/alice should have a session");
     let slack_bob = bridge
-        .get_session_for_sender("slack", "bob")
+        .get_session_for_sender("slack", "default", "bob")
         .await
         .expect("slack/bob should have a session");
 
@@ -369,7 +369,7 @@ async fn test_channel_bridge_skill_injection() {
 
     let channel = MockChannel::new(ChannelType::Telegram);
     let tx = channel.sender();
-    bridge.register_channel(Box::new(channel)).await.unwrap();
+    bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
     tx.send(make_channel_message(
         "skill-user",
@@ -381,7 +381,7 @@ async fn test_channel_bridge_skill_injection() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let session_id = bridge
-        .get_session_for_sender("telegram", "skill-user")
+        .get_session_for_sender("telegram", "default", "skill-user")
         .await
         .expect("session should be created for skill-user");
     let config = sm
