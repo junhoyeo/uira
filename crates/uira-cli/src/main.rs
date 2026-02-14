@@ -1124,8 +1124,8 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                 .unwrap_or_default();
 
             let bind_host = host
-                .as_deref()
-                .unwrap_or(&gateway_settings.host);
+                .clone()
+                .unwrap_or_else(|| gateway_settings.host.clone());
             let bind_port = port.unwrap_or(gateway_settings.port);
 
             println!(
@@ -1135,8 +1135,8 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                     .bold()
             );
 
-            let server = GatewayServer::new(gateway_settings.max_sessions);
-            server.start(bind_host, bind_port).await?;
+            let server = GatewayServer::new_with_settings(gateway_settings);
+            server.start(&bind_host, bind_port).await?;
 
             Ok(())
         }

@@ -10,6 +10,7 @@ use axum::{Json, Router};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
+use uira_core::schema::GatewaySettings;
 
 use crate::channels::{Channel, ChannelResponse};
 use crate::error::GatewayError;
@@ -43,6 +44,18 @@ impl GatewayServer {
             session_manager: Arc::new(SessionManager::new(max_sessions)),
             channels: Arc::new(RwLock::new(HashMap::new())),
             auth_token: None,
+        }
+    }
+
+    pub fn new_with_settings(settings: GatewaySettings) -> Self {
+        let session_manager = Arc::new(SessionManager::new_with_settings(
+            settings.max_sessions,
+            settings.clone(),
+        ));
+        Self {
+            session_manager,
+            channels: Arc::new(RwLock::new(HashMap::new())),
+            auth_token: settings.auth_token,
         }
     }
 
@@ -424,6 +437,37 @@ mod tests {
             .await
             .expect("should accept connection when no auth configured");
 
+        let resp = send_and_recv(&mut ws, r#"{"type": "list_sessions"}"#).await;
+        assert_eq!(resp["type"], "sessions_list");
+    }
+
+    #[tokio::test]
+    async fn test_new_with_settings_uses_auth_token() {
+        let settings = GatewaySettings {
+            max_sessions: 10,
+            auth_token: Some("test-secret".to_string()),
+            ..GatewaySettings::default()
+        };
+        let server = GatewayServer::new_with_settings(settings);
+        let app = server.router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let bind_addr = format!("127.0.0.1:{}", addr.port());
+
+        let no_auth = connect_with_auth(&bind_addr, None).await;
+        assert!(
+            no_auth.is_err(),
+            "should reject connection without token when auth_token is set"
+        );
+
+        let mut ws = connect_with_auth(&bind_addr, Some("test-secret"))
+            .await
+            .expect("should accept connection with configured token");
         let resp = send_and_recv(&mut ws, r#"{"type": "list_sessions"}"#).await;
         assert_eq!(resp["type"], "sessions_list");
     }
