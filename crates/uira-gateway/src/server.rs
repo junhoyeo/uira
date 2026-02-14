@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::response::Response;
+use axum::http::HeaderMap;
+use axum::response::IntoResponse;
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -10,21 +11,39 @@ use crate::error::GatewayError;
 use crate::protocol::{GatewayMessage, GatewayResponse, SessionInfoResponse};
 use crate::session_manager::SessionManager;
 
+struct AppState {
+    session_manager: Arc<SessionManager>,
+    auth_token: Option<String>,
+}
+
 pub struct GatewayServer {
     session_manager: Arc<SessionManager>,
+    auth_token: Option<String>,
 }
 
 impl GatewayServer {
     pub fn new(max_sessions: usize) -> Self {
         Self {
             session_manager: Arc::new(SessionManager::new(max_sessions)),
+            auth_token: None,
         }
     }
 
+    /// Set an authentication token. When set, WebSocket connections must
+    /// provide a matching `Authorization: Bearer <token>` header.
+    pub fn with_auth_token(mut self, token: Option<String>) -> Self {
+        self.auth_token = token;
+        self
+    }
+
     pub fn router(&self) -> Router {
+        let state = Arc::new(AppState {
+            session_manager: self.session_manager.clone(),
+            auth_token: self.auth_token.clone(),
+        });
         Router::new()
             .route("/ws", axum::routing::any(ws_handler))
-            .with_state(self.session_manager.clone())
+            .with_state(state)
     }
 
     pub async fn start(&self, host: &str, port: u16) -> Result<(), GatewayError> {
@@ -45,10 +64,26 @@ impl GatewayServer {
 }
 
 async fn ws_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
-    State(session_manager): State<Arc<SessionManager>>,
-) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, session_manager))
+) -> impl IntoResponse {
+    if let Some(expected_token) = &state.auth_token {
+        let auth_header = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok());
+        match auth_header {
+            Some(value) if value.starts_with("Bearer ") => {
+                let token = &value[7..];
+                if token != expected_token.as_str() {
+                    return axum::http::StatusCode::UNAUTHORIZED.into_response();
+                }
+            }
+            _ => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
+        }
+    }
+    ws.on_upgrade(move |socket| handle_socket(socket, state.session_manager.clone()))
+        .into_response()
 }
 
 async fn handle_socket(mut socket: WebSocket, session_manager: Arc<SessionManager>) {
@@ -124,8 +159,12 @@ mod tests {
     use super::*;
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite;
+    use tungstenite::client::IntoClientRequest;
 
     async fn start_test_server() -> String {
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        }
         let server = GatewayServer::new(10);
         let app = server.router();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -239,6 +278,80 @@ mod tests {
         assert_eq!(resp["type"], "error");
         assert!(resp["message"].as_str().unwrap().contains("not found"));
     }
+
+    // -- Auth helpers & tests ------------------------------------------------
+
+    async fn start_auth_server(auth_token: Option<String>) -> String {
+        let server = GatewayServer::new(10).with_auth_token(auth_token);
+        let app = server.router();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("127.0.0.1:{}", addr.port())
+    }
+
+    async fn connect_with_auth(
+        addr: &str,
+        token: Option<&str>,
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        tungstenite::Error,
+    > {
+        let url = format!("ws://{}/ws", addr);
+        let mut request = url.parse::<tungstenite::http::Uri>().unwrap().into_client_request().unwrap();
+        if let Some(t) = token {
+            request.headers_mut().insert(
+                "Authorization",
+                format!("Bearer {}", t).parse().unwrap(),
+            );
+        }
+        let (ws_stream, _) = tokio_tungstenite::connect_async(request).await?;
+        Ok(ws_stream)
+    }
+
+    #[tokio::test]
+    async fn test_auth_rejects_missing_token() {
+        let addr = start_auth_server(Some("secret-token".into())).await;
+        let result = connect_with_auth(&addr, None).await;
+        assert!(result.is_err(), "should reject connection without token");
+    }
+
+    #[tokio::test]
+    async fn test_auth_rejects_wrong_token() {
+        let addr = start_auth_server(Some("secret-token".into())).await;
+        let result = connect_with_auth(&addr, Some("wrong-token")).await;
+        assert!(result.is_err(), "should reject connection with wrong token");
+    }
+
+    #[tokio::test]
+    async fn test_auth_accepts_correct_token() {
+        let addr = start_auth_server(Some("secret-token".into())).await;
+        let mut ws = connect_with_auth(&addr, Some("secret-token"))
+            .await
+            .expect("should accept connection with correct token");
+
+        let resp = send_and_recv(&mut ws, r#"{"type": "list_sessions"}"#).await;
+        assert_eq!(resp["type"], "sessions_list");
+    }
+
+    #[tokio::test]
+    async fn test_auth_accepts_all_when_no_token_configured() {
+        let addr = start_auth_server(None).await;
+        let mut ws = connect_with_auth(&addr, None)
+            .await
+            .expect("should accept connection when no auth configured");
+
+        let resp = send_and_recv(&mut ws, r#"{"type": "list_sessions"}"#).await;
+        assert_eq!(resp["type"], "sessions_list");
+    }
+
+    // -- Existing tests ----------------------------------------------------
 
     #[tokio::test]
     async fn test_full_lifecycle() {
