@@ -30,6 +30,7 @@ pub struct SessionInfo {
     pub id: String,
     pub status: SessionStatus,
     pub created_at: DateTime<Utc>,
+    pub last_message_at: DateTime<Utc>,
     pub config: SessionConfig,
     pub skill_context: Option<String>,
 }
@@ -43,11 +44,14 @@ struct ManagedSession {
 }
 
 /// Manages multiple concurrent agent sessions for the gateway.
+#[derive(Clone)]
 pub struct SessionManager {
     sessions: Arc<RwLock<HashMap<String, ManagedSession>>>,
     max_sessions: usize,
     settings: GatewaySettings,
     next_id: Arc<AtomicU64>,
+    reaper_started: Arc<AtomicBool>,
+    reaper_interval: Duration,
     #[cfg(test)]
     test_model_client: Option<Arc<dyn ModelClient>>,
 }
@@ -63,6 +67,8 @@ impl SessionManager {
             max_sessions,
             settings,
             next_id: Arc::new(AtomicU64::new(1)),
+            reaper_started: Arc::new(AtomicBool::new(false)),
+            reaper_interval: Duration::from_secs(60),
             #[cfg(test)]
             test_model_client: None,
         }
@@ -79,6 +85,8 @@ impl SessionManager {
             max_sessions,
             settings,
             next_id: Arc::new(AtomicU64::new(1)),
+            reaper_started: Arc::new(AtomicBool::new(false)),
+            reaper_interval: Duration::from_secs(60),
             test_model_client: Some(test_model_client),
         }
     }
@@ -101,6 +109,8 @@ impl SessionManager {
         config: SessionConfig,
         client: Arc<dyn ModelClient>,
     ) -> Result<String, GatewayError> {
+        self.start_reaper();
+
         let mut sessions = self.sessions.write().await;
 
         if sessions.len() >= self.max_sessions {
@@ -127,6 +137,7 @@ impl SessionManager {
             id: id.clone(),
             status: SessionStatus::Active,
             created_at: Utc::now(),
+            last_message_at: Utc::now(),
             skill_context: config.skill_context.clone(),
             config,
         };
@@ -143,6 +154,56 @@ impl SessionManager {
         );
 
         Ok(id)
+    }
+
+    pub fn start_reaper(&self) {
+        let Some(idle_timeout_secs) = self.settings.idle_timeout_secs else {
+            return;
+        };
+
+        if self.reaper_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let manager = self.clone();
+        let idle_timeout = chrono::Duration::seconds(
+            i64::try_from(idle_timeout_secs).unwrap_or(i64::MAX),
+        );
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(manager.reaper_interval);
+            loop {
+                interval.tick().await;
+
+                let now = Utc::now();
+                let idle_session_ids = {
+                    let sessions = manager.sessions.read().await;
+                    sessions
+                        .iter()
+                        .filter_map(|(session_id, session)| {
+                            let idle_duration = now.signed_duration_since(session.info.last_message_at);
+                            if idle_duration > idle_timeout {
+                                Some(session_id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+                for session_id in idle_session_ids {
+                    if let Err(error) = manager.destroy_session(&session_id).await {
+                        if !matches!(error, GatewayError::SessionNotFound(_)) {
+                            tracing::debug!(
+                                session_id,
+                                error = %error,
+                                "Failed to destroy idle gateway session"
+                            );
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Destroy a session by ID.
@@ -202,10 +263,11 @@ impl SessionManager {
         message: String,
     ) -> Result<(), GatewayError> {
         let sender = {
-            let sessions = self.sessions.read().await;
+            let mut sessions = self.sessions.write().await;
             let session = sessions
-                .get(session_id)
+                .get_mut(session_id)
                 .ok_or_else(|| GatewayError::SessionNotFound(session_id.to_string()))?;
+            session.info.last_message_at = Utc::now();
             session.agent_input_tx.clone()
         };
 
@@ -215,6 +277,40 @@ impl SessionManager {
             .send(prompt)
             .await
             .map_err(|e| GatewayError::SendFailed(e.to_string()))
+    }
+
+    pub async fn shutdown(&self) -> Result<(), GatewayError> {
+        let sessions = {
+            let mut sessions = self.sessions.write().await;
+            sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
+        };
+
+        let mut shutdown_errors = Vec::new();
+
+        for session in sessions {
+            let ManagedSession {
+                agent_input_tx,
+                event_stream: _,
+                agent_handle,
+                agent_control,
+                info: _,
+            } = session;
+
+            agent_control.store(true, Ordering::SeqCst);
+            drop(agent_input_tx);
+
+            match timeout(Duration::from_secs(10), agent_handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => shutdown_errors.push(format!("Agent task join error: {}", error)),
+                Err(_) => shutdown_errors.push("Timed out waiting for agent shutdown".to_string()),
+            }
+        }
+
+        if shutdown_errors.is_empty() {
+            Ok(())
+        } else {
+            Err(GatewayError::SessionShutdownFailed(shutdown_errors.join(", ")))
+        }
     }
 
     pub async fn take_event_stream(&self, session_id: &str) -> Option<EventStream> {
@@ -342,6 +438,15 @@ mod tests {
         }
     }
 
+    fn test_settings_with_idle_timeout(idle_timeout_secs: Option<u64>) -> GatewaySettings {
+        GatewaySettings {
+            provider: "ollama".to_string(),
+            model: "llama3.1".to_string(),
+            idle_timeout_secs,
+            ..GatewaySettings::default()
+        }
+    }
+
     #[tokio::test]
     async fn test_create_session_with_agent() {
         let manager = SessionManager::new_with_settings(10, test_settings());
@@ -407,6 +512,120 @@ mod tests {
         manager.destroy_session(&id).await.unwrap();
         assert_eq!(manager.session_count().await, 0);
         assert!(!manager.has_session(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_send_message_updates_last_message_at() {
+        let manager = SessionManager::new_with_settings(10, test_settings());
+        let client = Arc::new(MockModelClient::new("ok"));
+        let id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        let before = manager
+            .list_sessions()
+            .await
+            .into_iter()
+            .find(|session| session.id == id)
+            .unwrap()
+            .last_message_at;
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        manager
+            .send_message(&id, "hello".to_string())
+            .await
+            .unwrap();
+
+        let after = manager
+            .list_sessions()
+            .await
+            .into_iter()
+            .find(|session| session.id == id)
+            .unwrap()
+            .last_message_at;
+
+        assert!(after > before);
+    }
+
+    #[tokio::test]
+    async fn test_reaper_destroys_idle_session() {
+        let mut manager = SessionManager::new_with_settings(
+            10,
+            test_settings_with_idle_timeout(Some(1)),
+        );
+        manager.reaper_interval = Duration::from_millis(20);
+        manager.start_reaper();
+
+        let client = Arc::new(MockModelClient::new("ok"));
+        let id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        {
+            let mut sessions = manager.sessions.write().await;
+            let session = sessions.get_mut(&id).unwrap();
+            session.info.last_message_at = Utc::now() - chrono::Duration::seconds(2);
+        }
+
+        for _ in 0..25 {
+            if !manager.has_session(&id).await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(!manager.has_session(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_reaper_keeps_active_session() {
+        let mut manager = SessionManager::new_with_settings(
+            10,
+            test_settings_with_idle_timeout(Some(1)),
+        );
+        manager.reaper_interval = Duration::from_millis(20);
+        manager.start_reaper();
+
+        let client = Arc::new(MockModelClient::new("ok"));
+        let id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        for _ in 0..4 {
+            manager
+                .send_message(&id, "keepalive".to_string())
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        assert!(manager.has_session(&id).await);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_cancels_all_sessions() {
+        let manager = SessionManager::new_with_settings(10, test_settings());
+        let mut session_ids = Vec::new();
+
+        for _ in 0..3 {
+            let client = Arc::new(MockModelClient::new("ok").with_delay(StdDuration::from_millis(50)));
+            let id = manager
+                .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+                .await
+                .unwrap();
+            session_ids.push(id);
+        }
+
+        manager.shutdown().await.unwrap();
+
+        assert_eq!(manager.session_count().await, 0);
+        for session_id in session_ids {
+            assert!(!manager.has_session(&session_id).await);
+        }
     }
 
     #[tokio::test]
