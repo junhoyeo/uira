@@ -110,33 +110,9 @@ impl TodoContinuationHook {
                 paths.push(claude_dir.join("todos").join(format!("{}.json", sid)));
             }
 
-            let todos_dir = claude_dir.join("todos");
-            if todos_dir.exists() {
-                if let Ok(entries) = fs::read_dir(&todos_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "json") {
-                            paths.push(path);
-                        }
-                    }
-                }
-            }
-
             let uira_dir = home.join(".uira");
             if let Some(sid) = session_id {
                 paths.push(uira_dir.join("todos").join(format!("{}.json", sid)));
-            }
-
-            let uira_todos_dir = uira_dir.join("todos");
-            if uira_todos_dir.exists() {
-                if let Ok(entries) = fs::read_dir(&uira_todos_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "json") {
-                            paths.push(path);
-                        }
-                    }
-                }
             }
         }
 
@@ -353,6 +329,25 @@ mod tests {
 
         let ctx = StopContext::default();
         assert!(!ctx.is_user_abort());
+    }
+
+    #[test]
+    fn test_todo_file_paths_are_session_scoped() {
+        let paths = TodoContinuationHook::get_todo_file_paths(Some("sid-123"), "/tmp/project");
+
+        let home_todos = paths
+            .iter()
+            .filter(|p| p.to_string_lossy().contains("/.claude/todos/"))
+            .collect::<Vec<_>>();
+        assert!(home_todos.iter().all(|p| p.to_string_lossy().contains("sid-123")));
+
+        let home_uira_todos = paths
+            .iter()
+            .filter(|p| p.to_string_lossy().contains("/.uira/todos/"))
+            .collect::<Vec<_>>();
+        assert!(home_uira_todos
+            .iter()
+            .all(|p| p.to_string_lossy().contains("sid-123")));
     }
 
     #[tokio::test]
