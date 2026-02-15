@@ -295,6 +295,15 @@ impl ChannelBridge {
 
         let capabilities = channel.capabilities();
         let content = adapt_content_for_capabilities(content, &capabilities);
+        if content.is_empty() {
+            debug!(
+                session_id = %session_id,
+                channel_type = %channel_type,
+                account_id = %account_id,
+                "Skipping empty adapted response"
+            );
+            return;
+        }
         if content.len() > capabilities.max_message_length {
             debug!(
                 session_id = %session_id,
@@ -587,15 +596,22 @@ fn strip_markdown_formatting(content: &str) -> String {
         .replace("`", "")
         .replace("**", "")
         .replace("__", "")
-        .replace("~~", "")
-        .replace('#', "")
-        .replace('>', "")
-        .replace('*', "")
-        .replace('_', "");
+        .replace("~~", "");
 
     stripped = stripped
         .lines()
-        .map(|line| line.strip_prefix("- ").unwrap_or(line).trim_end())
+        .map(|line| {
+            let line = line
+                .strip_prefix("###### ")
+                .or_else(|| line.strip_prefix("##### "))
+                .or_else(|| line.strip_prefix("#### "))
+                .or_else(|| line.strip_prefix("### "))
+                .or_else(|| line.strip_prefix("## "))
+                .or_else(|| line.strip_prefix("# "))
+                .unwrap_or(line);
+            let line = line.strip_prefix("> ").unwrap_or(line);
+            line.strip_prefix("- ").unwrap_or(line).trim_end()
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -1293,6 +1309,79 @@ mod tests {
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
         assert_eq!(sent[0].content.trim_end(), "Hello world\n\ncode value");
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_preserves_literal_symbols_while_stripping_markdown() {
+        let sm = test_session_manager_with_mock_client(MockModelClient::new(
+            "C# and a > b and snake_case\n\n## Header",
+        ));
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+        assert_eq!(
+            sent[0].content.trim_end(),
+            "C# and a > b and snake_case\n\nHeader"
+        );
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_drops_empty_message_after_adaptation() {
+        let sm = test_session_manager_with_mock_client(MockModelClient::new("**` `**"));
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        sleep(Duration::from_millis(100)).await;
+        assert!(sent_messages.lock().unwrap().is_empty());
 
         bridge.stop().await;
     }
