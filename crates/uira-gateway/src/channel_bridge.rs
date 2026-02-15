@@ -337,7 +337,6 @@ impl ChannelBridge {
         let channels = self.channels.clone();
         let response_handles = self.response_handles.clone();
         let skill_config = self.skill_config.clone();
-        let account_id = account_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut rx = rx;
