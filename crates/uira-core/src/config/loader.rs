@@ -147,6 +147,7 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         channels: config.channels,
         providers: expand_providers_settings(config.providers),
         keybinds: config.keybinds,
+        sidebar: config.sidebar,
     }
 }
 
