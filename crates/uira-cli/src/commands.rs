@@ -1,6 +1,7 @@
 //! CLI commands
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum CliMode {
@@ -29,9 +30,13 @@ pub struct Cli {
     #[arg(short, long)]
     pub provider: Option<String>,
 
-    /// Sandbox policy (read-only, workspace-write, full-access)
+    /// Sandbox policy (read-only, workspace-write, full-access, custom)
     #[arg(long, default_value = "workspace-write")]
     pub sandbox: String,
+
+    /// Path to JSON file containing custom sandbox rules (used when --sandbox custom)
+    #[arg(long)]
+    pub sandbox_rules: Option<PathBuf>,
 
     /// Run in full-auto mode (no approval prompts)
     #[arg(long)]
@@ -277,5 +282,21 @@ mod tests {
     fn parses_rpc_mode_flag() {
         let cli = Cli::parse_from(["uira-agent", "--mode", "rpc"]);
         assert_eq!(cli.mode, CliMode::Rpc);
+    }
+
+    #[test]
+    fn parses_custom_sandbox_rules_flag() {
+        let cli = Cli::parse_from([
+            "uira-agent",
+            "--sandbox",
+            "custom",
+            "--sandbox-rules",
+            "./sandbox-rules.json",
+        ]);
+        assert_eq!(cli.sandbox, "custom");
+        assert_eq!(
+            cli.sandbox_rules,
+            Some(PathBuf::from("./sandbox-rules.json"))
+        );
     }
 }

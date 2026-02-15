@@ -3,6 +3,8 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -1361,6 +1363,8 @@ fn create_agent_config(
     let sandbox_policy = match cli.sandbox.as_str() {
         "read-only" => SandboxPolicy::read_only(),
         "full-access" => SandboxPolicy::full_access(),
+        "custom" => load_custom_sandbox_policy(cli.sandbox_rules.as_deref(), &cwd)
+            .unwrap_or_else(|| SandboxPolicy::workspace_write(cwd.clone())),
         _ => SandboxPolicy::workspace_write(cwd.clone()),
     };
 
@@ -1399,6 +1403,46 @@ fn create_agent_config(
     }
 
     config
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CustomSandboxRules {
+    #[serde(default)]
+    readable: Vec<PathBuf>,
+    #[serde(default)]
+    writable: Vec<PathBuf>,
+    #[serde(default)]
+    executable: Vec<PathBuf>,
+    #[serde(default)]
+    network: bool,
+}
+
+fn load_custom_sandbox_policy(rules_file: Option<&Path>, cwd: &Path) -> Option<SandboxPolicy> {
+    let rules_file = rules_file?;
+    let raw = std::fs::read_to_string(rules_file).ok()?;
+    let parsed: CustomSandboxRules = serde_json::from_str(&raw).ok()?;
+
+    let base = rules_file.parent().unwrap_or(cwd);
+
+    Some(SandboxPolicy::Custom {
+        readable: resolve_paths(parsed.readable, base),
+        writable: resolve_paths(parsed.writable, base),
+        executable: resolve_paths(parsed.executable, base),
+        network: parsed.network,
+    })
+}
+
+fn resolve_paths(paths: Vec<PathBuf>, base: &Path) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                base.join(path)
+            }
+        })
+        .collect()
 }
 
 async fn prepare_external_mcp(

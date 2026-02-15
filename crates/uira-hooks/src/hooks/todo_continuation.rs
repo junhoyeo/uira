@@ -1,8 +1,11 @@
+use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::hook::{Hook, HookContext, HookResult};
+use crate::types::{HookEvent, HookInput, HookOutput};
 use uira_types::{TodoItem, TodoPriority, TodoStatus};
 
 /// Lenient deserialization struct for backward-compatible parsing of todo files
@@ -244,9 +247,53 @@ impl Default for TodoContinuationHook {
     }
 }
 
+#[async_trait]
+impl Hook for TodoContinuationHook {
+    fn name(&self) -> &str {
+        "todo-continuation"
+    }
+
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::Stop]
+    }
+
+    async fn execute(
+        &self,
+        _event: HookEvent,
+        input: &HookInput,
+        context: &HookContext,
+    ) -> HookResult {
+        let stop_context = StopContext {
+            stop_reason: input.stop_reason.clone(),
+            user_requested: input.user_requested,
+        };
+
+        let result = Self::check_incomplete_todos(
+            input.session_id.as_deref(),
+            &context.directory,
+            Some(&stop_context),
+        );
+
+        if result.count == 0 {
+            return Ok(HookOutput::pass());
+        }
+
+        Ok(HookOutput::continue_with_message(format!(
+            "[TODO CONTINUATION] {} pending task(s) remain. Continue execution until all todos are complete.",
+            result.count
+        )))
+    }
+
+    fn priority(&self) -> i32 {
+        100
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
 
     fn make_item(id: &str, content: &str, status: TodoStatus) -> TodoItem {
         TodoItem {
@@ -306,5 +353,47 @@ mod tests {
 
         let ctx = StopContext::default();
         assert!(!ctx.is_user_abort());
+    }
+
+    #[tokio::test]
+    async fn test_hook_emits_message_for_incomplete_todos() {
+        let temp = tempdir().unwrap();
+        let todo_dir = temp.path().join(".uira");
+        std::fs::create_dir_all(&todo_dir).unwrap();
+
+        let todos = vec![make_item("1", "Pending task", TodoStatus::Pending)];
+        std::fs::write(
+            todo_dir.join("todos.json"),
+            serde_json::to_string(&todos).unwrap(),
+        )
+        .unwrap();
+
+        let hook = TodoContinuationHook::new();
+        let input = HookInput {
+            session_id: Some("test-session".to_string()),
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            directory: Some(temp.path().to_string_lossy().to_string()),
+            stop_reason: None,
+            user_requested: Some(false),
+            transcript_path: None,
+            extra: HashMap::new(),
+        };
+        let context = HookContext::new(
+            Some("test-session".to_string()),
+            temp.path().to_string_lossy().to_string(),
+        );
+
+        let output = hook.execute(HookEvent::Stop, &input, &context).await.unwrap();
+        assert!(output.should_continue);
+        assert!(output
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("TODO CONTINUATION"));
     }
 }
