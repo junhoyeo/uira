@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,6 +15,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tracing::Instrument;
 use uira_core::schema::GatewaySettings;
 
 use crate::channels::{Channel, ChannelResponse};
@@ -30,6 +32,7 @@ struct AppState {
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     auth_token: Option<String>,
     start_time: Instant,
+    next_conn_id: AtomicU64,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,6 +93,7 @@ impl GatewayServer {
             channels: self.channels.clone(),
             auth_token: self.auth_token.clone(),
             start_time: Instant::now(),
+            next_conn_id: AtomicU64::new(1),
         });
         Router::new()
             .route("/ws", axum::routing::any(ws_handler))
@@ -155,8 +159,11 @@ async fn ws_handler(
             _ => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
         }
     }
+    let conn_id = state.next_conn_id.fetch_add(1, Ordering::Relaxed);
     ws.on_upgrade(move |socket| {
+        let span = tracing::info_span!("ws_conn", conn_id);
         handle_socket(socket, state.session_manager.clone(), state.channels.clone())
+            .instrument(span)
     })
     .into_response()
 }
@@ -181,6 +188,8 @@ async fn handle_socket(
     session_manager: Arc<SessionManager>,
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
 ) {
+    tracing::debug!("WebSocket connection established");
+
     let (ws_sender, mut ws_receiver) = socket.split();
     let (tx, rx) = mpsc::channel::<String>(64);
     let mut event_tasks = Vec::new();
@@ -302,6 +311,7 @@ async fn handle_socket(
         task.abort();
     }
     let _ = writer_task.await;
+    tracing::debug!("WebSocket connection closed");
 }
 
 async fn write_outbound(
