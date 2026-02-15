@@ -1398,6 +1398,7 @@ fn build_theme_overrides(
         warning: uira_config.and_then(|cfg| cfg.theme_colors.warning.clone()),
         success: uira_config.and_then(|cfg| cfg.theme_colors.success.clone()),
         borders: uira_config.and_then(|cfg| cfg.theme_colors.borders.clone()),
+        ..Default::default()
     }
 }
 
