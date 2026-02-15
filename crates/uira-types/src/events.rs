@@ -100,6 +100,21 @@ pub enum ThreadEvent {
         duration_secs: f64,
     },
 
+    /// Subagent has been started
+    SubagentStarted {
+        task_id: String,
+        agent_name: String,
+        model: String,
+        session_id: String,
+    },
+    /// Subagent has completed
+    SubagentCompleted {
+        task_id: String,
+        session_id: String,
+        success: bool,
+        duration_secs: f64,
+    },
+
     /// Model was switched at runtime
     ModelSwitched { model: String, provider: String },
 
@@ -144,7 +159,11 @@ pub enum Item {
     },
 
     /// Agent message (text response)
-    AgentMessage { content: String },
+    AgentMessage {
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
 
     /// Tool is being called
     ToolCall {
@@ -335,6 +354,7 @@ mod tests {
     fn test_item_serialization() {
         let item = Item::AgentMessage {
             content: "Hello!".to_string(),
+            name: None,
         };
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("\"type\":\"agent_message\""));
