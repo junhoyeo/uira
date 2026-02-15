@@ -241,15 +241,22 @@ impl SessionManager {
 
                 for session_id in idle_session_ids {
                     // Re-check under read lock before destroying to avoid race condition
-                        let still_idle = {
-                            let sessions = manager.sessions.read().await;
-                            sessions.get(&session_id).is_some_and(|s| {
-                                let idle = now.signed_duration_since(s.info.last_message_at);
-                                idle > idle_timeout
-                            })
-                        };
-                    
+                    let still_idle = {
+                        let sessions = manager.sessions.read().await;
+                        sessions.get(&session_id).is_some_and(|s| {
+                            let idle = now.signed_duration_since(s.info.last_message_at);
+                            idle > idle_timeout
+                        })
+                    };
+
                     if still_idle {
+                        {
+                            let mut sessions = manager.sessions.write().await;
+                            if let Some(session) = sessions.get_mut(&session_id) {
+                                session.info.status = SessionStatus::Idle;
+                            }
+                        }
+
                         if let Err(error) = manager.destroy_session(&session_id).await {
                             if !matches!(error, GatewayError::SessionNotFound(_)) {
                                 tracing::debug!(
@@ -274,6 +281,10 @@ impl SessionManager {
     /// Destroy a session by ID.
     pub async fn destroy_session(&self, session_id: &str) -> Result<(), GatewayError> {
         let mut sessions = self.sessions.write().await;
+
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.info.status = SessionStatus::ShuttingDown;
+        }
 
         let session = sessions
             .remove(session_id)
