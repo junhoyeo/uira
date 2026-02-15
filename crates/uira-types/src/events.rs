@@ -238,40 +238,19 @@ impl std::fmt::Display for AgentState {
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentError {
-    #[error("model error: {message}")]
-    ModelError { message: String },
-
     #[error("tool error: {tool} - {message}")]
     ToolError { tool: String, message: String },
-
-    #[error("sandbox error: {message}")]
-    SandboxError { message: String },
-
-    #[error("context exceeded: {used} tokens used, {limit} limit")]
-    ContextExceeded { used: u64, limit: u64 },
-
-    #[error("approval denied: {reason}")]
-    ApprovalDenied { reason: String },
 
     #[error("cancelled by user")]
     Cancelled,
 
-    #[error("timeout after {seconds}s")]
-    Timeout { seconds: u64 },
-
     #[error("max turns exceeded: {turns}")]
     MaxTurnsExceeded { turns: usize },
-
-    #[error("configuration error: {message}")]
-    ConfigError { message: String },
 }
 
 impl AgentError {
     pub fn is_recoverable(&self) -> bool {
-        matches!(
-            self,
-            Self::ToolError { .. } | Self::ApprovalDenied { .. } | Self::Timeout { .. }
-        )
+        matches!(self, Self::ToolError { .. })
     }
 }
 

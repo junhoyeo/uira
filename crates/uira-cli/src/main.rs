@@ -3,6 +3,7 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
+use secrecy::SecretString;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -118,8 +119,14 @@ async fn run_rpc(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, _provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, _provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
 
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
@@ -148,8 +155,14 @@ async fn run_exec(
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
     let agent_config = create_agent_config(
@@ -1114,10 +1127,18 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
 }
 
 async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_gateway::GatewayServer;
+    use std::collections::HashMap;
+    use uira_gateway::channel_bridge::ChannelSkillConfig;
+    use uira_gateway::{
+        Channel, ChannelBridge, GatewayServer, SkillLoader, SlackChannel, TelegramChannel,
+    };
 
     match command {
-        GatewayCommands::Start { host, port, auth_token } => {
+        GatewayCommands::Start {
+            host,
+            port,
+            auth_token,
+        } => {
             let config = uira_core::loader::load_config(None).ok();
             let mut gateway_settings = config
                 .as_ref()
@@ -1125,25 +1146,175 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                 .cloned()
                 .unwrap_or_default();
 
+            // Warn if gateway.enabled is false in config (but proceed since
+            // the user explicitly ran `gateway start`)
+            if config.is_some() && !gateway_settings.enabled {
+                eprintln!(
+                    "⚠ gateway.enabled is false in config — starting anyway due to explicit CLI invocation. \
+                     Set `gateway.enabled: true` in uira.yml to suppress this warning."
+                );
+            }
+
             let bind_host = host
                 .clone()
                 .unwrap_or_else(|| gateway_settings.host.clone());
             let bind_port = port.unwrap_or(gateway_settings.port);
 
-            // CLI auth_token overrides config
             if auth_token.is_some() {
                 gateway_settings.auth_token = auth_token.clone();
             }
 
-            println!(
-                "{}",
-                format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+            let outbound_channels: Arc<tokio::sync::RwLock<HashMap<String, Arc<dyn Channel>>>> =
+                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+            let server = GatewayServer::new_with_settings(gateway_settings)
+                .with_channels(outbound_channels.clone());
+            let session_manager = server.session_manager();
+
+            let channel_settings = config
+                .as_ref()
+                .map(|c| c.channels.clone())
+                .unwrap_or_default();
+
+            let mut telegram_configs = Vec::new();
+            if let Some(tg) = channel_settings.telegram {
+                telegram_configs.push(tg);
+            }
+            telegram_configs.extend(channel_settings.telegram_accounts);
+
+            let mut slack_configs = Vec::new();
+            if let Some(sl) = channel_settings.slack {
+                slack_configs.push(sl);
+            }
+            slack_configs.extend(channel_settings.slack_accounts);
+
+            let has_channels = !telegram_configs.is_empty() || !slack_configs.is_empty();
+
+            let mut bridge = if has_channels {
+                let mut channel_active_skills: HashMap<String, Vec<String>> = HashMap::new();
+
+                for cfg in &telegram_configs {
+                    if !cfg.active_skills.is_empty() {
+                        channel_active_skills
+                            .entry("telegram".to_string())
+                            .or_default()
+                            .extend(cfg.active_skills.iter().cloned());
+                    }
+                }
+                for cfg in &slack_configs {
+                    if !cfg.active_skills.is_empty() {
+                        channel_active_skills
+                            .entry("slack".to_string())
+                            .or_default()
+                            .extend(cfg.active_skills.iter().cloned());
+                    }
+                }
+
+                for skills in channel_active_skills.values_mut() {
+                    skills.sort();
+                    skills.dedup();
+                }
+
+                let skill_config = if !channel_active_skills.is_empty() {
+                    let skill_paths = config
+                        .as_ref()
+                        .map(|c| c.skills.paths.clone())
+                        .unwrap_or_default();
+
+                    SkillLoader::new(&skill_paths)
+                        .and_then(|loader| {
+                            ChannelSkillConfig::from_active_skills(
+                                Some(&loader),
+                                channel_active_skills,
+                            )
+                        })
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to load channel skills: {e}");
+                            ChannelSkillConfig::new()
+                        })
+                } else {
+                    ChannelSkillConfig::new()
+                };
+
+                Some(
+                    ChannelBridge::with_skill_config(session_manager, skill_config)
+                        .with_outbound_channels(outbound_channels.clone()),
+                )
+            } else {
+                None
+            };
+
+            let mut channel_count = 0usize;
+
+            if let Some(ref mut bridge) = bridge {
+                for tg_config in telegram_configs {
+                    let account_id = tg_config.account_id.clone();
+                    let channel = TelegramChannel::new(tg_config);
+                    match bridge
+                        .register_channel(Box::new(channel), account_id.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!(account_id = %account_id, "Telegram channel registered");
+                            channel_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                account_id = %account_id,
+                                error = %e,
+                                "Failed to register Telegram channel"
+                            );
+                        }
+                    }
+                }
+
+                for sl_config in slack_configs {
+                    let account_id = sl_config.account_id.clone();
+                    let channel = SlackChannel::new(sl_config);
+                    match bridge
+                        .register_channel(Box::new(channel), account_id.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!(account_id = %account_id, "Slack channel registered");
+                            channel_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                account_id = %account_id,
+                                error = %e,
+                                "Failed to register Slack channel"
+                            );
+                        }
+                    }
+                }
+            }
+
+            if channel_count > 0 {
+                println!(
+                    "{}",
+                    format!(
+                        "Gateway started on ws://{}:{} ({channel_count} channel(s) active)",
+                        bind_host, bind_port,
+                    )
                     .green()
                     .bold()
-            );
+                );
+            } else {
+                println!(
+                    "{}",
+                    format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+                        .green()
+                        .bold()
+                );
+            }
 
-            let server = GatewayServer::new_with_settings(gateway_settings);
             server.start(&bind_host, bind_port).await?;
+
+            if let Some(mut bridge) = bridge {
+                bridge.stop().await;
+                tracing::info!("Channel bridge stopped");
+            }
 
             Ok(())
         }
@@ -1167,8 +1338,14 @@ async fn run_interactive(
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
     let agent_config = create_agent_config(
@@ -1251,8 +1428,8 @@ fn create_client(
     agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
     registry: &ModelRegistry,
     agent_model_overrides: &std::collections::HashMap<String, String>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
-    use secrecy::SecretString;
     use uira_types::Provider;
 
     let provider = cli
@@ -1337,17 +1514,191 @@ fn create_client(
                 .ok()
                 .map(SecretString::from);
 
-            let provider_config = ProviderConfig {
-                provider: Provider::OpenCode,
-                api_key,
-                model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
-                ..Default::default()
-            };
+            let opencode_settings = uira_config.map(|cfg| &cfg.opencode);
+            maybe_autostart_opencode_server(opencode_settings);
+            let provider_config =
+                build_opencode_provider_config(api_key, model, opencode_settings);
 
             let client = OpenCodeClient::new(provider_config.clone())?;
             Ok((Arc::new(client), provider_config))
         }
         _ => Err(format!("Unknown provider: {}", provider).into()),
+    }
+}
+
+fn build_opencode_provider_config(
+    api_key: Option<SecretString>,
+    model: Option<String>,
+    settings: Option<&uira_core::schema::OpencodeSettings>,
+) -> ProviderConfig {
+    let mut provider_config = ProviderConfig {
+        provider: uira_types::Provider::OpenCode,
+        api_key,
+        model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
+        ..Default::default()
+    };
+
+    if let Some(opencode) = settings {
+        provider_config.base_url = Some(opencode_base_url(opencode));
+        provider_config.timeout_seconds = Some(opencode.timeout_secs);
+    }
+
+    provider_config
+}
+
+fn opencode_base_url(settings: &uira_core::schema::OpencodeSettings) -> String {
+    format!("http://{}:{}/v1", settings.host, settings.port)
+}
+
+fn maybe_autostart_opencode_server(settings: Option<&uira_core::schema::OpencodeSettings>) {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::process::{Command, Stdio};
+
+    let Some(settings) = settings else {
+        return;
+    };
+
+    if !settings.auto_start {
+        return;
+    }
+
+    let host_port = format!("{}:{}", settings.host, settings.port);
+    let is_running = host_port
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .map(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok())
+        .unwrap_or(false);
+
+    if is_running {
+        return;
+    }
+
+    let args = opencode_server_start_args(settings);
+    if let Err(error) = Command::new("opencode")
+        .args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        tracing::warn!(
+            "Failed to auto-start OpenCode server with `opencode {}`: {}",
+            args.join(" "),
+            error
+        );
+        return;
+    }
+
+    let startup_timeout = Duration::from_secs(settings.timeout_secs.min(10));
+    if !wait_for_listener(&host_port, startup_timeout) {
+        tracing::warn!(
+            "OpenCode auto-start did not become ready at {} within {}s",
+            host_port,
+            startup_timeout.as_secs()
+        );
+    }
+}
+
+fn wait_for_listener(host_port: &str, timeout: Duration) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::thread;
+    use std::time::Instant;
+
+    let Some(addr) = host_port
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+    else {
+        return false;
+    };
+
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    false
+}
+
+fn opencode_server_start_args(settings: &uira_core::schema::OpencodeSettings) -> Vec<String> {
+    vec![
+        "serve".to_string(),
+        "--host".to_string(),
+        settings.host.clone(),
+        "--port".to_string(),
+        settings.port.to_string(),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_opencode_provider_config, opencode_base_url, opencode_server_start_args,
+        wait_for_listener,
+    };
+    use std::net::TcpListener;
+    use std::time::Duration;
+    use uira_core::schema::OpencodeSettings;
+
+    #[test]
+    fn opencode_provider_config_applies_uira_settings() {
+        let settings = OpencodeSettings {
+            host: "192.168.0.50".to_string(),
+            port: 7777,
+            timeout_secs: 45,
+            auto_start: false,
+        };
+
+        let provider_config = build_opencode_provider_config(
+            None,
+            Some("opencode/gpt-5-nano".to_string()),
+            Some(&settings),
+        );
+
+        assert_eq!(
+            provider_config.base_url,
+            Some("http://192.168.0.50:7777/v1".to_string())
+        );
+        assert_eq!(provider_config.timeout_seconds, Some(45));
+        assert_eq!(provider_config.model, "opencode/gpt-5-nano");
+    }
+
+    #[test]
+    fn opencode_base_url_includes_host_and_port() {
+        let settings = OpencodeSettings {
+            host: "localhost".to_string(),
+            port: 4097,
+            timeout_secs: 120,
+            auto_start: true,
+        };
+
+        assert_eq!(opencode_base_url(&settings), "http://localhost:4097/v1");
+    }
+
+    #[test]
+    fn opencode_server_start_args_match_settings() {
+        let settings = OpencodeSettings {
+            host: "127.0.0.1".to_string(),
+            port: 5001,
+            timeout_secs: 120,
+            auto_start: true,
+        };
+
+        assert_eq!(
+            opencode_server_start_args(&settings),
+            vec!["serve", "--host", "127.0.0.1", "--port", "5001"]
+        );
+    }
+
+    #[test]
+    fn wait_for_listener_detects_ready_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(wait_for_listener(&addr.to_string(), Duration::from_millis(300)));
+        drop(listener);
     }
 }
 

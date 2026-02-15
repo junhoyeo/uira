@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,6 +15,8 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tracing::Instrument;
 use uira_core::schema::GatewaySettings;
 
 use crate::channels::{Channel, ChannelResponse};
@@ -30,6 +33,7 @@ struct AppState {
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
     auth_token: Option<String>,
     start_time: Instant,
+    next_conn_id: AtomicU64,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,6 +72,11 @@ impl GatewayServer {
         }
     }
 
+    /// Shared handle to the session manager backing this server.
+    pub fn session_manager(&self) -> Arc<SessionManager> {
+        self.session_manager.clone()
+    }
+
     /// Set an authentication token. When set, WebSocket connections must
     /// provide a matching `Authorization: Bearer <token>` header.
     pub fn with_auth_token(mut self, token: Option<String>) -> Self {
@@ -90,6 +99,7 @@ impl GatewayServer {
             channels: self.channels.clone(),
             auth_token: self.auth_token.clone(),
             start_time: Instant::now(),
+            next_conn_id: AtomicU64::new(1),
         });
         Router::new()
             .route("/ws", axum::routing::any(ws_handler))
@@ -155,8 +165,11 @@ async fn ws_handler(
             _ => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
         }
     }
+    let conn_id = state.next_conn_id.fetch_add(1, Ordering::Relaxed);
     ws.on_upgrade(move |socket| {
+        let span = tracing::info_span!("ws_conn", conn_id);
         handle_socket(socket, state.session_manager.clone(), state.channels.clone())
+            .instrument(span)
     })
     .into_response()
 }
@@ -181,10 +194,11 @@ async fn handle_socket(
     session_manager: Arc<SessionManager>,
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
 ) {
+    tracing::debug!("WebSocket connection established");
+
     let (ws_sender, mut ws_receiver) = socket.split();
     let (tx, rx) = mpsc::channel::<String>(64);
-    let mut event_tasks = Vec::new();
-    let mut subscribed_sessions: HashSet<String> = HashSet::new();
+    let mut event_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
     let writer_task = tokio::spawn(write_outbound(ws_sender, rx));
 
     while let Some(inbound) = ws_receiver.next().await {
@@ -197,7 +211,7 @@ async fn handle_socket(
 
         match serde_json::from_str::<GatewayMessage>(&text) {
             Ok(GatewayMessage::SubscribeEvents { session_id }) => {
-                if subscribed_sessions.contains(&session_id) {
+                if event_tasks.get(&session_id).is_some_and(|t| !t.is_finished()) {
                     let err = GatewayResponse::Error {
                         message: format!(
                             "Already subscribed to events for session '{}'",
@@ -212,7 +226,6 @@ async fn handle_socket(
 
                 match session_manager.subscribe_events(&session_id).await {
                     Some(mut event_rx) => {
-                        subscribed_sessions.insert(session_id.clone());
                         let ack = GatewayResponse::EventsSubscribed {
                             session_id: session_id.clone(),
                         };
@@ -222,7 +235,7 @@ async fn handle_socket(
 
                         let tx_clone = tx.clone();
                         let stream_session_id = session_id.clone();
-                        event_tasks.push(tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             loop {
                                 let event_json = match event_rx.recv().await {
                                     Ok(event_json) => event_json,
@@ -266,7 +279,8 @@ async fn handle_socket(
                                 session_id: stream_session_id,
                             };
                             let _ = tx_clone.send(serialize_response(&ended)).await;
-                        }));
+                        });
+                        event_tasks.insert(session_id, task);
                     }
                     None => {
                         let err = GatewayResponse::Error {
@@ -294,14 +308,15 @@ async fn handle_socket(
             }
         }
 
-        event_tasks.retain(|task| !task.is_finished());
+        event_tasks.retain(|_, task| !task.is_finished());
     }
 
     drop(tx);
-    for task in event_tasks {
+    for (_, task) in event_tasks {
         task.abort();
     }
     let _ = writer_task.await;
+    tracing::debug!("WebSocket connection closed");
 }
 
 async fn write_outbound(
@@ -388,6 +403,12 @@ async fn handle_message(
             recipient,
             text,
         } => {
+            if text.len() > MAX_MESSAGE_CONTENT_SIZE {
+                return GatewayResponse::Error {
+                    message: "Outbound text exceeds maximum size (64KB)".to_string(),
+                };
+            }
+
             let channel = {
                 let channels_map = channels.read().await;
                 channels_map.get(&channel_type).cloned()
@@ -992,6 +1013,54 @@ mod tests {
             resp["message"].as_str().unwrap(),
             "Channel 'nonexistent' not found"
         );
+    }
+
+    #[tokio::test]
+    async fn test_send_outbound_content_too_large() {
+        let (url, _mock_channel) = start_test_server_with_mock_channel().await;
+        let mut ws = connect(&url).await;
+
+        let large_text = "a".repeat(MAX_MESSAGE_CONTENT_SIZE + 1);
+        let msg = serde_json::json!({
+            "type": "send_outbound",
+            "channel_type": "telegram",
+            "recipient": "user123",
+            "text": large_text,
+        })
+        .to_string();
+
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "error");
+        assert_eq!(
+            resp["message"].as_str().unwrap(),
+            "Outbound text exceeds maximum size (64KB)"
+        );
+
+        assert_eq!(_mock_channel.sent_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_send_message_to_shutting_down_session() {
+        let url = start_test_server().await;
+        let mut ws = connect(&url).await;
+
+        let create_resp = send_and_recv(&mut ws, r#"{"type": "create_session"}"#).await;
+        let session_id = create_resp["session_id"].as_str().unwrap().to_string();
+
+        let msg = format!(
+            r#"{{"type": "destroy_session", "session_id": "{}"}}"#,
+            session_id
+        );
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "session_destroyed");
+
+        let msg = format!(
+            r#"{{"type": "send_message", "session_id": "{}", "content": "hello"}}"#,
+            session_id
+        );
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "error");
+        assert!(resp["message"].as_str().unwrap().contains("not found"));
     }
 
     // -- Existing tests ----------------------------------------------------

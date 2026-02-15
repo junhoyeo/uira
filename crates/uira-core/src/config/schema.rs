@@ -370,101 +370,6 @@ fn default_comments_docstrings() -> bool {
     false
 }
 
-/// HUD configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HudConfig {
-    /// HUD preset: "minimal", "standard", "verbose"
-    #[serde(default = "default_hud_preset")]
-    pub preset: String,
-
-    /// Enabled HUD elements
-    #[serde(default)]
-    pub elements: Vec<String>,
-
-    /// Thresholds for warnings and alerts
-    #[serde(default)]
-    pub thresholds: HudThresholds,
-}
-
-impl Default for HudConfig {
-    fn default() -> Self {
-        Self {
-            preset: default_hud_preset(),
-            elements: default_hud_elements(),
-            thresholds: HudThresholds::default(),
-        }
-    }
-}
-
-/// HUD thresholds
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HudThresholds {
-    /// Token usage warning threshold (percentage)
-    #[serde(default = "default_token_warning_threshold")]
-    pub token_warning: f32,
-
-    /// Token usage critical threshold (percentage)
-    #[serde(default = "default_token_critical_threshold")]
-    pub token_critical: f32,
-
-    /// Task count warning threshold
-    #[serde(default = "default_task_warning_threshold")]
-    pub task_warning: usize,
-}
-
-impl Default for HudThresholds {
-    fn default() -> Self {
-        Self {
-            token_warning: default_token_warning_threshold(),
-            token_critical: default_token_critical_threshold(),
-            task_warning: default_task_warning_threshold(),
-        }
-    }
-}
-
-/// Agent tier preferences
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentTierPreferences {
-    /// Default tier for analysis tasks: "low", "medium", "high"
-    #[serde(default = "default_tier")]
-    pub analysis: String,
-
-    /// Default tier for execution tasks: "low", "medium", "high"
-    #[serde(default = "default_tier")]
-    pub execution: String,
-
-    /// Default tier for search tasks: "low", "medium", "high"
-    #[serde(default = "default_tier")]
-    pub search: String,
-
-    /// Default tier for design tasks: "low", "medium", "high"
-    #[serde(default = "default_tier")]
-    pub design: String,
-}
-
-impl Default for AgentTierPreferences {
-    fn default() -> Self {
-        Self {
-            analysis: default_tier(),
-            execution: default_tier(),
-            search: default_tier(),
-            design: default_tier(),
-        }
-    }
-}
-
-/// Plugin settings
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PluginSettings {
-    /// Enabled plugins
-    #[serde(default)]
-    pub enabled: Vec<String>,
-
-    /// Plugin-specific configuration
-    #[serde(default)]
-    pub config: HashMap<String, serde_json::Value>,
-}
-
 /// MCP (Model Context Protocol) settings
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpSettings {
@@ -866,35 +771,6 @@ pub enum PermissionActionConfig {
 }
 
 // Default value functions
-
-fn default_hud_preset() -> String {
-    "standard".to_string()
-}
-
-fn default_hud_elements() -> Vec<String> {
-    vec![
-        "mode".to_string(),
-        "tokens".to_string(),
-        "tasks".to_string(),
-        "agents".to_string(),
-    ]
-}
-
-fn default_token_warning_threshold() -> f32 {
-    70.0
-}
-
-fn default_token_critical_threshold() -> f32 {
-    90.0
-}
-
-fn default_task_warning_threshold() -> usize {
-    10
-}
-
-fn default_tier() -> String {
-    "medium".to_string()
-}
 
 // ============================================================================
 // Skills Configuration

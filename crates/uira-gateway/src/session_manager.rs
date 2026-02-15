@@ -43,7 +43,6 @@ pub struct SessionInfo {
     pub created_at: DateTime<Utc>,
     pub last_message_at: DateTime<Utc>,
     pub config: SessionConfig,
-    pub skill_context: Option<String>,
 }
 
 struct ManagedSession {
@@ -153,8 +152,14 @@ impl SessionManager {
         let relay_handle = tokio::spawn(async move {
             let mut event_stream = event_stream;
             while let Some(event) = event_stream.next().await {
-                let event_json = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-                let _ = relay_broadcast_tx.send(event_json);
+                match serde_json::to_value(&event) {
+                    Ok(event_json) => {
+                        let _ = relay_broadcast_tx.send(event_json);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Failed to serialize agent event; skipping");
+                    }
+                }
             }
         });
 
@@ -171,7 +176,6 @@ impl SessionManager {
             status: SessionStatus::Active,
             created_at: Utc::now(),
             last_message_at: Utc::now(),
-            skill_context: config.skill_context.clone(),
             config,
         };
 
@@ -250,13 +254,6 @@ impl SessionManager {
                     };
 
                     if still_idle {
-                        {
-                            let mut sessions = manager.sessions.write().await;
-                            if let Some(session) = sessions.get_mut(&session_id) {
-                                session.info.status = SessionStatus::Idle;
-                            }
-                        }
-
                         if let Err(error) = manager.destroy_session(&session_id).await {
                             if !matches!(error, GatewayError::SessionNotFound(_)) {
                                 tracing::debug!(
@@ -347,6 +344,13 @@ impl SessionManager {
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| GatewayError::SessionNotFound(session_id.to_string()))?;
+            if session.info.status == SessionStatus::ShuttingDown {
+                return Err(GatewayError::SendFailed(format!(
+                    "Session '{}' is shutting down",
+                    session_id
+                )));
+            }
+            session.info.status = SessionStatus::Active;
             session.info.last_message_at = Utc::now();
             session.agent_input_tx.clone()
         };
@@ -800,6 +804,26 @@ mod tests {
         let manager = SessionManager::new_with_settings(10, test_settings());
         let result = manager.destroy_session("nonexistent").await;
         assert!(matches!(result, Err(GatewayError::SessionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_to_shutting_down_session() {
+        let manager = SessionManager::new_with_settings(10, test_settings());
+        let client = Arc::new(MockModelClient::new("ok"));
+        let id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.get_mut(&id).unwrap().info.status = SessionStatus::ShuttingDown;
+        }
+
+        let result = manager.send_message(&id, "hello".to_string()).await;
+        assert!(matches!(result, Err(GatewayError::SendFailed(_))));
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("shutting down"));
     }
 
     #[tokio::test]

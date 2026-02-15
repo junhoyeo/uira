@@ -1,4 +1,4 @@
-use crate::hooks::{HooksConfig as AiHooksConfig, OnFail};
+use crate::hooks::OnFail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -7,7 +7,7 @@ use std::path::Path;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ai_hooks: Option<AiHooksConfig>,
+    pub ai_hooks: Option<serde_yaml_ng::Value>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
@@ -173,5 +173,23 @@ pre-commit:
         );
         assert!(parsed.hooks.contains_key("pre-commit"));
         assert!(!parsed.hooks.contains_key("theme_colors"));
+    }
+
+    #[test]
+    fn test_ai_hooks_block_not_flattened_into_hooks() {
+        let yaml = r#"
+ai_hooks:
+  pre-check:
+    - run: echo old
+
+pre-commit:
+  commands:
+    - run: cargo fmt --check
+"#;
+
+        let parsed: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(parsed.ai_hooks.is_some());
+        assert!(parsed.hooks.contains_key("pre-commit"));
+        assert!(!parsed.hooks.contains_key("ai_hooks"));
     }
 }

@@ -148,7 +148,7 @@ impl MockChannel {
                 sender: sender.to_string(),
                 content: content.to_string(),
                 channel_type: self.channel_type.clone(),
-                channel_id: "mock-channel".to_string(),
+                channel_id: "test-channel".to_string(),
                 timestamp: Utc::now(),
                 metadata: Default::default(),
             };
@@ -295,6 +295,6 @@ mod tests {
         assert_eq!(msg.content, "hello world");
         assert_eq!(msg.sender, "tester");
         assert_eq!(msg.channel_type, ChannelType::Slack);
-        assert_eq!(msg.channel_id, "mock-channel");
+        assert_eq!(msg.channel_id, "test-channel");
     }
 }
