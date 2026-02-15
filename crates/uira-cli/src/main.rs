@@ -1374,7 +1374,11 @@ async fn run_interactive(
     } else {
         format!("{}/{}", provider_config.provider, provider_config.model)
     };
-    let mut app = uira_tui::App::new().with_model(&active_model_id);
+    let sidebar_config = uira_config
+        .as_ref()
+        .map(|cfg| cfg.sidebar.clone())
+        .unwrap_or_default();
+    let mut app = uira_tui::App::new_with_sidebar(sidebar_config).with_model(&active_model_id);
     let theme_name = uira_config
         .as_ref()
         .map(|cfg| cfg.theme.as_str())

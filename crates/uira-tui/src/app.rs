@@ -22,6 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender};
+use uira_core::schema::SidebarConfig;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -838,6 +839,10 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        Self::new_with_sidebar(SidebarConfig::default())
+    }
+
+    pub fn new_with_sidebar(sidebar: SidebarConfig) -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
         let theme = Theme::default();
         let mut approval_overlay = ApprovalOverlay::new();
@@ -846,6 +851,12 @@ impl App {
         model_selector.set_theme(theme.clone());
         let mut command_palette = CommandPalette::new();
         command_palette.set_theme(theme.clone());
+        let sidebar_sections = [
+            sidebar.show_context,
+            sidebar.show_mcp,
+            sidebar.show_todos,
+            sidebar.show_files,
+        ];
         Self {
             should_quit: false,
             event_tx,
@@ -871,7 +882,7 @@ impl App {
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
-            sidebar_sections: [true; 4],
+            sidebar_sections,
             modified_files: HashSet::new(),
             pending_tool_paths: HashMap::new(),
             subagent_task_sessions: HashMap::new(),
@@ -1285,13 +1296,10 @@ impl App {
         } else {
             "▶"
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} Context", ctx_arrow),
-                Style::default().fg(self.theme.accent),
-            ),
-            Span::styled(" [1]", Style::default().fg(self.theme.text_muted)),
-        ]));
+        lines.push(Line::from(Span::styled(
+            format!("{} Context", ctx_arrow),
+            Style::default().fg(self.theme.accent),
+        )));
         if self.sidebar_sections[0] {
             let model = self.current_model.as_deref().unwrap_or("not connected");
             lines.push(Line::from(Span::styled(
@@ -1318,13 +1326,10 @@ impl App {
         } else {
             "▶"
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} MCP", mcp_arrow),
-                Style::default().fg(self.theme.accent),
-            ),
-            Span::styled(" [2]", Style::default().fg(self.theme.text_muted)),
-        ]));
+        lines.push(Line::from(Span::styled(
+            format!("{} MCP", mcp_arrow),
+            Style::default().fg(self.theme.accent),
+        )));
         if self.sidebar_sections[1] {
             lines.push(Line::from(Span::styled(
                 "  ○ No MCP servers",
@@ -1345,13 +1350,10 @@ impl App {
         } else {
             "▶"
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} Todos ({}/{})", todo_arrow, completed, total),
-                Style::default().fg(self.theme.accent),
-            ),
-            Span::styled(" [3]", Style::default().fg(self.theme.text_muted)),
-        ]));
+        lines.push(Line::from(Span::styled(
+            format!("{} Todos ({}/{})", todo_arrow, completed, total),
+            Style::default().fg(self.theme.accent),
+        )));
         if self.sidebar_sections[2] {
             if self.todos.is_empty() {
                 lines.push(Line::from(Span::styled(
@@ -1402,13 +1404,10 @@ impl App {
         } else {
             "▶"
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} Files ({})", files_arrow, file_count),
-                Style::default().fg(self.theme.accent),
-            ),
-            Span::styled(" [4]", Style::default().fg(self.theme.text_muted)),
-        ]));
+        lines.push(Line::from(Span::styled(
+            format!("{} Files ({})", files_arrow, file_count),
+            Style::default().fg(self.theme.accent),
+        )));
         if self.sidebar_sections[3] {
             if self.modified_files.is_empty() {
                 lines.push(Line::from(Span::styled(
@@ -1858,7 +1857,17 @@ impl App {
         }
 
         // Global shortcuts
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
+        let allow_input_ctrl_shortcut = self.input_focused
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(
+                key.code,
+                KeyCode::Char(c)
+                    if c.eq_ignore_ascii_case(&'a')
+                        || c.eq_ignore_ascii_case(&'e')
+                        || c.eq_ignore_ascii_case(&'u')
+                        || (c.eq_ignore_ascii_case(&'k') && !self.input.is_empty())
+            );
+        if key.modifiers.contains(KeyModifiers::CONTROL) && !allow_input_ctrl_shortcut {
             match key.code {
                 KeyCode::Char('c') | KeyCode::Char('q') => {
                     self.should_quit = true;
@@ -1908,28 +1917,8 @@ impl App {
             return KeyAction::None;
         }
 
-        if key.modifiers.is_empty() && self.input.is_empty() {
+        if key.modifiers.contains(KeyModifiers::ALT) && !self.input_focused {
             match key.code {
-                KeyCode::Char(c) if c.eq_ignore_ascii_case(&'t') => {
-                    self.toggle_todo_sidebar();
-                    return KeyAction::None;
-                }
-                KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
-                    self.mark_selected_todo_done();
-                    return KeyAction::None;
-                }
-                KeyCode::Char(c @ '1'..='4') => {
-                    let idx = (c as usize) - ('1' as usize);
-                    self.sidebar_sections[idx] = !self.sidebar_sections[idx];
-                    let names = ["Context", "MCP", "Todos", "Files"];
-                    let state = if self.sidebar_sections[idx] {
-                        "expanded"
-                    } else {
-                        "collapsed"
-                    };
-                    self.status = format!("{} section {}", names[idx], state);
-                    return KeyAction::None;
-                }
                 KeyCode::Char('[') => {
                     if self.session_stack.is_in_child() {
                         self.session_stack.prev_sibling();
@@ -1950,6 +1939,39 @@ impl App {
         if self.input_focused {
             let char_count = self.input.chars().count();
             match key.code {
+                KeyCode::Char(c)
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && c.eq_ignore_ascii_case(&'a') =>
+                {
+                    self.cursor_pos = 0;
+                }
+                KeyCode::Char(c)
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && c.eq_ignore_ascii_case(&'e') =>
+                {
+                    self.cursor_pos = char_count;
+                }
+                KeyCode::Char(c)
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && c.eq_ignore_ascii_case(&'u') =>
+                {
+                    self.input.clear();
+                    self.cursor_pos = 0;
+                }
+                KeyCode::Char(c)
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && c.eq_ignore_ascii_case(&'k') =>
+                {
+                    if self.cursor_pos < char_count {
+                        let byte_pos = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(self.input.len());
+                        self.input.truncate(byte_pos);
+                    }
+                }
                 KeyCode::Char(c) => {
                     // Exit history mode when typing
                     if self.history_index.is_some() {
@@ -1964,6 +1986,33 @@ impl App {
                         .unwrap_or(self.input.len());
                     self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
+                }
+                KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.cursor_pos > 0 {
+                        let chars: Vec<char> = self.input.chars().collect();
+                        let mut start = self.cursor_pos;
+                        while start > 0 && chars[start - 1].is_whitespace() {
+                            start -= 1;
+                        }
+                        while start > 0 && !chars[start - 1].is_whitespace() {
+                            start -= 1;
+                        }
+
+                        let start_byte = self
+                            .input
+                            .char_indices()
+                            .nth(start)
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        let end_byte = self
+                            .input
+                            .char_indices()
+                            .nth(self.cursor_pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(self.input.len());
+                        self.input.replace_range(start_byte..end_byte, "");
+                        self.cursor_pos = start;
+                    }
                 }
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
@@ -1988,9 +2037,35 @@ impl App {
                         self.input.remove(byte_pos);
                     }
                 }
+                KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.cursor_pos > 0 {
+                        let chars: Vec<char> = self.input.chars().collect();
+                        let mut pos = self.cursor_pos;
+                        while pos > 0 && chars[pos - 1].is_whitespace() {
+                            pos -= 1;
+                        }
+                        while pos > 0 && !chars[pos - 1].is_whitespace() {
+                            pos -= 1;
+                        }
+                        self.cursor_pos = pos;
+                    }
+                }
                 KeyCode::Left => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
+                    }
+                }
+                KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
+                    if self.cursor_pos < char_count {
+                        let chars: Vec<char> = self.input.chars().collect();
+                        let mut pos = self.cursor_pos;
+                        while pos < char_count && !chars[pos].is_whitespace() {
+                            pos += 1;
+                        }
+                        while pos < char_count && chars[pos].is_whitespace() {
+                            pos += 1;
+                        }
+                        self.cursor_pos = pos;
                     }
                 }
                 KeyCode::Right => {
@@ -1999,10 +2074,10 @@ impl App {
                     }
                 }
                 KeyCode::Home => {
-                    self.chat_view.scroll_to_top();
+                    self.cursor_pos = 0;
                 }
                 KeyCode::End => {
-                    self.chat_view.scroll_to_bottom();
+                    self.cursor_pos = char_count;
                 }
                 KeyCode::Enter => {
                     if self.input.is_empty() && self.pending_images.is_empty() {
@@ -2930,6 +3005,45 @@ impl App {
             "toggle_sidebar" => {
                 self.toggle_todo_sidebar();
             }
+            "mark_todo_done" => {
+                self.mark_selected_todo_done();
+            }
+            "toggle_context" => {
+                self.sidebar_sections[0] = !self.sidebar_sections[0];
+                let state = if self.sidebar_sections[0] {
+                    "expanded"
+                } else {
+                    "collapsed"
+                };
+                self.status = format!("Context section {}", state);
+            }
+            "toggle_mcp" => {
+                self.sidebar_sections[1] = !self.sidebar_sections[1];
+                let state = if self.sidebar_sections[1] {
+                    "expanded"
+                } else {
+                    "collapsed"
+                };
+                self.status = format!("MCP section {}", state);
+            }
+            "toggle_todos" => {
+                self.sidebar_sections[2] = !self.sidebar_sections[2];
+                let state = if self.sidebar_sections[2] {
+                    "expanded"
+                } else {
+                    "collapsed"
+                };
+                self.status = format!("Todos section {}", state);
+            }
+            "toggle_files" => {
+                self.sidebar_sections[3] = !self.sidebar_sections[3];
+                let state = if self.sidebar_sections[3] {
+                    "expanded"
+                } else {
+                    "collapsed"
+                };
+                self.status = format!("Files section {}", state);
+            }
             _ => {}
         }
     }
@@ -3066,7 +3180,7 @@ impl App {
                     };
                     let role = if is_error { "error" } else { "tool" };
                     self.chat_view
-                        .push_tool_message(role, tool_name, output, false, None);
+                        .push_tool_message(role, tool_name, output, true, None);
                     if let Some(task_id) = subagent_task_id {
                         if let Some(last) = self.chat_view.messages.last_mut() {
                             last.message_id = Some(task_id);
@@ -3719,6 +3833,18 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_sections_can_start_collapsed_from_config() {
+        let app = App::new_with_sidebar(SidebarConfig {
+            show_context: true,
+            show_mcp: false,
+            show_todos: true,
+            show_files: false,
+        });
+
+        assert_eq!(app.sidebar_sections, [true, false, true, false]);
+    }
+
+    #[test]
     fn unknown_ctrl_shortcut_does_not_insert_text() {
         let mut app = App::new();
 
@@ -3727,6 +3853,120 @@ mod tests {
         assert_eq!(action, KeyAction::None);
         assert!(app.input.is_empty());
         assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn bare_t_in_input_mode_inserts_text_instead_of_toggling_sidebar() {
+        let mut app = App::new();
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()));
+
+        assert_eq!(action, KeyAction::None);
+        assert_eq!(app.input, "t");
+        assert!(app.show_todo_sidebar);
+    }
+
+    #[test]
+    fn ctrl_a_moves_cursor_to_start() {
+        let mut app = App::new();
+        app.input = "hello world".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn ctrl_e_moves_cursor_to_end() {
+        let mut app = App::new();
+        app.input = "hello world".to_string();
+        app.cursor_pos = 0;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.cursor_pos, app.input.chars().count());
+    }
+
+    #[test]
+    fn home_and_end_move_cursor_when_input_focused() {
+        let mut app = App::new();
+        app.input = "hello world".to_string();
+        app.cursor_pos = 5;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.cursor_pos, 0);
+
+        app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.cursor_pos, app.input.chars().count());
+    }
+
+    #[test]
+    fn alt_left_moves_cursor_one_word_backward() {
+        let mut app = App::new();
+        app.input = "hello   world".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
+
+        assert_eq!(app.cursor_pos, 8);
+    }
+
+    #[test]
+    fn alt_right_moves_cursor_one_word_forward() {
+        let mut app = App::new();
+        app.input = "hello   world  done".to_string();
+        app.cursor_pos = 0;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT));
+
+        assert_eq!(app.cursor_pos, 8);
+    }
+
+    #[test]
+    fn alt_backspace_deletes_word_backward() {
+        let mut app = App::new();
+        app.input = "hello   world".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT));
+
+        assert_eq!(app.input, "hello   ");
+        assert_eq!(app.cursor_pos, 8);
+    }
+
+    #[test]
+    fn ctrl_u_clears_input_line() {
+        let mut app = App::new();
+        app.input = "hello world".to_string();
+        app.cursor_pos = 5;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+
+        assert!(app.input.is_empty());
+        assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn ctrl_k_kills_to_end_when_input_non_empty() {
+        let mut app = App::new();
+        app.input = "hello world".to_string();
+        app.cursor_pos = 5;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.input, "hello");
+        assert_eq!(app.cursor_pos, 5);
+        assert!(!app.command_palette.is_active());
+    }
+
+    #[test]
+    fn ctrl_k_opens_command_palette_when_input_empty() {
+        let mut app = App::new();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+
+        assert!(app.command_palette.is_active());
     }
 
     #[test]
