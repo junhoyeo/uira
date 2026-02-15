@@ -1131,6 +1131,15 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                 .cloned()
                 .unwrap_or_default();
 
+            // Warn if gateway.enabled is false in config (but proceed since
+            // the user explicitly ran `gateway start`)
+            if config.is_some() && !gateway_settings.enabled {
+                eprintln!(
+                    "⚠ gateway.enabled is false in config — starting anyway due to explicit CLI invocation. \
+                     Set `gateway.enabled: true` in uira.yml to suppress this warning."
+                );
+            }
+
             let bind_host = host
                 .clone()
                 .unwrap_or_else(|| gateway_settings.host.clone());
