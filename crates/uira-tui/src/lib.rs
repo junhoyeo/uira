@@ -8,11 +8,13 @@
 
 mod app;
 mod events;
+mod keybinds;
 mod theme;
 pub mod views;
 mod widgets;
 
 pub use app::App;
 pub use events::AppEvent;
+pub use keybinds::{KeybindConfig, KeyBinding};
 pub use theme::{Theme, ThemeOverrides};
 pub use views::{ApprovalOverlay, ApprovalRequest, ApprovalView};

@@ -1,5 +1,6 @@
 //! OpenAI client implementation with OAuth (Codex) support
 
+use crate::auth::CredentialStore;
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::StreamExt;
@@ -10,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
-use crate::auth::CredentialStore;
 use uira_types::{
     ContentBlock, ContentDelta, Message, MessageContent, MessageDelta, ModelResponse, Role,
     StopReason, StreamChunk, StreamMessageStart, TokenUsage, ToolSpec,

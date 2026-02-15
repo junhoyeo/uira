@@ -2,11 +2,12 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use uira_types::Provider;
-use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
+use std::time::Instant;
 use uira_orchestration::AgentExecutor;
+use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
+use uira_types::{Provider, ThreadEvent};
 
-use crate::{Agent, AgentConfig};
+use crate::{Agent, AgentConfig, EventSender};
 
 const DEFAULT_MAX_DEPTH: usize = 3;
 
@@ -15,6 +16,7 @@ pub struct ExecutorConfig {
     pub provider_config: ProviderConfig,
     pub agent_config: AgentConfig,
     pub max_depth: usize,
+    pub event_sender: Option<EventSender>,
 }
 
 impl ExecutorConfig {
@@ -23,11 +25,17 @@ impl ExecutorConfig {
             provider_config,
             agent_config,
             max_depth: DEFAULT_MAX_DEPTH,
+            event_sender: None,
         }
     }
 
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = max_depth;
+        self
+    }
+
+    pub fn with_event_sender(mut self, event_sender: EventSender) -> Self {
+        self.event_sender = Some(event_sender);
         self
     }
 }
@@ -102,10 +110,41 @@ impl AgentExecutor for RecursiveAgentExecutor {
         let child_executor = Arc::new(self.child_executor());
         let mut agent = Agent::new_with_executor(agent_config, client, Some(child_executor));
 
-        let result = agent
-            .run(prompt)
-            .await
-            .map_err(|e| format!("Subagent execution failed: {}", e))?;
+        if let Some(ref sender) = self.config.event_sender {
+            agent = agent.with_event_sender(sender.clone());
+        }
+
+        let session_id = agent.session().id.to_string();
+        let task_id = format!("subagent-{}", session_id);
+
+        if let Some(ref sender) = self.config.event_sender {
+            let _ = sender
+                .send(ThreadEvent::SubagentStarted {
+                    task_id: task_id.clone(),
+                    agent_name: model.to_string(),
+                    model: model.to_string(),
+                    session_id: session_id.clone(),
+                })
+                .await;
+        }
+
+        let started_at = Instant::now();
+        let run_result = agent.run(prompt).await;
+        let duration_secs = started_at.elapsed().as_secs_f64();
+
+        if let Some(ref sender) = self.config.event_sender {
+            let success = run_result.as_ref().map(|result| result.success).unwrap_or(false);
+            let _ = sender
+                .send(ThreadEvent::SubagentCompleted {
+                    task_id,
+                    session_id,
+                    success,
+                    duration_secs,
+                })
+                .await;
+        }
+
+        let result = run_result.map_err(|e| format!("Subagent execution failed: {}", e))?;
 
         if result.success {
             Ok(if result.output.is_empty() {

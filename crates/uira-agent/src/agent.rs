@@ -1,5 +1,6 @@
 //! Main agent implementation
 
+use crate::telemetry::{SessionSpan, TurnSpan};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
@@ -11,12 +12,11 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uira_core::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
+use uira_providers::ModelClient;
 use uira_types::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
-use uira_providers::ModelClient;
-use crate::telemetry::{SessionSpan, TurnSpan};
 
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
@@ -89,6 +89,12 @@ impl Agent {
         let (sender, stream) = EventStream::channel(100);
         self.event_sender = Some(sender);
         (self, stream)
+    }
+
+    /// Set event sender directly (for child agents sharing parent's channel)
+    pub fn with_event_sender(mut self, sender: EventSender) -> Self {
+        self.event_sender = Some(sender);
+        self
     }
 
     /// Enable rollout recording for session persistence
@@ -1492,14 +1498,14 @@ impl Agent {
                             .await;
 
                             if decision.is_denied() {
-                                let deny_reason =
-                                    if let uira_types::ReviewDecision::Deny { reason } =
-                                        &decision
-                                    {
-                                        reason.clone().unwrap_or_default()
-                                    } else {
-                                        String::new()
-                                    };
+                                let deny_reason = if let uira_types::ReviewDecision::Deny {
+                                    reason,
+                                } = &decision
+                                {
+                                    reason.clone().unwrap_or_default()
+                                } else {
+                                    String::new()
+                                };
 
                                 let error_msg = format!("Tool execution denied: {}", deny_reason);
                                 results.push(ContentBlock::tool_error(&call.id, &error_msg));

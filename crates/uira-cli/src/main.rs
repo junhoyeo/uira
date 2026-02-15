@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uira_agent::{
-    init_subscriber, init_tui_subscriber, Agent, AgentConfig, ExecutorConfig,
+    init_subscriber, init_tui_subscriber, Agent, AgentConfig, EventStream, ExecutorConfig,
     RecursiveAgentExecutor, TelemetryConfig,
 };
 use uira_orchestration::{get_agent_definitions, ModelRegistry};
@@ -174,17 +174,19 @@ async fn run_exec(
         external_mcp_specs,
     );
 
-    let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
-    let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
-    let agent = Agent::new_with_executor(agent_config, client, Some(executor)).with_rollout()?;
-
     if !json_output {
         println!("{} {}", "Running:".cyan().bold(), prompt.dimmed());
         println!();
     }
 
     if cli.verbose {
-        let (mut agent, mut event_stream) = agent.with_event_stream();
+        let (event_sender, mut event_stream) = EventStream::channel(100);
+        let executor_config = ExecutorConfig::new(provider_config, agent_config.clone())
+            .with_event_sender(event_sender.clone());
+        let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
+        let mut agent = Agent::new_with_executor(agent_config, client, Some(executor))
+            .with_event_sender(event_sender)
+            .with_rollout()?;
 
         let event_printer = tokio::spawn(async move {
             while let Some(event) = event_stream.next().await {
@@ -258,7 +260,9 @@ async fn run_exec(
             print_result(&result);
         }
     } else {
-        let mut agent = agent;
+        let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
+        let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
+        let mut agent = Agent::new_with_executor(agent_config, client, Some(executor)).with_rollout()?;
         let result = agent.run(prompt).await?;
 
         if json_output {
@@ -1419,6 +1423,7 @@ fn build_theme_overrides(
         warning: uira_config.and_then(|cfg| cfg.theme_colors.warning.clone()),
         success: uira_config.and_then(|cfg| cfg.theme_colors.success.clone()),
         borders: uira_config.and_then(|cfg| cfg.theme_colors.borders.clone()),
+        ..Default::default()
     }
 }
 

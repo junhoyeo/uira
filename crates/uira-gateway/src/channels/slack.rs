@@ -143,8 +143,7 @@ impl Channel for SlackChannel {
                 .await
                 .map_err(|e| ChannelError::SendFailed(e.to_string()))?;
 
-            if !status.is_success() || resp_body.get("ok") != Some(&serde_json::Value::Bool(true))
-            {
+            if !status.is_success() || resp_body.get("ok") != Some(&serde_json::Value::Bool(true)) {
                 let err_msg = resp_body["error"]
                     .as_str()
                     .unwrap_or("unknown error")
@@ -247,7 +246,10 @@ async fn run_socket_mode_loop(
         }
 
         if let Some(channel_msg) = parse_socket_mode_event(&envelope, allowed_channels) {
-            debug!("Received message from {}: {}", channel_msg.sender, channel_msg.content);
+            debug!(
+                "Received message from {}: {}",
+                channel_msg.sender, channel_msg.content
+            );
             if tx.send(channel_msg).await.is_err() {
                 info!("Message receiver dropped, stopping Socket Mode loop");
                 break;

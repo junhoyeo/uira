@@ -1,0 +1,19 @@
+# Example: Vim-style keybindings for Uira TUI
+theme: dracula
+
+keybinds:
+  # Vim-style navigation
+  scroll_up: "k"
+  scroll_down: "j"
+  page_up: "ctrl+u"
+  page_down: "ctrl+d"
+  
+  # Keep default command palette
+  command_palette: "ctrl+p"
+  
+  # Keep default sidebar toggle
+  toggle_sidebar: "t"
+  
+  # Keep default tool collapse/expand
+  collapse_tools: "ctrl+o"
+  expand_tools: "ctrl+shift+o"

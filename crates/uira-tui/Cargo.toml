@@ -20,9 +20,11 @@ ratatui = "0.29"
 crossterm = "0.28"
 tui-textarea = "0.7"
 syntect = "5"
+pulldown-cmark = "0.13"
 tracing = "0.1"
 tempfile = { workspace = true }
 base64 = "0.22"
+dirs = "5"
 
 [dev-dependencies]
 tokio = { workspace = true }

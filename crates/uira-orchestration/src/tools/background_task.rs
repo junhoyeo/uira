@@ -1,11 +1,11 @@
+use crate::features::background_agent::{
+    get_background_manager, BackgroundTask, BackgroundTaskConfig, BackgroundTaskStatus, LaunchInput,
+};
 use crate::tools::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use crate::features::background_agent::{
-    get_background_manager, BackgroundTask, BackgroundTaskConfig, BackgroundTaskStatus, LaunchInput,
-};
 
 /// Extract a required string field from input, returning ToolError on failure.
 fn get_required_string(input: &Value, field: &str) -> Result<String, ToolError> {
@@ -327,8 +327,8 @@ pub fn tool_definition() -> ToolDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::features::background_agent::BackgroundManager;
+    use tempfile::TempDir;
 
     /// Helper to create an isolated BackgroundManager for testing
     fn create_test_manager() -> (Arc<BackgroundManager>, TempDir) {

@@ -1,6 +1,6 @@
 pub mod agents;
-pub mod sdk;
 pub mod features;
+pub mod sdk;
 pub mod tools;
 
 pub use agents::{
@@ -13,23 +13,22 @@ pub use agents::{
     AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PromptLoader,
     PromptSource, RoutingTier, TierBuilder, ToolRestrictions, ToolRestrictionsRegistry,
 };
+pub use features::{background_agent, model_routing, uira_state};
+pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,
-    AgentsConfig, AgentTierOverride, BackgroundTask, Context7Config, ExaConfig, FeaturesConfig,
+    AgentTierOverride, AgentsConfig, BackgroundTask, Context7Config, ExaConfig, FeaturesConfig,
     HookContext, HookEvent, HookResult, MagicKeywordsConfig, McpServerConfig, McpServersConfig,
     PermissionsConfig, PluginConfig, QueryOptions, RoutingConfig, SdkError, SdkResult,
     SessionOptions, SessionState, TaskStatus, TierModelsConfig, UiraSession,
 };
-pub use features::{background_agent, model_routing, uira_state};
-pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use tools::{
     builtin_tools, create_builtin_router, register_builtins, register_builtins_with_todos,
-    register_builtins_without_todos, AgentExecutor, ApprovalCache, ApprovalCacheFile,
-    ApprovalKey, AstToolProvider, BashTool, BoxedTool, CacheDecision, CachedApproval,
-    CommentChecker, DelegationToolProvider, EditTool, FetchUrlTool, FunctionTool, GlobTool,
-    GrepTool, LspClient, LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider,
-    PendingApproval, ReadTool, RunOptions, TodoReadTool, TodoSessionInfo, TodoStore,
-    TodoWriteTool, Tool, ToolCallRuntime, ToolContent, ToolContext, ToolDefinition, ToolError,
-    ToolFuture, ToolHandler, ToolInput, ToolOrchestrator, ToolOutput, ToolProvider,
-    ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
+    register_builtins_without_todos, AgentExecutor, ApprovalCache, ApprovalCacheFile, ApprovalKey,
+    AstToolProvider, BashTool, BoxedTool, CacheDecision, CachedApproval, CommentChecker,
+    DelegationToolProvider, EditTool, FetchUrlTool, FunctionTool, GlobTool, GrepTool, LspClient,
+    LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider, PendingApproval, ReadTool,
+    RunOptions, TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, Tool, ToolCallRuntime,
+    ToolContent, ToolContext, ToolDefinition, ToolError, ToolFuture, ToolHandler, ToolInput,
+    ToolOrchestrator, ToolOutput, ToolProvider, ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
 };

@@ -462,7 +462,11 @@ impl Tool for WebSearchTool {
             {
                 Ok(text) => {
                     if text.trim().is_empty() {
-                        (Vec::new(), Some("No search results found".to_string()), "exa")
+                        (
+                            Vec::new(),
+                            Some("No search results found".to_string()),
+                            "exa",
+                        )
                     } else {
                         (Vec::new(), Some(text), "exa")
                     }
@@ -522,12 +526,14 @@ impl Tool for CodeSearchTool {
 
     fn schema(&self) -> JsonSchema {
         JsonSchema::object()
-            .property("query", JsonSchema::string().description("Code search query"))
+            .property(
+                "query",
+                JsonSchema::string().description("Code search query"),
+            )
             .property(
                 "tokens_num",
-                JsonSchema::number().description(
-                    "Number of tokens to return (1000-50000, default: 5000)",
-                ),
+                JsonSchema::number()
+                    .description("Number of tokens to return (1000-50000, default: 5000)"),
             )
             .required(&["query"])
     }
@@ -796,9 +802,12 @@ async fn grep_app_search(
         });
     }
 
-    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
-        message: format!("Failed to read grep.app response body: {e}"),
-    })?;
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to read grep.app response body: {e}"),
+        })?;
 
     parse_mcp_sse_response(&response_text, "grep.app")
 }
@@ -838,9 +847,12 @@ fn parse_mcp_sse_response(response_text: &str, provider: &str) -> Result<String,
             message: format!("{provider} response missing result payload"),
         })?;
 
-        let first = result.content.first().ok_or_else(|| ToolError::ExecutionFailed {
-            message: format!("{provider} response contained no content"),
-        })?;
+        let first = result
+            .content
+            .first()
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: format!("{provider} response contained no content"),
+            })?;
 
         if first.content_type != "text" {
             last_error = Some(format!(
@@ -943,9 +955,12 @@ async fn exa_search(
         });
     }
 
-    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
-        message: format!("Failed to read Exa web search response body: {e}"),
-    })?;
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to read Exa web search response body: {e}"),
+        })?;
 
     match parse_mcp_sse_response(&response_text, "Exa") {
         Ok(text) => Ok(text),
@@ -1005,9 +1020,12 @@ async fn exa_code_search(query: &str, tokens_num: usize) -> Result<String, ToolE
         });
     }
 
-    let response_text = response.text().await.map_err(|e| ToolError::ExecutionFailed {
-        message: format!("Failed to read Exa code search response body: {e}"),
-    })?;
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to read Exa code search response body: {e}"),
+        })?;
 
     parse_mcp_sse_response(&response_text, "Exa")
 }
