@@ -11,6 +11,7 @@ use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uira_core::schema::GatewaySettings;
@@ -194,8 +195,8 @@ async fn handle_socket(
 
         match serde_json::from_str::<GatewayMessage>(&text) {
             Ok(GatewayMessage::SubscribeEvents { session_id }) => {
-                match session_manager.take_event_stream(&session_id).await {
-                    Some(mut event_stream) => {
+                match session_manager.subscribe_events(&session_id).await {
+                    Some(mut event_rx) => {
                         let ack = GatewayResponse::EventsSubscribed {
                             session_id: session_id.clone(),
                         };
@@ -206,9 +207,20 @@ async fn handle_socket(
                         let tx_clone = tx.clone();
                         let stream_session_id = session_id.clone();
                         event_tasks.push(tokio::spawn(async move {
-                            while let Some(event) = event_stream.next().await {
-                                let event_json =
-                                    serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                            loop {
+                                let event_json = match event_rx.recv().await {
+                                    Ok(event_json) => event_json,
+                                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                        tracing::warn!(
+                                            session_id = %stream_session_id,
+                                            skipped,
+                                            "WebSocket event subscriber lagged behind; skipping missed events"
+                                        );
+                                        continue;
+                                    }
+                                    Err(broadcast::error::RecvError::Closed) => break,
+                                };
+
                                 let response = GatewayResponse::AgentEvent {
                                     session_id: stream_session_id.clone(),
                                     event: event_json,
@@ -242,10 +254,7 @@ async fn handle_socket(
                     }
                     None => {
                         let err = GatewayResponse::Error {
-                            message: format!(
-                                "Event stream not available for session '{}' (already subscribed or session not found)",
-                                session_id
-                            ),
+                            message: format!("Session '{}' not found", session_id),
                         };
                         if tx.send(serialize_response(&err)).await.is_err() {
                             break;
@@ -552,7 +561,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_events_twice_returns_error() {
+    async fn test_subscribe_events_twice_succeeds() {
         let url = start_test_server().await;
         let mut ws = connect(&url).await;
 
@@ -572,12 +581,9 @@ mod tests {
         ws.send(tungstenite::Message::Text(subscribe_msg.into()))
             .await
             .unwrap();
-        let second = recv_until_type(&mut ws, "error").await;
-        assert_eq!(second["type"], "error");
-        assert!(second["message"]
-            .as_str()
-            .unwrap()
-            .contains("Event stream not available"));
+        let second = recv_until_type(&mut ws, "events_subscribed").await;
+        assert_eq!(second["type"], "events_subscribed");
+        assert_eq!(second["session_id"].as_str(), Some(session_id.as_str()));
     }
 
     #[tokio::test]

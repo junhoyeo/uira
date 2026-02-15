@@ -4,14 +4,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::{mpsc, RwLock};
+use futures_util::StreamExt;
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 use uira_agent::{Agent, AgentConfig, EventStream};
 use uira_core::schema::GatewaySettings;
 use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
-use uira_types::{Message, Provider};
+use uira_types::{Message, Provider, ThreadEvent};
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;
@@ -48,7 +49,8 @@ pub struct SessionInfo {
 struct ManagedSession {
     info: SessionInfo,
     agent_input_tx: mpsc::Sender<Message>,
-    event_stream: Option<EventStream>,
+    event_broadcast_tx: broadcast::Sender<serde_json::Value>,
+    _relay_handle: JoinHandle<()>,
     agent_handle: JoinHandle<()>,
     agent_control: Arc<AtomicBool>,
 }
@@ -62,6 +64,7 @@ pub struct SessionManager {
     next_id: Arc<AtomicU64>,
     reaper_started: Arc<AtomicBool>,
     reaper_interval: Duration,
+    reaper_handle: Arc<std::sync::Mutex<Option<JoinHandle<()>>>>,
     #[cfg(test)]
     test_model_client: Option<Arc<dyn ModelClient>>,
 }
@@ -79,6 +82,7 @@ impl SessionManager {
             next_id: Arc::new(AtomicU64::new(1)),
             reaper_started: Arc::new(AtomicBool::new(false)),
             reaper_interval: Duration::from_secs(60),
+            reaper_handle: Arc::new(std::sync::Mutex::new(None)),
             #[cfg(test)]
             test_model_client: None,
         }
@@ -97,6 +101,7 @@ impl SessionManager {
             next_id: Arc::new(AtomicU64::new(1)),
             reaper_started: Arc::new(AtomicBool::new(false)),
             reaper_interval: Duration::from_secs(60),
+            reaper_handle: Arc::new(std::sync::Mutex::new(None)),
             test_model_client: Some(test_model_client),
         }
     }
@@ -141,6 +146,16 @@ impl SessionManager {
             .with_rollout()
             .map_err(|e| GatewayError::SessionCreationFailed(e.to_string()))?;
         let (agent, event_stream) = agent.with_event_stream();
+        let (event_broadcast_tx, _) = broadcast::channel::<serde_json::Value>(256);
+        let relay_broadcast_tx = event_broadcast_tx.clone();
+        let relay_handle = tokio::spawn(async move {
+            let mut event_stream = event_stream;
+            while let Some(event) = event_stream.next().await {
+                let event_json = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                let _ = relay_broadcast_tx.send(event_json);
+            }
+        });
+
         let agent_control = agent.control().cancel_signal();
         let (mut agent, agent_input_tx, _approval_rx, _command_tx) = agent.with_interactive();
         let agent_handle = tokio::spawn(async move {
@@ -163,7 +178,8 @@ impl SessionManager {
             ManagedSession {
                 info,
                 agent_input_tx,
-                event_stream: Some(event_stream),
+                event_broadcast_tx,
+                _relay_handle: relay_handle,
                 agent_handle,
                 agent_control,
             },
@@ -186,7 +202,7 @@ impl SessionManager {
             i64::try_from(idle_timeout_secs).unwrap_or(i64::MAX),
         );
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(manager.reaper_interval);
             loop {
                 interval.tick().await;
@@ -231,6 +247,9 @@ impl SessionManager {
                 }
             }
         });
+
+        // Store the reaper handle for shutdown
+        *self.reaper_handle.lock().unwrap() = Some(handle);
     }
 
     /// Destroy a session by ID.
@@ -245,7 +264,8 @@ impl SessionManager {
 
         let ManagedSession {
             agent_input_tx,
-            event_stream: _,
+            event_broadcast_tx: _,
+            _relay_handle,
             agent_handle,
             agent_control,
             info: _,
@@ -253,6 +273,7 @@ impl SessionManager {
 
         agent_control.store(true, Ordering::SeqCst);
         drop(agent_input_tx);
+        _relay_handle.abort();
 
         let abort_handle = agent_handle.abort_handle();
         match timeout(Duration::from_secs(5), agent_handle).await {
@@ -309,6 +330,11 @@ impl SessionManager {
     }
 
     pub async fn shutdown(&self) -> Result<(), GatewayError> {
+        // Abort the reaper task
+        if let Some(handle) = self.reaper_handle.lock().unwrap().take() {
+            handle.abort();
+        }
+
         let sessions = {
             let mut sessions = self.sessions.write().await;
             sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
@@ -319,7 +345,8 @@ impl SessionManager {
         for session in sessions {
             let ManagedSession {
                 agent_input_tx,
-                event_stream: _,
+                event_broadcast_tx: _,
+                _relay_handle,
                 agent_handle,
                 agent_control,
                 info: _,
@@ -327,6 +354,7 @@ impl SessionManager {
 
             agent_control.store(true, Ordering::SeqCst);
             drop(agent_input_tx);
+            _relay_handle.abort();
 
             let abort_handle = agent_handle.abort_handle();
             match timeout(Duration::from_secs(10), agent_handle).await {
@@ -346,11 +374,43 @@ impl SessionManager {
         }
     }
 
-    pub async fn take_event_stream(&self, session_id: &str) -> Option<EventStream> {
-        let mut sessions = self.sessions.write().await;
+    pub async fn subscribe_events(
+        &self,
+        session_id: &str,
+    ) -> Option<broadcast::Receiver<serde_json::Value>> {
+        let sessions = self.sessions.read().await;
         sessions
-            .get_mut(session_id)
-            .and_then(|session| session.event_stream.take())
+            .get(session_id)
+            .map(|session| session.event_broadcast_tx.subscribe())
+    }
+
+    pub async fn take_event_stream(&self, session_id: &str) -> Option<EventStream> {
+        let mut event_rx = self.subscribe_events(session_id).await?;
+        let (event_tx, event_stream) = EventStream::channel(256);
+        let stream_session_id = session_id.to_string();
+        tokio::spawn(async move {
+            loop {
+                let event_json = match event_rx.recv().await {
+                    Ok(event_json) => event_json,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            session_id = %stream_session_id,
+                            skipped,
+                            "Event stream bridge lagged behind; skipping missed events"
+                        );
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+
+                if let Ok(event) = serde_json::from_value::<ThreadEvent>(event_json) {
+                    if event_tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        Some(event_stream)
     }
 
     /// Get the number of active sessions.
@@ -464,9 +524,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration as StdDuration;
 
-    use futures_util::StreamExt;
     use uira_providers::ModelClient;
-    use uira_types::ThreadEvent;
 
     use crate::testing::MockModelClient;
 
@@ -498,8 +556,8 @@ mod tests {
 
         assert!(id.starts_with("gw_ses_"));
         assert_eq!(manager.session_count().await, 1);
-        assert!(manager.take_event_stream(&id).await.is_some());
-        assert!(manager.take_event_stream(&id).await.is_none());
+        assert!(manager.subscribe_events(&id).await.is_some());
+        assert!(manager.subscribe_events(&id).await.is_some());
     }
 
     #[tokio::test]
@@ -513,7 +571,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut event_stream = manager.take_event_stream(&id).await.unwrap();
+        let mut event_stream = manager.subscribe_events(&id).await.unwrap();
 
         manager
             .send_message(&id, "hello".to_string())
@@ -522,13 +580,12 @@ mod tests {
 
         let mut observed_agent_activity = false;
         for _ in 0..20 {
-            if let Ok(Some(event)) = timeout(Duration::from_millis(100), event_stream.next()).await
-            {
-                match event {
-                    ThreadEvent::TurnStarted { .. }
-                    | ThreadEvent::ContentDelta { .. }
-                    | ThreadEvent::ThreadCompleted { .. }
-                    | ThreadEvent::Error { .. } => {
+            if let Ok(Ok(event)) = timeout(Duration::from_millis(100), event_stream.recv()).await {
+                match event.get("type").and_then(serde_json::Value::as_str) {
+                    Some("turn_started")
+                    | Some("content_delta")
+                    | Some("thread_completed")
+                    | Some("error") => {
                         observed_agent_activity = true;
                         break;
                     }
