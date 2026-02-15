@@ -352,6 +352,31 @@ impl ChannelBridge {
             return;
         };
 
+        let capabilities = {
+            let guard = channel.lock().await;
+            guard.capabilities()
+        };
+        let content = adapt_content_for_capabilities(content, &capabilities);
+        if content.is_empty() {
+            debug!(
+                session_id = %session_id,
+                channel_type = %channel_type,
+                account_id = %account_id,
+                "Skipping empty adapted response"
+            );
+            return;
+        }
+        if content.len() > capabilities.max_message_length {
+            debug!(
+                session_id = %session_id,
+                channel_type = %channel_type,
+                account_id = %account_id,
+                content_len = content.len(),
+                max_message_length = capabilities.max_message_length,
+                "Response exceeds channel max_message_length; relying on channel chunking"
+            );
+        }
+
         let response = ChannelResponse {
             content,
             recipient: channel_id,
@@ -386,6 +411,14 @@ impl ChannelBridge {
             .start()
             .await
             .map_err(|e| GatewayError::ServerError(format!("Failed to start channel: {e}")))?;
+
+        info!(
+            channel_type = %channel_type_key,
+            account_id = %account_id,
+            max_message_length = channel_capabilities.max_message_length,
+            supports_markdown = channel_capabilities.supports_markdown,
+            "Registered channel"
+        );
 
         let rx = channel
             .take_message_receiver()
@@ -635,13 +668,51 @@ impl ChannelBridge {
     }
 }
 
+fn adapt_content_for_capabilities(content: String, capabilities: &ChannelCapabilities) -> String {
+    if capabilities.supports_markdown {
+        return content;
+    }
+
+    strip_markdown_formatting(&content)
+}
+
+fn strip_markdown_formatting(content: &str) -> String {
+    let mut stripped = content
+        .replace("```", "")
+        .replace("`", "")
+        .replace("**", "")
+        .replace("__", "")
+        .replace("~~", "");
+
+    stripped = stripped
+        .lines()
+        .map(|line| {
+            let line = line
+                .strip_prefix("###### ")
+                .or_else(|| line.strip_prefix("##### "))
+                .or_else(|| line.strip_prefix("#### "))
+                .or_else(|| line.strip_prefix("### "))
+                .or_else(|| line.strip_prefix("## "))
+                .or_else(|| line.strip_prefix("# "))
+                .unwrap_or(line);
+            let line = line.strip_prefix("> ").unwrap_or(line);
+            line.strip_prefix("- ").unwrap_or(line).trim_end()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    stripped.trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channels::{ChannelMessage, ChannelResponse, ChannelType};
+    use crate::channels::{ChannelError, ChannelMessage, ChannelResponse, ChannelType};
     use crate::testing::{MockChannel, MockModelClient};
+    use async_trait::async_trait;
     use chrono::Utc;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::mpsc;
     use tokio::time::{sleep, Duration, Instant};
     use uira_core::schema::GatewaySettings;
     use uira_providers::ProviderError;
@@ -1250,6 +1321,180 @@ mod tests {
 
         let messages_b = sent_b.lock().unwrap().clone();
         assert!(messages_b.is_empty());
+
+        bridge.stop().await;
+    }
+
+    struct CapabilityMockChannel {
+        channel_type: ChannelType,
+        capabilities: ChannelCapabilities,
+        message_tx: Option<mpsc::Sender<ChannelMessage>>,
+        message_rx: Option<mpsc::Receiver<ChannelMessage>>,
+        sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
+        started: bool,
+    }
+
+    impl CapabilityMockChannel {
+        fn new(channel_type: ChannelType, capabilities: ChannelCapabilities) -> Self {
+            let (tx, rx) = mpsc::channel(32);
+            Self {
+                channel_type,
+                capabilities,
+                message_tx: Some(tx),
+                message_rx: Some(rx),
+                sent_messages: Arc::new(Mutex::new(Vec::new())),
+                started: false,
+            }
+        }
+
+        fn sender(&self) -> mpsc::Sender<ChannelMessage> {
+            self.message_tx.clone().expect("sender already taken")
+        }
+
+        fn sent_messages_shared(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
+            self.sent_messages.clone()
+        }
+    }
+
+    #[async_trait]
+    impl Channel for CapabilityMockChannel {
+        fn channel_type(&self) -> ChannelType {
+            self.channel_type.clone()
+        }
+
+        fn capabilities(&self) -> ChannelCapabilities {
+            self.capabilities.clone()
+        }
+
+        async fn start(&mut self) -> Result<(), ChannelError> {
+            if self.started {
+                return Err(ChannelError::Other("Already started".to_string()));
+            }
+            self.started = true;
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<(), ChannelError> {
+            self.started = false;
+            self.message_tx.take();
+            Ok(())
+        }
+
+        async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
+            self.sent_messages.lock().unwrap().push(response);
+            Ok(())
+        }
+
+        fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
+            self.message_rx.take()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_strips_markdown_for_channels_without_markdown_support() {
+        let sm = test_session_manager_with_mock_client(MockModelClient::new(
+            "# Hello **world**\n\n- `code` _value_",
+        ));
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+        assert_eq!(sent[0].content.trim_end(), "Hello world\n\ncode value");
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_preserves_literal_symbols_while_stripping_markdown() {
+        let sm = test_session_manager_with_mock_client(MockModelClient::new(
+            "C# and a > b and snake_case\n\n## Header",
+        ));
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+        assert_eq!(
+            sent[0].content.trim_end(),
+            "C# and a > b and snake_case\n\nHeader"
+        );
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_drops_empty_message_after_adaptation() {
+        let sm = test_session_manager_with_mock_client(MockModelClient::new("**` `**"));
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        sleep(Duration::from_millis(100)).await;
+        assert!(sent_messages.lock().unwrap().is_empty());
 
         bridge.stop().await;
     }
