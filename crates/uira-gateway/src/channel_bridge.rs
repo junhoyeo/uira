@@ -424,7 +424,7 @@ impl ChannelBridge {
                                 session_routes.clone(),
                             );
                             let mut handles = response_handles.write().await;
-                            handles.retain(|h| h.is_finished());
+                            handles.retain(|h| !h.is_finished());
                             handles.push(delivery_handle);
                         }
                         None => {
