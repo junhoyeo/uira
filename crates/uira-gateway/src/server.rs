@@ -325,12 +325,16 @@ async fn handle_message(
     channels: &Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
 ) -> GatewayResponse {
     match msg {
-        GatewayMessage::CreateSession { config } => match manager.create_session(config).await {
-            Ok(id) => GatewayResponse::SessionCreated { session_id: id },
-            Err(e) => GatewayResponse::Error {
-                message: e.to_string(),
-            },
-        },
+        GatewayMessage::CreateSession { config } => {
+            let mut config = config;
+            config.sanitize();
+            match manager.create_session(config).await {
+                Ok(id) => GatewayResponse::SessionCreated { session_id: id },
+                Err(e) => GatewayResponse::Error {
+                    message: e.to_string(),
+                },
+            }
+        }
         GatewayMessage::ListSessions => {
             let sessions = manager.list_sessions().await;
             GatewayResponse::SessionsList {
