@@ -1010,6 +1010,54 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_send_outbound_content_too_large() {
+        let (url, _mock_channel) = start_test_server_with_mock_channel().await;
+        let mut ws = connect(&url).await;
+
+        let large_text = "a".repeat(MAX_MESSAGE_CONTENT_SIZE + 1);
+        let msg = serde_json::json!({
+            "type": "send_outbound",
+            "channel_type": "telegram",
+            "recipient": "user123",
+            "text": large_text,
+        })
+        .to_string();
+
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "error");
+        assert_eq!(
+            resp["message"].as_str().unwrap(),
+            "Outbound text exceeds maximum size (64KB)"
+        );
+
+        assert_eq!(_mock_channel.sent_message_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_send_message_to_shutting_down_session() {
+        let url = start_test_server().await;
+        let mut ws = connect(&url).await;
+
+        let create_resp = send_and_recv(&mut ws, r#"{"type": "create_session"}"#).await;
+        let session_id = create_resp["session_id"].as_str().unwrap().to_string();
+
+        let msg = format!(
+            r#"{{"type": "destroy_session", "session_id": "{}"}}"#,
+            session_id
+        );
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "session_destroyed");
+
+        let msg = format!(
+            r#"{{"type": "send_message", "session_id": "{}", "content": "hello"}}"#,
+            session_id
+        );
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "error");
+        assert!(resp["message"].as_str().unwrap().contains("not found"));
+    }
+
     // -- Existing tests ----------------------------------------------------
 
     #[tokio::test]
