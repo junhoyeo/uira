@@ -345,6 +345,12 @@ impl SessionManager {
             let session = sessions
                 .get_mut(session_id)
                 .ok_or_else(|| GatewayError::SessionNotFound(session_id.to_string()))?;
+            if session.info.status == SessionStatus::ShuttingDown {
+                return Err(GatewayError::SendFailed(format!(
+                    "Session '{}' is shutting down",
+                    session_id
+                )));
+            }
             session.info.last_message_at = Utc::now();
             session.agent_input_tx.clone()
         };
