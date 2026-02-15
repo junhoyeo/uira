@@ -37,6 +37,8 @@ use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
     ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
 };
+use crate::views::session_nav::{self, SessionStack, SessionView};
+use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, Theme, ThemeOverrides};
 
@@ -555,6 +557,16 @@ fn format_gh_error(stderr: &str) -> String {
     }
 }
 
+fn extract_task_id(output: &str) -> Option<String> {
+    let json = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    for key in ["task_id", "taskId", "id"] {
+        if let Some(value) = json.get(key).and_then(|value| value.as_str()) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
 async fn create_gist_from_markdown(
     markdown: String,
     options: ShareCommandOptions,
@@ -797,6 +809,8 @@ pub struct App {
     current_model: Option<String>,
     session_id: Option<String>,
     current_branch: String,
+    pub session_stack: SessionStack,
+    pub task_registry: BackgroundTaskRegistry,
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
@@ -806,6 +820,7 @@ pub struct App {
     modified_files: HashSet<String>,
     /// Pending tool call paths: tool_call_id -> file_path
     pending_tool_paths: HashMap<String, String>,
+    subagent_task_sessions: HashMap<String, String>,
     theme: Theme,
     theme_overrides: ThemeOverrides,
     pending_images: Vec<PendingImage>,
@@ -851,12 +866,15 @@ impl App {
             current_model: None,
             session_id: None,
             current_branch: "main".to_string(),
+            session_stack: SessionStack::new(),
+            task_registry: BackgroundTaskRegistry::new(),
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
             sidebar_sections: [true; 4],
             modified_files: HashSet::new(),
             pending_tool_paths: HashMap::new(),
+            subagent_task_sessions: HashMap::new(),
             theme,
             theme_overrides: ThemeOverrides::default(),
             pending_images: Vec::new(),
@@ -1001,6 +1019,12 @@ impl App {
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
+        let hud_height = if self.task_registry.has_running_tasks() {
+            1
+        } else {
+            0
+        };
+        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
 
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
@@ -1038,6 +1062,8 @@ impl App {
                 .constraints([
                     Constraint::Min(3),
                     Constraint::Length(INLINE_APPROVAL_HEIGHT),
+                    Constraint::Length(session_header_height),
+                    Constraint::Length(hud_height),
                     Constraint::Length(1),
                     Constraint::Length(3),
                 ])
@@ -1045,21 +1071,27 @@ impl App {
 
             self.chat_view.render_chat(frame, chunks[0]);
             self.approval_overlay.render(frame, chunks[1]);
-            self.render_status(frame, chunks[2]);
-            self.render_input(frame, chunks[3]);
+            self.render_session_header(frame, chunks[2]);
+            self.render_hud(frame, chunks[3]);
+            self.render_status(frame, chunks[4]);
+            self.render_input(frame, chunks[5]);
         } else {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(3),
+                    Constraint::Length(session_header_height),
+                    Constraint::Length(hud_height),
                     Constraint::Length(1),
                     Constraint::Length(3),
                 ])
                 .split(main_area);
 
             self.chat_view.render_chat(frame, chunks[0]);
-            self.render_status(frame, chunks[1]);
-            self.render_input(frame, chunks[2]);
+            self.render_session_header(frame, chunks[1]);
+            self.render_hud(frame, chunks[2]);
+            self.render_status(frame, chunks[3]);
+            self.render_input(frame, chunks[4]);
         }
 
         self.toast_manager.tick();
@@ -1142,6 +1174,30 @@ impl App {
             .style(Style::default().bg(self.theme.bg).fg(self.theme.fg));
 
         frame.render_widget(status, area);
+    }
+
+    fn render_hud(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if !self.task_registry.has_running_tasks() {
+            return;
+        }
+
+        let hud_line = hud::render_hud_line(&self.task_registry);
+        let hud_paragraph = Paragraph::new(hud_line).style(Style::default().bg(self.theme.bg));
+        frame.render_widget(hud_paragraph, area);
+    }
+
+    fn render_session_header(&self, frame: &mut ratatui::Frame, area: Rect) {
+        if !self.session_stack.is_in_child() {
+            return;
+        }
+
+        if let Some(header_line) =
+            session_nav::render_session_header(&self.session_stack, self.theme.accent)
+        {
+            let header_paragraph =
+                Paragraph::new(header_line).style(Style::default().bg(self.theme.bg));
+            frame.render_widget(header_paragraph, area);
+        }
     }
 
     fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1598,6 +1654,12 @@ impl App {
     fn handle_mouse_click_event(&mut self, column: u16, row: u16) {
         let terminal_size = crossterm::terminal::size().unwrap_or((80, 24));
         let area = Rect::new(0, 0, terminal_size.0, terminal_size.1);
+        let hud_height = if self.task_registry.has_running_tasks() {
+            1
+        } else {
+            0
+        };
+        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
         
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
@@ -1624,6 +1686,8 @@ impl App {
                 .constraints([
                     Constraint::Min(3),
                     Constraint::Length(INLINE_APPROVAL_HEIGHT),
+                    Constraint::Length(session_header_height),
+                    Constraint::Length(hud_height),
                     Constraint::Length(1),
                     Constraint::Length(3),
                 ])
@@ -1634,6 +1698,8 @@ impl App {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Min(3),
+                    Constraint::Length(session_header_height),
+                    Constraint::Length(hud_height),
                     Constraint::Length(1),
                     Constraint::Length(3),
                 ])
@@ -1786,7 +1852,7 @@ impl App {
         // Approval overlay takes priority for key handling
         if self.approval_overlay.handle_key(key.code) {
             if !self.approval_overlay.is_active() {
-                self.agent_state = AgentState::Thinking;
+                self.set_agent_state(AgentState::Thinking);
             }
             return KeyAction::None;
         }
@@ -1864,6 +1930,18 @@ impl App {
                     self.status = format!("{} section {}", names[idx], state);
                     return KeyAction::None;
                 }
+                KeyCode::Char('[') => {
+                    if self.session_stack.is_in_child() {
+                        self.session_stack.prev_sibling();
+                        return KeyAction::None;
+                    }
+                }
+                KeyCode::Char(']') => {
+                    if self.session_stack.is_in_child() {
+                        self.session_stack.next_sibling();
+                        return KeyAction::None;
+                    }
+                }
                 _ => {}
             }
         }
@@ -1928,8 +2006,27 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if self.input.is_empty() && self.pending_images.is_empty() {
+                        let selected_task_id = self
+                            .chat_view
+                            .selected_message_index()
+                            .and_then(|idx| self.chat_view.messages.get(idx))
+                            .and_then(|msg| {
+                                let tool_name = msg.tool_output.as_ref()?.tool_name.as_str();
+                                if matches!(tool_name, "delegate_task" | "Task") {
+                                    msg.message_id.clone()
+                                } else {
+                                    None
+                                }
+                            });
                         if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                             self.status = status;
+                            if let Some(task_id) = selected_task_id {
+                                if let Some(session_id) = self.subagent_task_sessions.get(&task_id) {
+                                    if self.session_stack.push_session(session_id) {
+                                        self.status = format!("Entered subagent session {}", session_id);
+                                    }
+                                }
+                            }
                             return KeyAction::None;
                         }
                     }
@@ -1957,8 +2054,9 @@ impl App {
                     }
                 }
                 KeyCode::Esc => {
-                    // Exit history mode if active, otherwise quit
-                    if self.history_index.is_some() {
+                    if self.session_stack.is_in_child() {
+                        self.session_stack.pop_session();
+                    } else if self.history_index.is_some() {
                         self.history_index = None;
                         self.input = self.history_stash.clone();
                         self.cursor_pos = self.input.chars().count();
@@ -2246,7 +2344,7 @@ impl App {
         let has_images = !pending_images.is_empty();
 
         let display_message = Self::format_user_display(&input, &pending_images);
-        self.chat_view.push_message("user", display_message);
+        self.chat_view.push_message("user", display_message, None);
 
         let message = if has_images {
             let mut blocks = match MessageContent::from_prompt(&input) {
@@ -2286,7 +2384,7 @@ impl App {
             } else {
                 "Processing...".to_string()
             };
-            self.agent_state = AgentState::Thinking;
+            self.set_agent_state(AgentState::Thinking);
         } else {
             self.status = "No agent connected".to_string();
         }
@@ -2537,7 +2635,7 @@ impl App {
         let target = match parse_review_target_from_command(raw_command) {
             Ok(target) => target,
             Err(err) => {
-                self.chat_view.push_message("error", err);
+                self.chat_view.push_message("error", err, None);
                 return;
             }
         };
@@ -2547,7 +2645,7 @@ impl App {
             Ok(content) => content,
             Err(err) => {
                 self.chat_view
-                    .push_message("error", format!("Failed to gather review input: {}", err));
+                    .push_message("error", format!("Failed to gather review input: {}", err), None);
                 return;
             }
         };
@@ -2558,20 +2656,23 @@ impl App {
             } else {
                 format!(" Skipped binary files: {}.", skipped_binary.join(", "))
             };
-            self.chat_view.push_message(
-                "system",
-                format!("No diff found for {}.{}", target_description, suffix),
-            );
+                self.chat_view.push_message(
+                    "system",
+                    format!("No diff found for {}.{}", target_description, suffix),
+                    None,
+                );
             return;
         }
 
-        self.chat_view.push_message("user", raw_command.to_string());
+        self.chat_view
+            .push_message("user", raw_command.to_string(), None);
         self.chat_view.push_message(
             "system",
             format!(
                 "Starting review for {}. Output will be grouped into issues, suggestions, and praise.",
                 target_description
             ),
+            None,
         );
 
         let mut review_prompt = build_review_prompt(&target, &content);
@@ -2588,7 +2689,7 @@ impl App {
                 }
             });
             self.status = "Processing review...".to_string();
-            self.agent_state = AgentState::Thinking;
+            self.set_agent_state(AgentState::Thinking);
         } else {
             self.status = "No agent connected".to_string();
         }
@@ -2603,12 +2704,10 @@ impl App {
                 self.should_quit = true;
             }
             "/help" | "/h" | "/?" => {
-                self.chat_view.messages.push(ChatMessage {
-                    role: "system".to_string(),
-                    content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments"
-                        .to_string(),
-                    tool_output: None,
-                });
+                self.chat_view.messages.push(ChatMessage::new(
+                    "system",
+                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
+                ));
             }
             "/auth" | "/status" => {
                 let status_msg = if self.agent_input_tx.is_some() {
@@ -2619,6 +2718,7 @@ impl App {
                 self.chat_view.push_message(
                     "system",
                     format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
+                    None,
                 );
             }
             "/clear" => {
@@ -2630,11 +2730,9 @@ impl App {
             "/image" => {
                 let path_arg = input[command.len()..].trim();
                 if path_arg.is_empty() {
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: "Usage: /image <path>".to_string(),
-                        tool_output: None,
-                    });
+                    self.chat_view
+                        .messages
+                        .push(ChatMessage::new("system", "Usage: /image <path>"));
                     self.chat_view.auto_scroll_to_bottom();
                     return;
                 }
@@ -2646,21 +2744,19 @@ impl App {
                         let image_size = Self::format_size(image.size_bytes);
                         self.pending_images.push(image);
                         self.status = format!("Attached {} image(s)", self.pending_images.len());
-                        self.chat_view.messages.push(ChatMessage {
-                            role: "system".to_string(),
-                            content: format!(
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!(
                                 "Attached image: {} ({})\nIt will be sent with your next prompt.",
                                 image_label, image_size
                             ),
-                            tool_output: None,
-                        });
+                        ));
                     }
                     Err(error) => {
-                        self.chat_view.messages.push(ChatMessage {
-                            role: "error".to_string(),
-                            content: format!("Failed to attach image: {}", error),
-                            tool_output: None,
-                        });
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "error",
+                            format!("Failed to attach image: {}", error),
+                        ));
                     }
                 }
             }
@@ -2670,21 +2766,19 @@ impl App {
                     let image_size = Self::format_size(image.size_bytes);
                     self.pending_images.push(image);
                     self.status = format!("Attached {} image(s)", self.pending_images.len());
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!(
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "system",
+                        format!(
                             "Captured screenshot: {} ({})\nIt will be sent with your next prompt.",
                             image_label, image_size
                         ),
-                        tool_output: None,
-                    });
+                    ));
                 }
                 Err(error) => {
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "error".to_string(),
-                        content: format!("Failed to capture screenshot: {}", error),
-                        tool_output: None,
-                    });
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "error",
+                        format!("Failed to capture screenshot: {}", error),
+                    ));
                 }
             },
             "/review" => {
@@ -2704,11 +2798,9 @@ impl App {
                 if let Some(branch_name) = parts.get(1) {
                     self.switch_branch(branch_name);
                 } else {
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: "Usage: /switch <branch>".to_string(),
-                        tool_output: None,
-                    });
+                    self.chat_view
+                        .messages
+                        .push(ChatMessage::new("system", "Usage: /switch <branch>"));
                 }
             }
             "/branches" => {
@@ -2720,14 +2812,13 @@ impl App {
             "/share" => match parse_share_command(&parts) {
                 Ok(options) => self.share_session(options),
                 Err(err) => {
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "error".to_string(),
-                        content: format!(
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "error",
+                        format!(
                             "{}\nUsage: /share [--public] [--description <text>]",
                             err
                         ),
-                        tool_output: None,
-                    });
+                    ));
                 }
             },
             "/models" => {
@@ -2758,6 +2849,7 @@ impl App {
                                 "Unknown model: {}. Use /models to see available options.",
                                 model_name
                             ),
+                            None,
                         );
                     }
                 } else {
@@ -2768,6 +2860,7 @@ impl App {
                     self.chat_view.push_message(
                         "system",
                         format!("Current model: {}\nUsage: /model <name>", current),
+                        None,
                     );
                 }
             }
@@ -2776,30 +2869,24 @@ impl App {
                     match self.set_theme_by_name(theme_name) {
                         Ok(()) => {
                             self.status = format!("Theme changed to {}", self.theme.name);
-                            self.chat_view.messages.push(ChatMessage {
-                                role: "system".to_string(),
-                                content: format!("Theme set to {}", self.theme.name),
-                                tool_output: None,
-                            });
+                            self.chat_view.messages.push(ChatMessage::new(
+                                "system",
+                                format!("Theme set to {}", self.theme.name),
+                            ));
                         }
                         Err(err) => {
-                            self.chat_view.messages.push(ChatMessage {
-                                role: "system".to_string(),
-                                content: err,
-                                tool_output: None,
-                            });
+                            self.chat_view.messages.push(ChatMessage::new("system", err));
                         }
                     }
                 } else {
-                    self.chat_view.messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: format!(
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "system",
+                        format!(
                             "Current theme: {}\nAvailable themes: {}\nUsage: /theme <name>",
                             self.theme.name,
                             Theme::available_names().join(", ")
                         ),
-                        tool_output: None,
-                    });
+                    ));
                 }
             }
             _ => {
@@ -2809,6 +2896,7 @@ impl App {
                         "Unknown command: {}. Type /help for available commands.",
                         command
                     ),
+                    None,
                 );
             }
         }
@@ -2852,7 +2940,7 @@ impl App {
             AppEvent::Agent(thread_event) => self.handle_agent_event(thread_event),
             AppEvent::TracingLog(msg) => {
                 self.chat_view
-                    .push_message("error", format!("log: {}", msg));
+                    .push_message("error", format!("log: {}", msg), None);
             }
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
@@ -2860,14 +2948,14 @@ impl App {
             AppEvent::ApprovalRequest(request) => {
                 // Enqueue approval and update state
                 self.approval_overlay.enqueue(request);
-                self.agent_state = AgentState::WaitingForApproval;
+                self.set_agent_state(AgentState::WaitingForApproval);
             }
             AppEvent::TodoUpdated(todos) => {
                 self.todos = todos;
             }
             AppEvent::Info(message) => {
                 self.status = message.clone();
-                self.chat_view.push_message("system", message);
+                self.chat_view.push_message("system", message, None);
             }
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
@@ -2876,7 +2964,7 @@ impl App {
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
                 self.chat_view
-                    .push_message("system", format!("Error: {}", msg));
+                    .push_message("system", format!("Error: {}", msg), None);
             }
         }
     }
@@ -2885,7 +2973,7 @@ impl App {
         match event {
             ThreadEvent::ThreadStarted { thread_id } => {
                 self.session_id = Some(thread_id);
-                self.agent_state = AgentState::Thinking;
+                self.set_agent_state(AgentState::Thinking);
                 self.status = "Agent started".to_string();
             }
             ThreadEvent::TurnStarted { turn_number } => {
@@ -2898,7 +2986,7 @@ impl App {
                 );
             }
             ThreadEvent::WaitingForInput { prompt } => {
-                self.agent_state = AgentState::WaitingForUser;
+                self.set_agent_state(AgentState::WaitingForUser);
                 self.status = prompt;
                 self.process_queued_messages();
             }
@@ -2927,10 +3015,10 @@ impl App {
                         }
                     }
                     self.chat_view.tool_call_names.insert(id, name.clone());
-                    self.agent_state = AgentState::ExecutingTool;
+                    self.set_agent_state(AgentState::ExecutingTool);
                     self.status = format!("Executing: {}", name);
                 }
-                Item::AgentMessage { content } => {
+                Item::AgentMessage { content, .. } => {
                     // Start streaming
                     self.chat_view.set_streaming_buffer(content);
                 }
@@ -2943,7 +3031,7 @@ impl App {
                     // Note: Actual approval requests come via the approval channel with oneshot sender
                     // This event is just for logging/display purposes
                     self.status = format!("Approval needed: {} - {}", tool_name, reason);
-                    self.agent_state = AgentState::WaitingForApproval;
+                    self.set_agent_state(AgentState::WaitingForApproval);
                     tracing::debug!(
                         "Approval request: {} for {} with input {:?}",
                         id,
@@ -2971,19 +3059,29 @@ impl App {
                         .tool_call_names
                         .remove(&tool_call_id)
                         .unwrap_or_else(|| "tool".to_string());
+                    let subagent_task_id = if matches!(tool_name.as_str(), "delegate_task" | "Task") {
+                        extract_task_id(&output)
+                    } else {
+                        None
+                    };
                     let role = if is_error { "error" } else { "tool" };
                     self.chat_view
-                        .push_tool_message(role, tool_name, output, false);
-                    self.agent_state = AgentState::Thinking;
+                        .push_tool_message(role, tool_name, output, false, None);
+                    if let Some(task_id) = subagent_task_id {
+                        if let Some(last) = self.chat_view.messages.last_mut() {
+                            last.message_id = Some(task_id);
+                        }
+                    }
+                    self.set_agent_state(AgentState::Thinking);
                 }
-                Item::AgentMessage { content } => {
+                Item::AgentMessage { content, name } => {
                     self.chat_view.clear_streaming_buffer();
                     if let Some(thinking) = self.chat_view.take_thinking_buffer() {
                         if !thinking.is_empty() {
-                            self.chat_view.push_message("thinking", thinking);
+                            self.chat_view.push_message("thinking", thinking, None);
                         }
                     }
-                    self.chat_view.push_message("assistant", content);
+                    self.chat_view.push_message("assistant", content, name);
                 }
                 Item::ApprovalDecision {
                     request_id,
@@ -2995,15 +3093,15 @@ impl App {
                         if approved { "granted" } else { "denied" }
                     );
                     if approved {
-                        self.agent_state = AgentState::ExecutingTool;
+                        self.set_agent_state(AgentState::ExecutingTool);
                     } else {
-                        self.agent_state = AgentState::Thinking;
+                        self.set_agent_state(AgentState::Thinking);
                     }
                 }
                 _ => {}
             },
             ThreadEvent::ThreadCompleted { usage } => {
-                self.agent_state = AgentState::Complete;
+                self.set_agent_state(AgentState::Complete);
                 self.status = format!(
                     "Complete (total: {} in / {} out tokens)",
                     usage.input_tokens, usage.output_tokens
@@ -3011,24 +3109,24 @@ impl App {
 
                 if let Some(thinking) = self.chat_view.take_thinking_buffer() {
                     if !thinking.is_empty() {
-                        self.chat_view.push_message("thinking", thinking);
+                        self.chat_view.push_message("thinking", thinking, None);
                     }
                 }
 
                 if let Some(buffer) = self.chat_view.clear_streaming_buffer() {
                     if !buffer.is_empty() {
-                        self.chat_view.push_message("assistant", buffer);
+                        self.chat_view.push_message("assistant", buffer, None);
                     }
                 }
             }
             ThreadEvent::ThreadCancelled => {
-                self.agent_state = AgentState::Cancelled;
+                self.set_agent_state(AgentState::Cancelled);
                 self.status = "Cancelled".to_string();
             }
             ThreadEvent::Error { message, .. } => {
-                self.agent_state = AgentState::Failed;
+                self.set_agent_state(AgentState::Failed);
                 self.status = format!("Error: {}", message);
-                self.chat_view.push_message("error", message);
+                self.chat_view.push_message("error", message, None);
             }
             // Goal Verification Events
             ThreadEvent::GoalVerificationStarted { goals, .. } => {
@@ -3048,6 +3146,7 @@ impl App {
                         "{} Goal '{}': {:.1}% (target: {:.1}%)",
                         icon, goal, score, target
                     ),
+                    None,
                 );
             }
             ThreadEvent::GoalVerificationCompleted {
@@ -3075,23 +3174,28 @@ impl App {
                 self.chat_view.push_message(
                     "system",
                     format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
+                    None,
                 );
             }
             ThreadEvent::RalphCircuitBreak { reason, iteration } => {
                 self.chat_view.push_message(
                     "system",
                     format!("Ralph stopped at iteration {}: {}", iteration, reason),
+                    None,
                 );
-                self.agent_state = AgentState::Complete;
+                self.set_agent_state(AgentState::Complete);
             }
             ThreadEvent::BackgroundTaskSpawned {
                 task_id,
                 description,
-                ..
+                agent: ref agent_name,
             } => {
+                self.task_registry
+                    .on_spawned(task_id.clone(), description.clone(), agent_name.clone());
                 self.chat_view.push_message(
                     "system",
                     format!("Background task started: {} ({})", description, task_id),
+                    Some(agent_name.clone()),
                 );
             }
             ThreadEvent::BackgroundTaskProgress {
@@ -3099,23 +3203,68 @@ impl App {
                 status,
                 message,
             } => {
+                self.task_registry.on_progress(&task_id, &status);
                 let msg = message.map(|m| format!(": {}", m)).unwrap_or_default();
                 self.chat_view.push_message(
                     "system",
                     format!("Background task {} - {}{}", task_id, status, msg),
+                    None,
                 );
             }
             ThreadEvent::BackgroundTaskCompleted {
                 task_id, success, ..
             } => {
+                self.task_registry.on_completed(&task_id, success);
                 let status = if success { "completed" } else { "failed" };
                 self.chat_view
-                    .push_message("system", format!("Background task {}: {}", task_id, status));
+                    .push_message("system", format!("Background task {}: {}", task_id, status), None);
+            }
+            ThreadEvent::SubagentStarted {
+                task_id,
+                agent_name,
+                model,
+                session_id,
+            } => {
+                self.subagent_task_sessions
+                    .insert(task_id.clone(), session_id.clone());
+                let parent_id = self.session_stack.current_id().to_string();
+                let child = SessionView::child(
+                    session_id.clone(),
+                    agent_name.clone(),
+                    Some(model.clone()),
+                    parent_id,
+                );
+                self.session_stack.register_child(child);
+                self.chat_view.push_message(
+                    "system",
+                    format!(
+                        "Subagent started: {} ({}, task: {}, session: {})",
+                        agent_name, model, task_id, session_id
+                    ),
+                    Some(agent_name),
+                );
+            }
+            ThreadEvent::SubagentCompleted {
+                task_id,
+                session_id,
+                success,
+                duration_secs,
+            } => {
+                self.session_stack.mark_completed(&session_id, success);
+                let status = if success { "completed" } else { "failed" };
+                self.chat_view.push_message(
+                    "system",
+                    format!(
+                        "Subagent {}: {} (task: {}, {:.1}s)",
+                        session_id, status, task_id, duration_secs
+                    ),
+                    None,
+                );
             }
             ThreadEvent::ModelSwitched { model, provider } => {
                 self.status = format!("Model: {}/{}", provider, model);
                 self.chat_view
-                    .push_message("system", format!("Switched to {}/{}", provider, model));
+                    .push_message("system", format!("Switched to {}/{}", provider, model), None);
             }
             ThreadEvent::TodoUpdated { todos } => {
                 let pending = todos
@@ -3139,7 +3288,7 @@ impl App {
     }
 
     pub fn add_message(&mut self, role: &str, content: &str) {
-        self.chat_view.push_message(role, content.to_string());
+        self.chat_view.push_message(role, content.to_string(), None);
         #[cfg(test)]
         {
             self.messages = self.chat_view.messages.clone();
@@ -3154,6 +3303,7 @@ impl App {
     /// Set the agent state
     pub fn set_agent_state(&mut self, state: AgentState) {
         self.agent_state = state;
+        self.chat_view.agent_state = state;
     }
 
     fn switch_model(&mut self, model_str: &str) {
@@ -3186,6 +3336,7 @@ impl App {
                             "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
                             model_str
                         ),
+                        None,
                     );
                 }
             }
@@ -3199,6 +3350,7 @@ impl App {
                 self.chat_view.push_message(
                     "error",
                     format!("Failed to create client for {}: {}", model_str, e),
+                    None,
                 );
             }
         }
@@ -3206,11 +3358,10 @@ impl App {
 
     fn share_session(&mut self, options: ShareCommandOptions) {
         if self.chat_view.messages.is_empty() {
-            self.chat_view.messages.push(ChatMessage {
-                role: "system".to_string(),
-                content: "No messages to share yet. Start a conversation first.".to_string(),
-                tool_output: None,
-            });
+            self.chat_view.messages.push(ChatMessage::new(
+                "system",
+                "No messages to share yet. Start a conversation first.",
+            ));
             return;
         }
 
@@ -3223,6 +3374,7 @@ impl App {
             "system",
             "Warning: sharing may include sensitive content from system/tool outputs. Review before sharing.\nUse /share --public only when intentional."
                 .to_string(),
+            None,
         );
 
         tokio::spawn(async move {
@@ -3299,6 +3451,7 @@ impl App {
             self.chat_view.push_message(
                 "error",
                 "No agent connected. Cannot fork session.".to_string(),
+                None,
             );
         }
     }
@@ -3347,11 +3500,10 @@ impl App {
                 }
             });
         } else {
-            self.chat_view.messages.push(ChatMessage {
-                role: "error".to_string(),
-                content: "No agent connected. Cannot switch branches.".to_string(),
-                tool_output: None,
-            });
+            self.chat_view.messages.push(ChatMessage::new(
+                "error",
+                "No agent connected. Cannot switch branches.",
+            ));
         }
     }
 
@@ -3400,11 +3552,10 @@ impl App {
                 }
             });
         } else {
-            self.chat_view.messages.push(ChatMessage {
-                role: "error".to_string(),
-                content: "No agent connected. Cannot list branches.".to_string(),
-                tool_output: None,
-            });
+            self.chat_view.messages.push(ChatMessage::new(
+                "error",
+                "No agent connected. Cannot list branches.",
+            ));
         }
     }
 
@@ -3445,11 +3596,10 @@ impl App {
                 }
             });
         } else {
-            self.chat_view.messages.push(ChatMessage {
-                role: "error".to_string(),
-                content: "No agent connected. Cannot show branch tree.".to_string(),
-                tool_output: None,
-            });
+            self.chat_view.messages.push(ChatMessage::new(
+                "error",
+                "No agent connected. Cannot show branch tree.",
+            ));
         }
     }
 }
@@ -3622,16 +3772,8 @@ mod tests {
     #[test]
     fn render_session_markdown_includes_metadata_and_messages() {
         let messages = vec![
-            ChatMessage {
-                role: "user".to_string(),
-                content: "Fix auth bug".to_string(),
-                tool_output: None,
-            },
-            ChatMessage {
-                role: "assistant".to_string(),
-                content: "I'll help".to_string(),
-                tool_output: None,
-            },
+            ChatMessage::new("user", "Fix auth bug"),
+            ChatMessage::new("assistant", "I'll help"),
         ];
 
         let markdown = render_session_markdown(&messages, Some("sess-123"), Some("anthropic/test"));
