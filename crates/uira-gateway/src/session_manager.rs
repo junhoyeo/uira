@@ -43,7 +43,6 @@ pub struct SessionInfo {
     pub created_at: DateTime<Utc>,
     pub last_message_at: DateTime<Utc>,
     pub config: SessionConfig,
-    pub skill_context: Option<String>,
 }
 
 struct ManagedSession {
@@ -171,7 +170,6 @@ impl SessionManager {
             status: SessionStatus::Active,
             created_at: Utc::now(),
             last_message_at: Utc::now(),
-            skill_context: config.skill_context.clone(),
             config,
         };
 
