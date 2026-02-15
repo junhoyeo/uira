@@ -398,6 +398,12 @@ async fn handle_message(
             recipient,
             text,
         } => {
+            if text.len() > MAX_MESSAGE_CONTENT_SIZE {
+                return GatewayResponse::Error {
+                    message: "Outbound text exceeds maximum size (64KB)".to_string(),
+                };
+            }
+
             let channel = {
                 let channels_map = channels.read().await;
                 channels_map.get(&channel_type).cloned()
