@@ -4,6 +4,8 @@ use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
 use secrecy::SecretString;
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -1712,6 +1714,16 @@ fn create_agent_config(
     let sandbox_policy = match cli.sandbox.as_str() {
         "read-only" => SandboxPolicy::read_only(),
         "full-access" => SandboxPolicy::full_access(),
+        "custom" => match load_custom_sandbox_policy(cli.sandbox_rules.as_deref(), &cwd) {
+            Ok(policy) => policy,
+            Err(error) => {
+                tracing::warn!(
+                    "Invalid custom sandbox rules; falling back to read-only policy: {}",
+                    error
+                );
+                SandboxPolicy::read_only()
+            }
+        },
         _ => SandboxPolicy::workspace_write(cwd.clone()),
     };
 
@@ -1750,6 +1762,79 @@ fn create_agent_config(
     }
 
     config
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CustomSandboxRules {
+    #[serde(default)]
+    readable: Vec<PathBuf>,
+    #[serde(default)]
+    writable: Vec<PathBuf>,
+    #[serde(default)]
+    executable: Vec<PathBuf>,
+    #[serde(default)]
+    network: bool,
+}
+
+#[derive(Debug)]
+enum CustomSandboxRulesError {
+    MissingRulesPath,
+    ReadError { path: String, message: String },
+    ParseError { path: String, message: String },
+}
+
+impl std::fmt::Display for CustomSandboxRulesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingRulesPath => write!(f, "missing --sandbox-rules path"),
+            Self::ReadError { path, message } => {
+                write!(f, "failed to read rules file '{}': {}", path, message)
+            }
+            Self::ParseError { path, message } => {
+                write!(f, "invalid JSON in rules file '{}': {}", path, message)
+            }
+        }
+    }
+}
+
+impl std::error::Error for CustomSandboxRulesError {}
+
+fn load_custom_sandbox_policy(
+    rules_file: Option<&Path>,
+    cwd: &Path,
+) -> Result<SandboxPolicy, CustomSandboxRulesError> {
+    let rules_file = rules_file.ok_or(CustomSandboxRulesError::MissingRulesPath)?;
+    let raw = std::fs::read_to_string(rules_file).map_err(|e| CustomSandboxRulesError::ReadError {
+        path: rules_file.display().to_string(),
+        message: e.to_string(),
+    })?;
+    let parsed: CustomSandboxRules =
+        serde_json::from_str(&raw).map_err(|e| CustomSandboxRulesError::ParseError {
+            path: rules_file.display().to_string(),
+            message: e.to_string(),
+        })?;
+
+    let base = rules_file.parent().unwrap_or(cwd);
+
+    Ok(SandboxPolicy::Custom {
+        readable: resolve_paths(parsed.readable, base),
+        writable: resolve_paths(parsed.writable, base),
+        executable: resolve_paths(parsed.executable, base),
+        network: parsed.network,
+    })
+}
+
+fn resolve_paths(paths: Vec<PathBuf>, base: &Path) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                base.join(path)
+            }
+        })
+        .collect()
 }
 
 async fn prepare_external_mcp(
