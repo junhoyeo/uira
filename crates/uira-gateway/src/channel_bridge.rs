@@ -376,11 +376,37 @@ impl ChannelBridge {
                 );
 
                 if let Err(e) = session_manager.send_message(&session_id, msg.content).await {
-                    error!(
-                        session_id = %session_id,
-                        error = %e,
-                        "Failed to route message to session"
+                    let is_stale_session = matches!(
+                        &e,
+                        GatewayError::SessionNotFound(_) | GatewayError::SendFailed(_)
                     );
+
+                    if is_stale_session {
+                        {
+                            let mut write_guard = sender_sessions.write().await;
+                            write_guard.remove(&key);
+                        }
+
+                        {
+                            let mut routes = session_routes.write().await;
+                            routes.remove(&session_id);
+                        }
+
+                        info!(
+                            session_id = %session_id,
+                            channel_type = %key.0,
+                            account_id = %key.1,
+                            sender = %key.2,
+                            error = %e,
+                            "Evicted stale session mapping after routing failure"
+                        );
+                    } else {
+                        error!(
+                            session_id = %session_id,
+                            error = %e,
+                            "Failed to route message to session"
+                        );
+                    }
                 }
             }
 
