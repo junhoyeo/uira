@@ -74,6 +74,7 @@ pub struct Theme {
     pub syntax_type: Color,
     pub syntax_operator: Color,
     pub syntax_punctuation: Color,
+    pub agent_colors: Vec<Color>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -175,6 +176,152 @@ fn blend(a: Color, b: Color, ratio: f32) -> Color {
         (ag as f32 * inv + bg as f32 * ratio) as u8,
         (ab as f32 * inv + bb as f32 * ratio) as u8,
     )
+}
+
+fn default_agent_palette() -> Vec<Color> {
+    vec![
+        Color::Cyan,
+        Color::Green,
+        Color::Yellow,
+        Color::Magenta,
+        Color::Blue,
+        Color::Red,
+    ]
+}
+
+fn agent_palette_for_theme(name: &str) -> Vec<Color> {
+    match name {
+        "default" | "dark" | "light" => default_agent_palette(),
+        "dracula" => vec![
+            Color::Rgb(139, 233, 253),
+            Color::Rgb(80, 250, 123),
+            Color::Rgb(241, 250, 140),
+            Color::Rgb(255, 121, 198),
+            Color::Rgb(189, 147, 249),
+            Color::Rgb(255, 85, 85),
+        ],
+        "nord" => vec![
+            Color::Rgb(136, 192, 208),
+            Color::Rgb(163, 190, 140),
+            Color::Rgb(235, 203, 139),
+            Color::Rgb(180, 142, 173),
+            Color::Rgb(129, 161, 193),
+            Color::Rgb(191, 97, 106),
+        ],
+        "catppuccin-mocha" => vec![
+            Color::Rgb(137, 220, 235),
+            Color::Rgb(166, 227, 161),
+            Color::Rgb(249, 226, 175),
+            Color::Rgb(245, 194, 231),
+            Color::Rgb(137, 180, 250),
+            Color::Rgb(243, 139, 168),
+        ],
+        "catppuccin-latte" => vec![
+            Color::Rgb(4, 165, 229),
+            Color::Rgb(64, 160, 43),
+            Color::Rgb(223, 142, 29),
+            Color::Rgb(234, 118, 203),
+            Color::Rgb(30, 102, 245),
+            Color::Rgb(210, 15, 57),
+        ],
+        "gruvbox-dark" => vec![
+            Color::Rgb(142, 192, 124),
+            Color::Rgb(184, 187, 38),
+            Color::Rgb(250, 189, 47),
+            Color::Rgb(211, 134, 155),
+            Color::Rgb(131, 165, 152),
+            Color::Rgb(251, 73, 52),
+        ],
+        "gruvbox-light" => vec![
+            Color::Rgb(7, 151, 178),
+            Color::Rgb(152, 151, 26),
+            Color::Rgb(215, 153, 33),
+            Color::Rgb(143, 63, 113),
+            Color::Rgb(7, 102, 120),
+            Color::Rgb(204, 36, 29),
+        ],
+        "tokyonight" => vec![
+            Color::Rgb(115, 218, 202),
+            Color::Rgb(158, 206, 106),
+            Color::Rgb(224, 175, 104),
+            Color::Rgb(187, 154, 247),
+            Color::Rgb(122, 162, 247),
+            Color::Rgb(247, 118, 142),
+        ],
+        "rosepine" => vec![
+            Color::Rgb(156, 207, 216),
+            Color::Rgb(49, 116, 143),
+            Color::Rgb(246, 193, 119),
+            Color::Rgb(196, 167, 231),
+            Color::Rgb(235, 188, 186),
+            Color::Rgb(235, 111, 146),
+        ],
+        "solarized-dark" => vec![
+            Color::Rgb(42, 161, 152),
+            Color::Rgb(133, 153, 0),
+            Color::Rgb(181, 137, 0),
+            Color::Rgb(108, 113, 196),
+            Color::Rgb(38, 139, 210),
+            Color::Rgb(220, 50, 47),
+        ],
+        "solarized-light" => vec![
+            Color::Rgb(42, 161, 152),
+            Color::Rgb(133, 153, 0),
+            Color::Rgb(181, 137, 0),
+            Color::Rgb(108, 113, 196),
+            Color::Rgb(38, 139, 210),
+            Color::Rgb(220, 50, 47),
+        ],
+        "monokai" => vec![
+            Color::Rgb(102, 217, 239),
+            Color::Rgb(166, 226, 46),
+            Color::Rgb(230, 219, 116),
+            Color::Rgb(174, 129, 255),
+            Color::Rgb(253, 151, 31),
+            Color::Rgb(249, 38, 114),
+        ],
+        "kanagawa" => vec![
+            Color::Rgb(126, 156, 216),
+            Color::Rgb(152, 187, 108),
+            Color::Rgb(226, 194, 111),
+            Color::Rgb(210, 126, 153),
+            Color::Rgb(122, 168, 159),
+            Color::Rgb(195, 64, 67),
+        ],
+        "github-dark" => vec![
+            Color::Rgb(56, 139, 253),
+            Color::Rgb(63, 185, 80),
+            Color::Rgb(210, 153, 34),
+            Color::Rgb(163, 113, 247),
+            Color::Rgb(121, 192, 255),
+            Color::Rgb(255, 123, 114),
+        ],
+        "github-light" => vec![
+            Color::Rgb(9, 105, 218),
+            Color::Rgb(26, 127, 55),
+            Color::Rgb(154, 103, 0),
+            Color::Rgb(130, 80, 223),
+            Color::Rgb(5, 80, 174),
+            Color::Rgb(207, 34, 46),
+        ],
+        "aura" => vec![
+            Color::Rgb(97, 255, 202),
+            Color::Rgb(130, 233, 255),
+            Color::Rgb(255, 202, 99),
+            Color::Rgb(255, 148, 214),
+            Color::Rgb(163, 128, 255),
+            Color::Rgb(255, 102, 102),
+        ],
+        "material" => vec![
+            Color::Rgb(137, 221, 255),
+            Color::Rgb(195, 232, 141),
+            Color::Rgb(255, 203, 107),
+            Color::Rgb(199, 146, 234),
+            Color::Rgb(130, 170, 255),
+            Color::Rgb(240, 113, 120),
+        ],
+        _ => default_agent_palette(),
+    }
 }
 
 impl Theme {
@@ -291,12 +438,13 @@ impl Theme {
             syntax_type: warning,
             syntax_operator: fg,
             syntax_punctuation: borders,
+            agent_colors: default_agent_palette(),
         }
     }
 
     pub fn from_name(name: &str) -> Result<Self, String> {
         let normalized = name.trim().to_ascii_lowercase();
-        let theme = match normalized.as_str() {
+        let mut theme = match normalized.as_str() {
             // -- Original 5 themes (base colors UNCHANGED) --------------------
             "default" => Self::base(
                 "default",
@@ -969,6 +1117,7 @@ impl Theme {
             }
         };
 
+        theme.agent_colors = agent_palette_for_theme(theme.name.as_str());
         Ok(theme)
     }
 
@@ -1350,6 +1499,14 @@ mod tests {
         assert_eq!(theme.bg_panel, Color::Rgb(255, 0, 0));
         assert_eq!(theme.syntax_keyword, Color::Rgb(0, 255, 0));
         assert_eq!(theme.md_heading, Color::Rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn test_agent_palette_present_for_all_themes() {
+        for name in Theme::available_names() {
+            let theme = Theme::from_name(name).unwrap();
+            assert_eq!(theme.agent_colors.len(), 6);
+        }
     }
 
     #[test]
