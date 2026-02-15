@@ -141,9 +141,10 @@ mod tests {
     fn test_workspace_write_policy() {
         let policy = generate_policy(&SandboxPolicy::WorkspaceWrite {
             workspace: PathBuf::from("/workspace"),
-            protected_paths: vec![PathBuf::from(".git")],
+            protected_paths: vec![],
         });
         assert!(policy.contains("(allow file-write* (subpath \"/workspace\"))"));
-        assert!(policy.contains("(deny file-write* (subpath \"/workspace/.git\"))"));
+        // .git is no longer protected by default
+        assert!(!policy.contains("(deny file-write* (subpath \"/workspace/.git\"))"));
     }
 }

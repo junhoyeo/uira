@@ -43,7 +43,7 @@ impl Default for SandboxPolicy {
     fn default() -> Self {
         Self::WorkspaceWrite {
             workspace: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            protected_paths: vec![PathBuf::from(".git")],
+            protected_paths: vec![],
         }
     }
 }
@@ -56,7 +56,7 @@ impl SandboxPolicy {
     pub fn workspace_write(workspace: impl Into<PathBuf>) -> Self {
         Self::WorkspaceWrite {
             workspace: workspace.into(),
-            protected_paths: vec![PathBuf::from(".git")],
+            protected_paths: vec![],
         }
     }
 
