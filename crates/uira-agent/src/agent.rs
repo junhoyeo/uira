@@ -91,6 +91,12 @@ impl Agent {
         (self, stream)
     }
 
+    /// Set event sender directly (for child agents sharing parent's channel)
+    pub fn with_event_sender(mut self, sender: EventSender) -> Self {
+        self.event_sender = Some(sender);
+        self
+    }
+
     /// Enable rollout recording for session persistence
     pub fn with_rollout(mut self) -> Result<Self, AgentLoopError> {
         let meta = SessionMetaLine::new(
