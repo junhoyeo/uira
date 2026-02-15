@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -183,6 +183,7 @@ async fn handle_socket(
     let (ws_sender, mut ws_receiver) = socket.split();
     let (tx, rx) = mpsc::channel::<String>(64);
     let mut event_tasks = Vec::new();
+    let mut subscribed_sessions: HashSet<String> = HashSet::new();
     let writer_task = tokio::spawn(write_outbound(ws_sender, rx));
 
     while let Some(inbound) = ws_receiver.next().await {
@@ -195,8 +196,22 @@ async fn handle_socket(
 
         match serde_json::from_str::<GatewayMessage>(&text) {
             Ok(GatewayMessage::SubscribeEvents { session_id }) => {
+                if subscribed_sessions.contains(&session_id) {
+                    let err = GatewayResponse::Error {
+                        message: format!(
+                            "Already subscribed to events for session '{}'",
+                            session_id
+                        ),
+                    };
+                    if tx.send(serialize_response(&err)).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+
                 match session_manager.subscribe_events(&session_id).await {
                     Some(mut event_rx) => {
+                        subscribed_sessions.insert(session_id.clone());
                         let ack = GatewayResponse::EventsSubscribed {
                             session_id: session_id.clone(),
                         };
@@ -561,7 +576,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_events_twice_succeeds() {
+    async fn test_subscribe_events_twice_fails() {
         let url = start_test_server().await;
         let mut ws = connect(&url).await;
 
@@ -581,9 +596,12 @@ mod tests {
         ws.send(tungstenite::Message::Text(subscribe_msg.into()))
             .await
             .unwrap();
-        let second = recv_until_type(&mut ws, "events_subscribed").await;
-        assert_eq!(second["type"], "events_subscribed");
-        assert_eq!(second["session_id"].as_str(), Some(session_id.as_str()));
+        let second = recv_until_type(&mut ws, "error").await;
+        assert_eq!(second["type"], "error");
+        assert!(second["message"]
+            .as_str()
+            .unwrap()
+            .contains("Already subscribed"));
     }
 
     #[tokio::test]
