@@ -293,6 +293,8 @@ async fn handle_socket(
                 }
             }
         }
+
+        event_tasks.retain(|task| !task.is_finished());
     }
 
     drop(tx);
