@@ -7,6 +7,9 @@ use std::path::Path;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_hooks: Option<serde_yaml_ng::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +110,7 @@ impl Config {
         hooks.insert("post-commit".to_string(), post_commit);
 
         Config {
+            ai_hooks: None,
             theme: None,
             theme_colors: None,
             hooks,
@@ -169,5 +173,23 @@ pre-commit:
         );
         assert!(parsed.hooks.contains_key("pre-commit"));
         assert!(!parsed.hooks.contains_key("theme_colors"));
+    }
+
+    #[test]
+    fn test_ai_hooks_block_not_flattened_into_hooks() {
+        let yaml = r#"
+ai_hooks:
+  pre-check:
+    - run: echo old
+
+pre-commit:
+  commands:
+    - run: cargo fmt --check
+"#;
+
+        let parsed: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(parsed.ai_hooks.is_some());
+        assert!(parsed.hooks.contains_key("pre-commit"));
+        assert!(!parsed.hooks.contains_key("ai_hooks"));
     }
 }
