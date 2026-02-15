@@ -141,6 +141,21 @@ async fn ws_handler(
     .into_response()
 }
 
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let max_len = a_bytes.len().max(b_bytes.len());
+
+    let mut diff = a_bytes.len() ^ b_bytes.len();
+    for i in 0..max_len {
+        let a_byte = *a_bytes.get(i).unwrap_or(&0);
+        let b_byte = *b_bytes.get(i).unwrap_or(&0);
+        diff |= (a_byte ^ b_byte) as usize;
+    }
+
+    diff == 0
+}
+
 async fn handle_socket(
     mut socket: WebSocket,
     session_manager: Arc<SessionManager>,
@@ -161,7 +176,12 @@ async fn handle_socket(
             },
         };
 
-        let response_json = serde_json::to_string(&response).unwrap_or_default();
+        let response_json = match serde_json::to_string(&response) {
+            Ok(json) => json,
+            Err(_) => {
+                r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
+            }
+        };
         if socket
             .send(Message::text(response_json))
             .await
@@ -220,8 +240,12 @@ async fn handle_message(
             recipient,
             text,
         } => {
-            let channels_map = channels.read().await;
-            match channels_map.get(&channel_type) {
+            let channel = {
+                let channels_map = channels.read().await;
+                channels_map.get(&channel_type).cloned()
+            };
+
+            match channel {
                 Some(channel) => {
                     let response = ChannelResponse {
                         content: text,
