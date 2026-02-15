@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 use uira_core::schema::GatewaySettings;
 
@@ -192,8 +193,7 @@ async fn handle_socket(
 
     let (ws_sender, mut ws_receiver) = socket.split();
     let (tx, rx) = mpsc::channel::<String>(64);
-    let mut event_tasks = Vec::new();
-    let mut subscribed_sessions: HashSet<String> = HashSet::new();
+    let mut event_tasks: HashMap<String, JoinHandle<()>> = HashMap::new();
     let writer_task = tokio::spawn(write_outbound(ws_sender, rx));
 
     while let Some(inbound) = ws_receiver.next().await {
@@ -206,7 +206,7 @@ async fn handle_socket(
 
         match serde_json::from_str::<GatewayMessage>(&text) {
             Ok(GatewayMessage::SubscribeEvents { session_id }) => {
-                if subscribed_sessions.contains(&session_id) {
+                if event_tasks.get(&session_id).is_some_and(|t| !t.is_finished()) {
                     let err = GatewayResponse::Error {
                         message: format!(
                             "Already subscribed to events for session '{}'",
@@ -221,7 +221,6 @@ async fn handle_socket(
 
                 match session_manager.subscribe_events(&session_id).await {
                     Some(mut event_rx) => {
-                        subscribed_sessions.insert(session_id.clone());
                         let ack = GatewayResponse::EventsSubscribed {
                             session_id: session_id.clone(),
                         };
@@ -231,7 +230,7 @@ async fn handle_socket(
 
                         let tx_clone = tx.clone();
                         let stream_session_id = session_id.clone();
-                        event_tasks.push(tokio::spawn(async move {
+                        let task = tokio::spawn(async move {
                             loop {
                                 let event_json = match event_rx.recv().await {
                                     Ok(event_json) => event_json,
@@ -275,7 +274,8 @@ async fn handle_socket(
                                 session_id: stream_session_id,
                             };
                             let _ = tx_clone.send(serialize_response(&ended)).await;
-                        }));
+                        });
+                        event_tasks.insert(session_id, task);
                     }
                     None => {
                         let err = GatewayResponse::Error {
@@ -303,11 +303,11 @@ async fn handle_socket(
             }
         }
 
-        event_tasks.retain(|task| !task.is_finished());
+        event_tasks.retain(|_, task| !task.is_finished());
     }
 
     drop(tx);
-    for task in event_tasks {
+    for (_, task) in event_tasks {
         task.abort();
     }
     let _ = writer_task.await;
