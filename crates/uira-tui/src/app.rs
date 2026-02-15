@@ -1,17 +1,17 @@
 //! Main TUI application
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span, Text},
+    style::Style,
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,17 +20,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::mpsc;
 use uira_agent::{Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender};
+use uira_providers::{
+    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
+    ProviderConfig, SecretString,
+};
 use uira_types::Provider;
 use uira_types::{
     AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
     TodoItem, TodoPriority, TodoStatus,
 };
-use uira_providers::{
-    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
-    ProviderConfig, SecretString,
-};
 
-use crate::views::{ApprovalOverlay, ApprovalRequest, ModelSelector, MODEL_GROUPS};
+use crate::views::{
+    ApprovalOverlay, ApprovalRequest, ChatView, ModelSelector, ToastManager, ToastVariant,
+    MODEL_GROUPS,
+};
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, Theme, ThemeOverrides};
 
@@ -118,7 +121,6 @@ fn parse_review_target(arguments: &[&str]) -> Result<ReviewTarget, String> {
     if arguments.is_empty() {
         return Ok(ReviewTarget::Staged);
     }
-
     let target = arguments.join(" ");
     if is_commit_reference(&target) {
         if is_valid_commit_reference(&target) {
@@ -144,7 +146,6 @@ fn parse_review_target_from_command(raw_command: &str) -> Result<ReviewTarget, S
     if remainder.is_empty() {
         return Ok(ReviewTarget::Staged);
     }
-
     let target = if remainder.len() >= 2 {
         let bytes = remainder.as_bytes();
         if (bytes[0] == b'"' && bytes[remainder.len() - 1] == b'"')
@@ -235,11 +236,9 @@ fn normalize_numstat_path(path: &str) -> String {
             }
         }
     }
-
     if let Some((_, to)) = path.rsplit_once(" => ") {
         return to.trim().to_string();
     }
-
     path.to_string()
 }
 
@@ -248,7 +247,6 @@ fn take_diff_token(input: &str) -> Option<(String, &str)> {
     if trimmed.is_empty() {
         return None;
     }
-
     if let Some(rest) = trimmed.strip_prefix('"') {
         let mut escaped = false;
         let mut token = String::new();
@@ -279,7 +277,6 @@ fn parse_diff_paths(header: &str) -> Option<(String, String)> {
     let rest = header.strip_prefix("diff --git ")?;
     let (left, rest) = take_diff_token(rest)?;
     let (right, _) = take_diff_token(rest)?;
-
     Some((
         left.trim_start_matches("a/").to_string(),
         right.trim_start_matches("b/").to_string(),
@@ -528,7 +525,6 @@ fn format_gh_error(stderr: &str) -> String {
         return "GitHub CLI (`gh`) is not installed. Install it from https://cli.github.com/"
             .to_string();
     }
-
     if lowered.contains("not logged into")
         || lowered.contains("authentication")
         || lowered.contains("gh auth login")
@@ -615,54 +611,6 @@ async fn create_gist_from_markdown(
     Ok(url)
 }
 
-fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> Vec<Line<'static>> {
-    let prefix_len = prefix.chars().count();
-    let content_width = max_width.saturating_sub(prefix_len);
-
-    if content_width == 0 {
-        return vec![Line::from(Span::styled(prefix.to_string(), style))];
-    }
-
-    let mut lines = Vec::new();
-    let mut first = true;
-
-    for paragraph in content.split('\n') {
-        let chars: Vec<char> = paragraph.chars().collect();
-        if chars.is_empty() {
-            let line_prefix = if first { prefix } else { "" };
-            lines.push(Line::from(Span::styled(line_prefix.to_string(), style)));
-            first = false;
-            continue;
-        }
-
-        let mut i = 0;
-        while i < chars.len() {
-            let width = if first { content_width } else { max_width };
-            let end = (i + width).min(chars.len());
-            let chunk: String = chars[i..end].iter().collect();
-
-            let line = if first {
-                Line::from(vec![
-                    Span::styled(prefix.to_string(), style.add_modifier(Modifier::BOLD)),
-                    Span::styled(chunk, style),
-                ])
-            } else {
-                Line::from(Span::styled(chunk, style))
-            };
-
-            lines.push(line);
-            first = false;
-            i = end;
-        }
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(prefix.to_string(), style)));
-    }
-
-    lines
-}
-
 fn format_branch_list(branches: &[BranchInfo]) -> String {
     if branches.is_empty() {
         return "No branches available.".to_string();
@@ -687,39 +635,6 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
     }
 
     lines.join("\n")
-}
-
-fn truncate_chars(input: &str, max_chars: usize) -> String {
-    let mut chars = input.chars();
-    let mut output: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        output.push_str("...");
-    }
-    output
-}
-
-fn summarize_tool_output(output: &str) -> String {
-    let total_lines = output.lines().count();
-    if total_lines == 0 {
-        return "no output".to_string();
-    }
-
-    let first_non_empty = output
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or("(empty lines)");
-
-    let preview = truncate_chars(first_non_empty, 80);
-    if total_lines == 1 {
-        preview
-    } else {
-        format!(
-            "{} (+{} more lines)",
-            preview,
-            total_lines.saturating_sub(1)
-        )
-    }
 }
 
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
@@ -855,15 +770,14 @@ pub struct App {
     should_quit: bool,
     event_tx: mpsc::Sender<AppEvent>,
     event_rx: mpsc::Receiver<AppEvent>,
+    chat_view: ChatView,
+    #[cfg(test)]
     messages: Vec<ChatMessage>,
     input: String,
     cursor_pos: usize,
     agent_state: AgentState,
     status: String,
-    list_state: ListState,
     input_focused: bool,
-    streaming_buffer: Option<String>,
-    thinking_buffer: Option<String>,
     approval_overlay: ApprovalOverlay,
     model_selector: ModelSelector,
     agent_input_tx: Option<mpsc::Sender<Message>>,
@@ -876,9 +790,10 @@ pub struct App {
     todo_list_state: ListState,
     theme: Theme,
     theme_overrides: ThemeOverrides,
-    tool_call_names: HashMap<String, String>,
     pending_images: Vec<PendingImage>,
     message_queue: MessageQueue,
+    #[allow(dead_code)]
+    toast_manager: ToastManager,
 }
 
 impl App {
@@ -893,15 +808,14 @@ impl App {
             should_quit: false,
             event_tx,
             event_rx,
+            chat_view: ChatView::new(theme.clone()),
+            #[cfg(test)]
             messages: Vec::new(),
             input: String::new(),
             cursor_pos: 0,
             agent_state: AgentState::Idle,
             status: "Ready".to_string(),
-            list_state: ListState::default(),
             input_focused: true,
-            streaming_buffer: None,
-            thinking_buffer: None,
             approval_overlay,
             model_selector,
             agent_input_tx: None,
@@ -914,9 +828,9 @@ impl App {
             todo_list_state: ListState::default(),
             theme,
             theme_overrides: ThemeOverrides::default(),
-            tool_call_names: HashMap::new(),
             pending_images: Vec::new(),
             message_queue: MessageQueue::default(),
+            toast_manager: ToastManager::new(),
         }
     }
 
@@ -934,6 +848,9 @@ impl App {
         self.theme = theme;
         self.approval_overlay.set_theme(self.theme.clone());
         self.model_selector.set_theme(self.theme.clone());
+        self.chat_view.set_theme(self.theme.clone());
+        self.toast_manager
+            .show(format!("Theme: {}", theme_name), ToastVariant::Info, 2000);
         Ok(())
     }
 
@@ -955,10 +872,18 @@ impl App {
 
             // Handle events
             if event::poll(std::time::Duration::from_millis(50))? {
-                if let Event::Key(key) = event::read()? {
-                    if self.handle_key_event(key) == KeyAction::OpenExternalEditor {
-                        self.open_external_editor();
+                match event::read()? {
+                    Event::Key(key) => {
+                        if self.handle_key_event(key) == KeyAction::OpenExternalEditor {
+                            self.open_external_editor();
+                        }
                     }
+                    Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::ScrollUp => self.chat_view.scroll_up(),
+                        MouseEventKind::ScrollDown => self.chat_view.scroll_down(),
+                        _ => {}
+                    },
+                    _ => {}
                 }
             }
 
@@ -1054,9 +979,13 @@ impl App {
             ])
             .split(main_area);
 
-        self.render_chat(frame, chunks[0]);
+        self.chat_view.render_chat(frame, chunks[0]);
         self.render_status(frame, chunks[1]);
         self.render_input(frame, chunks[2]);
+
+        // Tick and render toasts before overlays
+        self.toast_manager.tick();
+        self.toast_manager.render(frame, area, &self.theme);
 
         // Render approval overlay on top if active
         if self.approval_overlay.is_active() {
@@ -1067,98 +996,6 @@ impl App {
         if self.model_selector.is_active() {
             self.model_selector.render(frame, area);
         }
-    }
-
-    fn message_style(&self, role: &str) -> Style {
-        match role {
-            "user" => Style::default().fg(self.theme.accent),
-            "assistant" => Style::default().fg(self.theme.fg),
-            "tool" => Style::default().fg(self.theme.accent),
-            "error" => Style::default().fg(self.theme.error),
-            "system" => Style::default().fg(self.theme.warning),
-            _ => Style::default().fg(self.theme.fg),
-        }
-    }
-
-    fn render_chat(&mut self, frame: &mut ratatui::Frame, area: Rect) {
-        let block = Block::default()
-            .title(" Uira ")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(self.theme.borders).bg(self.theme.bg));
-
-        let inner_width = area.width.saturating_sub(2) as usize;
-
-        let mut items: Vec<ListItem> = self
-            .messages
-            .iter()
-            .map(|msg| {
-                let (prefix, style) = if msg.role == "thinking" {
-                    (
-                        "thinking: ",
-                        Style::default()
-                            .fg(self.theme.borders)
-                            .add_modifier(Modifier::ITALIC),
-                    )
-                } else {
-                    let s = self.message_style(msg.role.as_str());
-                    ("", s)
-                };
-
-                let role_prefix = if prefix.is_empty() {
-                    format!("{}: ", msg.role)
-                } else {
-                    prefix.to_string()
-                };
-
-                if let Some(tool_output) = &msg.tool_output {
-                    let body = if tool_output.collapsed {
-                        format!(
-                            "▶ {}: {} [Tab/Enter to expand]",
-                            tool_output.tool_name, tool_output.summary
-                        )
-                    } else {
-                        format!("▼ {}:\n{}", tool_output.tool_name, msg.content)
-                    };
-
-                    let lines = wrap_message(&role_prefix, &body, inner_width, style);
-                    return ListItem::new(Text::from(lines));
-                }
-
-                let lines = wrap_message(&role_prefix, &msg.content, inner_width, style);
-                ListItem::new(Text::from(lines))
-            })
-            .collect();
-
-        if let Some(ref buffer) = self.thinking_buffer {
-            if !buffer.is_empty() {
-                let style = Style::default()
-                    .fg(self.theme.borders)
-                    .add_modifier(Modifier::ITALIC);
-                let lines = wrap_message("> Thinking: ", buffer, inner_width, style);
-                items.push(ListItem::new(Text::from(lines)));
-            }
-        }
-
-        if let Some(ref buffer) = self.streaming_buffer {
-            if !buffer.is_empty() {
-                let style = self.message_style("assistant");
-                let mut lines = wrap_message("assistant: ", buffer, inner_width, style);
-                if let Some(last) = lines.last_mut() {
-                    last.spans.push(Span::styled(
-                        "▌",
-                        Style::default()
-                            .fg(self.theme.warning)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ));
-                }
-                items.push(ListItem::new(Text::from(lines)));
-            }
-        }
-
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-        frame.render_stateful_widget(list, area, &mut self.list_state);
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1204,6 +1041,14 @@ impl App {
             spans.push(Span::raw(" | "));
             spans.push(Span::styled(
                 format!("({} queued)", queued),
+                Style::default().fg(self.theme.warning),
+            ));
+        }
+
+        if self.chat_view.user_scrolled {
+            spans.push(Span::raw(" | "));
+            spans.push(Span::styled(
+                "[↓ Scroll to bottom]",
                 Style::default().fg(self.theme.warning),
             ));
         }
@@ -1334,50 +1179,6 @@ impl App {
         frame.render_widget(list, area);
     }
 
-    fn scroll_up(&mut self) {
-        let total = self.total_items();
-        let i = match self.list_state.selected() {
-            Some(i) => i.saturating_sub(1),
-            None if total > 0 => total - 1,
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    fn scroll_down(&mut self) {
-        let total = self.total_items();
-        if total == 0 {
-            return;
-        }
-        let i = match self.list_state.selected() {
-            Some(i) => (i + 1).min(total - 1),
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-
-    fn scroll_to_bottom(&mut self) {
-        let total = self.total_items();
-        if total > 0 {
-            self.list_state.select(Some(total - 1));
-        }
-    }
-
-    fn total_items(&self) -> usize {
-        let mut count = self.messages.len();
-        if self.thinking_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
-            count += 1;
-        }
-        if self
-            .streaming_buffer
-            .as_ref()
-            .is_some_and(|b| !b.is_empty())
-        {
-            count += 1;
-        }
-        count
-    }
-
     fn ensure_todo_selection(&mut self) {
         if self.todos.is_empty() {
             self.todo_list_state.select(None);
@@ -1463,89 +1264,6 @@ impl App {
         } else {
             self.todo_list_state.select(Some(selected));
         }
-    }
-
-    fn selected_message_index(&self) -> Option<usize> {
-        self.list_state
-            .selected()
-            .filter(|&index| index < self.messages.len())
-    }
-
-    fn toggle_selected_tool_output(&mut self) -> bool {
-        let Some(index) = self.selected_message_index() else {
-            return false;
-        };
-
-        let Some(tool_output) = self
-            .messages
-            .get_mut(index)
-            .and_then(|msg| msg.tool_output.as_mut())
-        else {
-            return false;
-        };
-
-        tool_output.collapsed = !tool_output.collapsed;
-        let action = if tool_output.collapsed {
-            "Collapsed"
-        } else {
-            "Expanded"
-        };
-        self.status = format!("{} {} output", action, tool_output.tool_name);
-        true
-    }
-
-    fn set_all_tool_outputs_collapsed(&mut self, collapsed: bool) -> usize {
-        let mut updated = 0;
-        for message in &mut self.messages {
-            if let Some(tool_output) = message.tool_output.as_mut() {
-                if tool_output.collapsed != collapsed {
-                    tool_output.collapsed = collapsed;
-                    updated += 1;
-                }
-            }
-        }
-        updated
-    }
-
-    fn collapse_all_tool_outputs(&mut self) {
-        let updated = self.set_all_tool_outputs_collapsed(true);
-        if updated == 0 {
-            self.status = "No expanded tool output to collapse".to_string();
-        } else {
-            self.status = format!("Collapsed {} tool output item(s)", updated);
-        }
-    }
-
-    fn expand_all_tool_outputs(&mut self) {
-        let updated = self.set_all_tool_outputs_collapsed(false);
-        if updated == 0 {
-            self.status = "No collapsed tool output to expand".to_string();
-        } else {
-            self.status = format!("Expanded {} tool output item(s)", updated);
-        }
-    }
-
-    fn push_message(&mut self, role: &str, content: String) {
-        self.messages.push(ChatMessage::new(role, content));
-        self.scroll_to_bottom();
-    }
-
-    fn push_tool_message(
-        &mut self,
-        role: &str,
-        tool_name: String,
-        content: String,
-        is_collapsed: bool,
-    ) {
-        let summary = summarize_tool_output(&content);
-        self.messages.push(ChatMessage::tool(
-            role,
-            content,
-            tool_name,
-            summary,
-            is_collapsed,
-        ));
-        self.scroll_to_bottom();
     }
 
     fn is_agent_busy(&self) -> bool {
@@ -1647,9 +1365,9 @@ impl App {
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
-                        self.expand_all_tool_outputs();
+                        self.status = self.chat_view.expand_all_tool_outputs();
                     } else {
-                        self.collapse_all_tool_outputs();
+                        self.status = self.chat_view.collapse_all_tool_outputs();
                     }
                 }
                 KeyCode::Char('g') => {
@@ -1726,17 +1444,17 @@ impl App {
                     }
                 }
                 KeyCode::Home => {
-                    self.cursor_pos = 0;
+                    self.chat_view.scroll_to_top();
                 }
                 KeyCode::End => {
-                    self.cursor_pos = char_count;
+                    self.chat_view.scroll_to_bottom();
                 }
                 KeyCode::Enter => {
-                    if self.input.is_empty()
-                        && self.pending_images.is_empty()
-                        && self.toggle_selected_tool_output()
-                    {
-                        return KeyAction::None;
+                    if self.input.is_empty() && self.pending_images.is_empty() {
+                        if let Some(status) = self.chat_view.toggle_selected_tool_output() {
+                            self.status = status;
+                            return KeyAction::None;
+                        }
                     }
 
                     if !self.input.trim().is_empty() || !self.pending_images.is_empty() {
@@ -1757,16 +1475,24 @@ impl App {
                     }
                 }
                 KeyCode::Tab => {
-                    let _ = self.toggle_selected_tool_output();
+                    if let Some(status) = self.chat_view.toggle_selected_tool_output() {
+                        self.status = status;
+                    }
                 }
                 KeyCode::Esc => {
                     self.should_quit = true;
                 }
                 KeyCode::Up => {
-                    self.scroll_up();
+                    self.chat_view.scroll_up();
                 }
                 KeyCode::Down => {
-                    self.scroll_down();
+                    self.chat_view.scroll_down();
+                }
+                KeyCode::PageUp => {
+                    self.chat_view.page_up();
+                }
+                KeyCode::PageDown => {
+                    self.chat_view.page_down();
                 }
                 _ => {}
             }
@@ -1875,7 +1601,11 @@ impl App {
         crossterm::terminal::disable_raw_mode()?;
 
         let mut stdout = std::io::stdout();
-        if let Err(error) = crossterm::execute!(stdout, crossterm::terminal::LeaveAlternateScreen) {
+        if let Err(error) = crossterm::execute!(
+            stdout,
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        ) {
             let _ = crossterm::terminal::enable_raw_mode();
             return Err(error);
         }
@@ -1888,7 +1618,11 @@ impl App {
         crossterm::terminal::enable_raw_mode()?;
 
         let mut stdout = std::io::stdout();
-        if let Err(error) = crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen) {
+        if let Err(error) = crossterm::execute!(
+            stdout,
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture
+        ) {
             let _ = crossterm::terminal::disable_raw_mode();
             return Err(error);
         }
@@ -1963,7 +1697,7 @@ impl App {
         let has_images = !pending_images.is_empty();
 
         let display_message = Self::format_user_display(&input, &pending_images);
-        self.push_message("user", display_message);
+        self.chat_view.push_message("user", display_message);
 
         let message = if has_images {
             let mut blocks = match MessageContent::from_prompt(&input) {
@@ -2254,7 +1988,7 @@ impl App {
         let target = match parse_review_target_from_command(raw_command) {
             Ok(target) => target,
             Err(err) => {
-                self.push_message("error", err);
+                self.chat_view.push_message("error", err);
                 return;
             }
         };
@@ -2263,7 +1997,8 @@ impl App {
         let (content, skipped_binary) = match collect_review_content(&target) {
             Ok(content) => content,
             Err(err) => {
-                self.push_message("error", format!("Failed to gather review input: {}", err));
+                self.chat_view
+                    .push_message("error", format!("Failed to gather review input: {}", err));
                 return;
             }
         };
@@ -2274,15 +2009,15 @@ impl App {
             } else {
                 format!(" Skipped binary files: {}.", skipped_binary.join(", "))
             };
-            self.push_message(
+            self.chat_view.push_message(
                 "system",
                 format!("No diff found for {}.{}", target_description, suffix),
             );
             return;
         }
 
-        self.push_message("user", raw_command.to_string());
-        self.push_message(
+        self.chat_view.push_message("user", raw_command.to_string());
+        self.chat_view.push_message(
             "system",
             format!(
                 "Starting review for {}. Output will be grouped into issues, suggestions, and praise.",
@@ -2319,7 +2054,7 @@ impl App {
                 self.should_quit = true;
             }
             "/help" | "/h" | "/?" => {
-                self.messages.push(ChatMessage {
+                self.chat_view.messages.push(ChatMessage {
                     role: "system".to_string(),
                     content: "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments"
                         .to_string(),
@@ -2332,13 +2067,13 @@ impl App {
                 } else {
                     "No agent connected"
                 };
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!("Status: {}\nState: {:?}", status_msg, self.agent_state),
                 );
             }
             "/clear" => {
-                self.messages.clear();
+                self.chat_view.messages.clear();
                 self.pending_images.clear();
                 self.message_queue.clear();
                 self.status = "Chat cleared".to_string();
@@ -2346,12 +2081,12 @@ impl App {
             "/image" => {
                 let path_arg = input[command.len()..].trim();
                 if path_arg.is_empty() {
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: "Usage: /image <path>".to_string(),
                         tool_output: None,
                     });
-                    self.scroll_to_bottom();
+                    self.chat_view.auto_scroll_to_bottom();
                     return;
                 }
 
@@ -2362,7 +2097,7 @@ impl App {
                         let image_size = Self::format_size(image.size_bytes);
                         self.pending_images.push(image);
                         self.status = format!("Attached {} image(s)", self.pending_images.len());
-                        self.messages.push(ChatMessage {
+                        self.chat_view.messages.push(ChatMessage {
                             role: "system".to_string(),
                             content: format!(
                                 "Attached image: {} ({})\nIt will be sent with your next prompt.",
@@ -2372,7 +2107,7 @@ impl App {
                         });
                     }
                     Err(error) => {
-                        self.messages.push(ChatMessage {
+                        self.chat_view.messages.push(ChatMessage {
                             role: "error".to_string(),
                             content: format!("Failed to attach image: {}", error),
                             tool_output: None,
@@ -2386,7 +2121,7 @@ impl App {
                     let image_size = Self::format_size(image.size_bytes);
                     self.pending_images.push(image);
                     self.status = format!("Attached {} image(s)", self.pending_images.len());
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: format!(
                             "Captured screenshot: {} ({})\nIt will be sent with your next prompt.",
@@ -2396,7 +2131,7 @@ impl App {
                     });
                 }
                 Err(error) => {
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "error".to_string(),
                         content: format!("Failed to capture screenshot: {}", error),
                         tool_output: None,
@@ -2420,7 +2155,7 @@ impl App {
                 if let Some(branch_name) = parts.get(1) {
                     self.switch_branch(branch_name);
                 } else {
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: "Usage: /switch <branch>".to_string(),
                         tool_output: None,
@@ -2436,7 +2171,7 @@ impl App {
             "/share" => match parse_share_command(&parts) {
                 Ok(options) => self.share_session(options),
                 Err(err) => {
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "error".to_string(),
                         content: format!(
                             "{}\nUsage: /share [--public] [--description <text>]",
@@ -2468,7 +2203,7 @@ impl App {
                     if is_known || model_name.contains('/') {
                         self.switch_model(&full_model);
                     } else {
-                        self.push_message(
+                        self.chat_view.push_message(
                             "system",
                             format!(
                                 "Unknown model: {}. Use /models to see available options.",
@@ -2481,7 +2216,7 @@ impl App {
                         .current_model
                         .as_deref()
                         .unwrap_or("(default from config)");
-                    self.push_message(
+                    self.chat_view.push_message(
                         "system",
                         format!("Current model: {}\nUsage: /model <name>", current),
                     );
@@ -2492,14 +2227,14 @@ impl App {
                     match self.set_theme_by_name(theme_name) {
                         Ok(()) => {
                             self.status = format!("Theme changed to {}", self.theme.name);
-                            self.messages.push(ChatMessage {
+                            self.chat_view.messages.push(ChatMessage {
                                 role: "system".to_string(),
                                 content: format!("Theme set to {}", self.theme.name),
                                 tool_output: None,
                             });
                         }
                         Err(err) => {
-                            self.messages.push(ChatMessage {
+                            self.chat_view.messages.push(ChatMessage {
                                 role: "system".to_string(),
                                 content: err,
                                 tool_output: None,
@@ -2507,7 +2242,7 @@ impl App {
                         }
                     }
                 } else {
-                    self.messages.push(ChatMessage {
+                    self.chat_view.messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: format!(
                             "Current theme: {}\nAvailable themes: {}\nUsage: /theme <name>",
@@ -2519,7 +2254,7 @@ impl App {
                 }
             }
             _ => {
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!(
                         "Unknown command: {}. Type /help for available commands.",
@@ -2529,7 +2264,7 @@ impl App {
             }
         }
 
-        self.scroll_to_bottom();
+        self.chat_view.auto_scroll_to_bottom();
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
@@ -2537,7 +2272,8 @@ impl App {
             AppEvent::Quit => self.should_quit = true,
             AppEvent::Agent(thread_event) => self.handle_agent_event(thread_event),
             AppEvent::TracingLog(msg) => {
-                self.push_message("error", format!("log: {}", msg));
+                self.chat_view
+                    .push_message("error", format!("log: {}", msg));
             }
             AppEvent::UserInput(_) => {
                 // Already handled in submit_input
@@ -2552,7 +2288,7 @@ impl App {
             }
             AppEvent::Info(message) => {
                 self.status = message.clone();
-                self.push_message("system", message);
+                self.chat_view.push_message("system", message);
             }
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
@@ -2560,7 +2296,8 @@ impl App {
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
-                self.push_message("system", format!("Error: {}", msg));
+                self.chat_view
+                    .push_message("system", format!("Error: {}", msg));
             }
         }
     }
@@ -2587,34 +2324,22 @@ impl App {
                 self.process_queued_messages();
             }
             ThreadEvent::ContentDelta { delta } => {
-                if let Some(ref mut buffer) = self.streaming_buffer {
-                    if buffer.len() + delta.len() <= MAX_STREAMING_BUFFER_SIZE {
-                        buffer.push_str(&delta);
-                    }
-                } else {
-                    self.streaming_buffer = Some(delta);
-                }
-                self.scroll_to_bottom();
+                self.chat_view
+                    .append_streaming_delta(&delta, MAX_STREAMING_BUFFER_SIZE);
             }
             ThreadEvent::ThinkingDelta { thinking } => {
-                if let Some(ref mut buffer) = self.thinking_buffer {
-                    if buffer.len() + thinking.len() <= MAX_STREAMING_BUFFER_SIZE {
-                        buffer.push_str(&thinking);
-                    }
-                } else {
-                    self.thinking_buffer = Some(thinking);
-                }
-                self.scroll_to_bottom();
+                self.chat_view
+                    .append_thinking_delta(&thinking, MAX_STREAMING_BUFFER_SIZE);
             }
             ThreadEvent::ItemStarted { item } => match item {
                 Item::ToolCall { id, name, .. } => {
-                    self.tool_call_names.insert(id, name.clone());
+                    self.chat_view.tool_call_names.insert(id, name.clone());
                     self.agent_state = AgentState::ExecutingTool;
                     self.status = format!("Executing: {}", name);
                 }
                 Item::AgentMessage { content } => {
                     // Start streaming
-                    self.streaming_buffer = Some(content);
+                    self.chat_view.set_streaming_buffer(content);
                 }
                 Item::ApprovalRequest {
                     id,
@@ -2642,21 +2367,23 @@ impl App {
                     is_error,
                 } => {
                     let tool_name = self
+                        .chat_view
                         .tool_call_names
                         .remove(&tool_call_id)
                         .unwrap_or_else(|| "tool".to_string());
                     let role = if is_error { "error" } else { "tool" };
-                    self.push_tool_message(role, tool_name, output, false);
+                    self.chat_view
+                        .push_tool_message(role, tool_name, output, false);
                     self.agent_state = AgentState::Thinking;
                 }
                 Item::AgentMessage { content } => {
-                    self.streaming_buffer = None;
-                    if let Some(thinking) = self.thinking_buffer.take() {
+                    self.chat_view.clear_streaming_buffer();
+                    if let Some(thinking) = self.chat_view.take_thinking_buffer() {
                         if !thinking.is_empty() {
-                            self.push_message("thinking", thinking);
+                            self.chat_view.push_message("thinking", thinking);
                         }
                     }
-                    self.push_message("assistant", content);
+                    self.chat_view.push_message("assistant", content);
                 }
                 Item::ApprovalDecision {
                     request_id,
@@ -2682,15 +2409,15 @@ impl App {
                     usage.input_tokens, usage.output_tokens
                 );
 
-                if let Some(thinking) = self.thinking_buffer.take() {
+                if let Some(thinking) = self.chat_view.take_thinking_buffer() {
                     if !thinking.is_empty() {
-                        self.push_message("thinking", thinking);
+                        self.chat_view.push_message("thinking", thinking);
                     }
                 }
 
-                if let Some(buffer) = self.streaming_buffer.take() {
+                if let Some(buffer) = self.chat_view.clear_streaming_buffer() {
                     if !buffer.is_empty() {
-                        self.push_message("assistant", buffer);
+                        self.chat_view.push_message("assistant", buffer);
                     }
                 }
             }
@@ -2701,7 +2428,7 @@ impl App {
             ThreadEvent::Error { message, .. } => {
                 self.agent_state = AgentState::Failed;
                 self.status = format!("Error: {}", message);
-                self.push_message("error", message);
+                self.chat_view.push_message("error", message);
             }
             // Goal Verification Events
             ThreadEvent::GoalVerificationStarted { goals, .. } => {
@@ -2715,7 +2442,7 @@ impl App {
                 ..
             } => {
                 let icon = if passed { "[PASS]" } else { "[FAIL]" };
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!(
                         "{} Goal '{}': {:.1}% (target: {:.1}%)",
@@ -2745,13 +2472,13 @@ impl App {
             ThreadEvent::RalphContinuation {
                 reason, confidence, ..
             } => {
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!("Ralph continuing: {} (confidence: {}%)", reason, confidence),
                 );
             }
             ThreadEvent::RalphCircuitBreak { reason, iteration } => {
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!("Ralph stopped at iteration {}: {}", iteration, reason),
                 );
@@ -2762,7 +2489,7 @@ impl App {
                 description,
                 ..
             } => {
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!("Background task started: {} ({})", description, task_id),
                 );
@@ -2773,7 +2500,7 @@ impl App {
                 message,
             } => {
                 let msg = message.map(|m| format!(": {}", m)).unwrap_or_default();
-                self.push_message(
+                self.chat_view.push_message(
                     "system",
                     format!("Background task {} - {}{}", task_id, status, msg),
                 );
@@ -2782,11 +2509,13 @@ impl App {
                 task_id, success, ..
             } => {
                 let status = if success { "completed" } else { "failed" };
-                self.push_message("system", format!("Background task {}: {}", task_id, status));
+                self.chat_view
+                    .push_message("system", format!("Background task {}: {}", task_id, status));
             }
             ThreadEvent::ModelSwitched { model, provider } => {
                 self.status = format!("Model: {}/{}", provider, model);
-                self.push_message("system", format!("Switched to {}/{}", provider, model));
+                self.chat_view
+                    .push_message("system", format!("Switched to {}/{}", provider, model));
             }
             ThreadEvent::TodoUpdated { todos } => {
                 let pending = todos
@@ -2810,7 +2539,11 @@ impl App {
     }
 
     pub fn add_message(&mut self, role: &str, content: &str) {
-        self.push_message(role, content.to_string());
+        self.chat_view.push_message(role, content.to_string());
+        #[cfg(test)]
+        {
+            self.messages = self.chat_view.messages.clone();
+        }
     }
 
     /// Set the status message
@@ -2829,6 +2562,11 @@ impl App {
 
         match create_client_for_model(model_str) {
             Ok(new_client) => {
+                self.toast_manager.show(
+                    format!("Switched to {}", model_str),
+                    ToastVariant::Success,
+                    3000,
+                );
                 if let Some(ref tx) = self.agent_command_tx {
                     let tx = tx.clone();
                     let model_str = model_str.to_string();
@@ -2842,7 +2580,7 @@ impl App {
                         }
                     });
                 } else {
-                    self.push_message(
+                    self.chat_view.push_message(
                         "system",
                         format!(
                             "Model set to: {}\nNote: No agent connected, change will apply when agent starts.",
@@ -2853,7 +2591,12 @@ impl App {
             }
             Err(e) => {
                 self.status = "Model switch failed".to_string();
-                self.push_message(
+                self.toast_manager.show(
+                    format!("Failed to switch model: {}", e),
+                    ToastVariant::Error,
+                    5000,
+                );
+                self.chat_view.push_message(
                     "error",
                     format!("Failed to create client for {}: {}", model_str, e),
                 );
@@ -2862,8 +2605,8 @@ impl App {
     }
 
     fn share_session(&mut self, options: ShareCommandOptions) {
-        if self.messages.is_empty() {
-            self.messages.push(ChatMessage {
+        if self.chat_view.messages.is_empty() {
+            self.chat_view.messages.push(ChatMessage {
                 role: "system".to_string(),
                 content: "No messages to share yet. Start a conversation first.".to_string(),
                 tool_output: None,
@@ -2871,12 +2614,12 @@ impl App {
             return;
         }
 
-        let messages = self.messages.clone();
+        let messages = self.chat_view.messages.clone();
         let session_id = self.session_id.clone();
         let model = self.current_model.clone();
         let event_tx = self.event_tx.clone();
         self.status = "Sharing session to GitHub Gist...".to_string();
-        self.push_message(
+        self.chat_view.push_message(
             "system",
             "Warning: sharing may include sensitive content from system/tool outputs. Review before sharing.\nUse /share --public only when intentional."
                 .to_string(),
@@ -2953,7 +2696,7 @@ impl App {
                 }
             });
         } else {
-            self.push_message(
+            self.chat_view.push_message(
                 "error",
                 "No agent connected. Cannot fork session.".to_string(),
             );
@@ -3004,7 +2747,7 @@ impl App {
                 }
             });
         } else {
-            self.messages.push(ChatMessage {
+            self.chat_view.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot switch branches.".to_string(),
                 tool_output: None,
@@ -3057,7 +2800,7 @@ impl App {
                 }
             });
         } else {
-            self.messages.push(ChatMessage {
+            self.chat_view.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot list branches.".to_string(),
                 tool_output: None,
@@ -3102,7 +2845,7 @@ impl App {
                 }
             });
         } else {
-            self.messages.push(ChatMessage {
+            self.chat_view.messages.push(ChatMessage {
                 role: "error".to_string(),
                 content: "No agent connected. Cannot show branch tree.".to_string(),
                 tool_output: None,

@@ -11,12 +11,12 @@ use uira_agent::{
     RecursiveAgentExecutor, TelemetryConfig,
 };
 use uira_orchestration::{get_agent_definitions, ModelRegistry};
-use uira_types::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
+use uira_types::ExecutionResult;
 
 mod commands;
 mod config;
@@ -686,7 +686,7 @@ async fn run_config(
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_core::loader::load_config;
-                    use uira_hooks::GoalRunner;
+    use uira_hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {
@@ -904,9 +904,7 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
                 uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                     "completed".green()
                 }
-                uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
-                    "error".red()
-                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Error => "error".red(),
                 uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                     "cancelled".dimmed()
                 }
@@ -1020,11 +1018,7 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
                 .find(|s| s.name == *name)
                 .ok_or_else(|| format!("Skill not found: {}", name))?;
 
-            println!(
-                "{} {}",
-                "Skill:".cyan().bold(),
-                skill.name.yellow().bold()
-            );
+            println!("{} {}", "Skill:".cyan().bold(), skill.name.yellow().bold());
             println!("{}", "─".repeat(80).dimmed());
 
             let content = std::fs::read_to_string(&skill.path)?;
@@ -1123,9 +1117,7 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                 .cloned()
                 .unwrap_or_default();
 
-            let bind_host = host
-                .as_deref()
-                .unwrap_or(&gateway_settings.host);
+            let bind_host = host.as_deref().unwrap_or(&gateway_settings.host);
             let bind_port = port.unwrap_or(gateway_settings.port);
 
             println!(
@@ -1149,6 +1141,7 @@ async fn run_interactive(
     tracing_rx: Option<UnboundedReceiver<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::{
+        event::{DisableMouseCapture, EnableMouseCapture},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -1176,7 +1169,7 @@ async fn run_interactive(
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1204,7 +1197,11 @@ async fn run_interactive(
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result.map_err(|e| e.into())
@@ -1235,6 +1232,7 @@ fn build_theme_overrides(
         warning: uira_config.and_then(|cfg| cfg.theme_colors.warning.clone()),
         success: uira_config.and_then(|cfg| cfg.theme_colors.success.clone()),
         borders: uira_config.and_then(|cfg| cfg.theme_colors.borders.clone()),
+        ..Default::default()
     }
 }
 
