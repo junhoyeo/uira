@@ -72,6 +72,11 @@ impl GatewayServer {
         }
     }
 
+    /// Shared handle to the session manager backing this server.
+    pub fn session_manager(&self) -> Arc<SessionManager> {
+        self.session_manager.clone()
+    }
+
     /// Set an authentication token. When set, WebSocket connections must
     /// provide a matching `Authorization: Bearer <token>` header.
     pub fn with_auth_token(mut self, token: Option<String>) -> Self {
