@@ -1,4 +1,4 @@
-use crate::hooks::{HooksConfig as AiHooksConfig, OnFail};
+use crate::hooks::OnFail;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -6,9 +6,6 @@ use std::path::Path;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ai_hooks: Option<AiHooksConfig>,
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
 
@@ -110,7 +107,6 @@ impl Config {
         hooks.insert("post-commit".to_string(), post_commit);
 
         Config {
-            ai_hooks: None,
             theme: None,
             theme_colors: None,
             hooks,
