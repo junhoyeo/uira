@@ -286,7 +286,7 @@ fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
         .get(1)
         .and_then(|s| {
             // Pad or truncate to 9 digits for nanoseconds
-            let padded = format!("{:<09}", s);
+            let padded = format!("{:0<9}", s);
             padded[..9].parse::<u32>().ok()
         })
         .unwrap_or(0);
@@ -535,6 +535,13 @@ mod tests {
 
         let ts_zero = parse_slack_timestamp("invalid");
         assert_eq!(ts_zero.timestamp(), 0);
+    }
+
+    #[test]
+    fn test_parse_slack_timestamp_short_fraction() {
+        let ts = parse_slack_timestamp("1234567890.1");
+        assert_eq!(ts.timestamp(), 1234567890);
+        assert_eq!(ts.timestamp_subsec_nanos(), 100000000); // "1" → "100000000"
     }
 
     #[test]

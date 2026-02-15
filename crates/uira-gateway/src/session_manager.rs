@@ -132,15 +132,17 @@ impl SessionManager {
     ) -> Result<String, GatewayError> {
         self.start_reaper();
 
-        let mut sessions = self.sessions.write().await;
+        // Phase 1: Check capacity and reserve ID under read lock
+        let id = {
+            let sessions = self.sessions.read().await;
+            if sessions.len() >= self.max_sessions {
+                return Err(GatewayError::MaxSessionsReached(self.max_sessions));
+            }
+            format!("gw_ses_{}", self.next_id.fetch_add(1, Ordering::Relaxed))
+        };
 
-        if sessions.len() >= self.max_sessions {
-            return Err(GatewayError::MaxSessionsReached(self.max_sessions));
-        }
-
-        let id = format!("gw_ses_{}", self.next_id.fetch_add(1, Ordering::Relaxed));
+        // Phase 2: Build agent OUTSIDE the lock
         let agent_config = self.build_agent_config(&config);
-
         let agent = Agent::new(agent_config, client);
         let agent = agent
             .with_rollout()
@@ -173,6 +175,15 @@ impl SessionManager {
             config,
         };
 
+        // Phase 3: Insert under write lock (fast — just a HashMap insert)
+        let mut sessions = self.sessions.write().await;
+        // Re-check capacity (another session may have been created between phase 1 and 3)
+        if sessions.len() >= self.max_sessions {
+            // Clean up the agent we just created
+            relay_handle.abort();
+            agent_handle.abort();
+            return Err(GatewayError::MaxSessionsReached(self.max_sessions));
+        }
         sessions.insert(
             id.clone(),
             ManagedSession {
