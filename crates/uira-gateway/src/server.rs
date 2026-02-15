@@ -20,6 +20,9 @@ use crate::error::GatewayError;
 use crate::protocol::{GatewayMessage, GatewayResponse, SessionInfoResponse};
 use crate::session_manager::SessionManager;
 
+/// Maximum size (in bytes) for a single WS frame payload.
+const MAX_WS_FRAME_SIZE: usize = 128 * 1024; // 128 KB
+
 struct AppState {
     session_manager: Arc<SessionManager>,
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
@@ -211,7 +214,22 @@ async fn handle_socket(
                                     event: event_json,
                                 };
 
-                                if tx_clone.send(serialize_response(&response)).await.is_err() {
+                                let serialized = serialize_response(&response);
+                                let to_send = if serialized.len() > MAX_WS_FRAME_SIZE {
+                                    let truncated = GatewayResponse::AgentEvent {
+                                        session_id: stream_session_id.clone(),
+                                        event: serde_json::json!({
+                                            "type": "truncated",
+                                            "original_size": serialized.len(),
+                                            "message": "Event payload exceeded maximum frame size"
+                                        }),
+                                    };
+                                    serialize_response(&truncated)
+                                } else {
+                                    serialized
+                                };
+
+                                if tx_clone.send(to_send).await.is_err() {
                                     return;
                                 }
                             }
