@@ -132,11 +132,7 @@ pub fn telegram_message_to_channel_message(
     let text = msg.text()?;
     let from = msg.from.as_ref()?;
 
-    let sender = from
-        .username
-        .as_deref()
-        .unwrap_or("unknown")
-        .to_string();
+    let sender = from.id.to_string();
 
     let mut metadata = HashMap::new();
     metadata.insert("chat_id".to_string(), msg.chat.id.to_string());
