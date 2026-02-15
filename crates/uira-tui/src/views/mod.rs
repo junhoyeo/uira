@@ -4,6 +4,7 @@ mod approval;
 mod chat_view;
 mod command_palette;
 mod model_selector;
+pub mod session_nav;
 mod toast;
 
 pub use approval::{ApprovalOverlay, ApprovalRequest, ApprovalView, INLINE_APPROVAL_HEIGHT};
