@@ -230,6 +230,9 @@ pub enum GatewayCommands {
         /// Port to bind to (default: from config or 18789)
         #[arg(long)]
         port: Option<u16>,
+        /// Authentication token for WebSocket connections
+        #[arg(long)]
+        auth_token: Option<String>,
     },
 }
 
