@@ -6,6 +6,16 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub tool_output: Option<ToolOutputState>,
+    #[allow(dead_code)]
+    pub agent_name: Option<String>,
+    #[allow(dead_code)]
+    pub session_id: Option<String>,
+    #[allow(dead_code)]
+    pub message_id: Option<String>,
+    #[allow(dead_code)]
+    pub turn_number: Option<usize>,
+    #[allow(dead_code)]
+    pub timestamp: Option<u64>,
 }
 
 impl ChatMessage {
@@ -14,6 +24,11 @@ impl ChatMessage {
             role: role.into(),
             content: content.into(),
             tool_output: None,
+            agent_name: None,
+            session_id: None,
+            message_id: None,
+            turn_number: None,
+            timestamp: None,
         }
     }
 
@@ -32,7 +47,17 @@ impl ChatMessage {
                 summary: summary.into(),
                 collapsed,
             }),
+            agent_name: None,
+            session_id: None,
+            message_id: None,
+            turn_number: None,
+            timestamp: None,
         }
+    }
+
+    pub fn with_agent(mut self, agent_name: Option<String>) -> Self {
+        self.agent_name = agent_name;
+        self
     }
 }
 
