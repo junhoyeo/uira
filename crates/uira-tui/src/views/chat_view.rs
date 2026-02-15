@@ -77,6 +77,8 @@ impl ChatView {
 
         self.rebuild_render_cache_if_needed(inner_width);
         self.clamp_scroll_offset();
+        // Sync follow state after clamping - if viewport resize moved us to bottom,
+        // re-enable auto-follow so new messages scroll correctly
         self.sync_follow_with_position();
 
         let start = self.scroll_offset.min(self.total_lines);
