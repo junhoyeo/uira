@@ -248,13 +248,6 @@ impl SessionManager {
                     };
 
                     if still_idle {
-                        {
-                            let mut sessions = manager.sessions.write().await;
-                            if let Some(session) = sessions.get_mut(&session_id) {
-                                session.info.status = SessionStatus::Idle;
-                            }
-                        }
-
                         if let Err(error) = manager.destroy_session(&session_id).await {
                             if !matches!(error, GatewayError::SessionNotFound(_)) {
                                 tracing::debug!(
@@ -805,6 +798,26 @@ mod tests {
         let manager = SessionManager::new_with_settings(10, test_settings());
         let result = manager.destroy_session("nonexistent").await;
         assert!(matches!(result, Err(GatewayError::SessionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_to_shutting_down_session() {
+        let manager = SessionManager::new_with_settings(10, test_settings());
+        let client = Arc::new(MockModelClient::new("ok"));
+        let id = manager
+            .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+            .await
+            .unwrap();
+
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.get_mut(&id).unwrap().info.status = SessionStatus::ShuttingDown;
+        }
+
+        let result = manager.send_message(&id, "hello".to_string()).await;
+        assert!(matches!(result, Err(GatewayError::SendFailed(_))));
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("shutting down"));
     }
 
     #[tokio::test]
