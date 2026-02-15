@@ -98,9 +98,18 @@ impl GatewayServer {
 
         tracing::info!("Gateway started on ws://{}", addr);
 
+        let session_manager = self.session_manager.clone();
+
         axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                tokio::signal::ctrl_c().await.ok();
+                tracing::info!("Shutdown signal received, stopping gateway...");
+            })
             .await
             .map_err(|e| GatewayError::ServerError(e.to_string()))?;
+
+        session_manager.shutdown().await?;
+        tracing::info!("Gateway shutdown complete");
 
         Ok(())
     }
