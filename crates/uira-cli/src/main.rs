@@ -3,6 +3,7 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
+use secrecy::SecretString;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -116,8 +117,14 @@ async fn run_rpc(cli: &Cli, config: &CliConfig) -> Result<(), Box<dyn std::error
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, _provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, _provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
 
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
@@ -146,8 +153,14 @@ async fn run_exec(
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
     let agent_config = create_agent_config(
@@ -1165,8 +1178,14 @@ async fn run_interactive(
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
     let agent_defs = get_agent_definitions(None);
     let registry = ModelRegistry::new();
-    let (client, provider_config) =
-        create_client(cli, config, &agent_defs, &registry, &agent_model_overrides)?;
+    let (client, provider_config) = create_client(
+        cli,
+        config,
+        &agent_defs,
+        &registry,
+        &agent_model_overrides,
+        uira_config.as_ref(),
+    )?;
     let (external_mcp_servers, external_mcp_specs) =
         prepare_external_mcp(uira_config.as_ref()).await?;
     let agent_config = create_agent_config(
@@ -1249,8 +1268,8 @@ fn create_client(
     agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
     registry: &ModelRegistry,
     agent_model_overrides: &std::collections::HashMap<String, String>,
+    uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
-    use secrecy::SecretString;
     use uira_types::Provider;
 
     let provider = cli
@@ -1335,17 +1354,146 @@ fn create_client(
                 .ok()
                 .map(SecretString::from);
 
-            let provider_config = ProviderConfig {
-                provider: Provider::OpenCode,
-                api_key,
-                model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
-                ..Default::default()
-            };
+            let opencode_settings = uira_config.map(|cfg| &cfg.opencode);
+            maybe_autostart_opencode_server(opencode_settings);
+            let provider_config =
+                build_opencode_provider_config(api_key, model, opencode_settings);
 
             let client = OpenCodeClient::new(provider_config.clone())?;
             Ok((Arc::new(client), provider_config))
         }
         _ => Err(format!("Unknown provider: {}", provider).into()),
+    }
+}
+
+fn build_opencode_provider_config(
+    api_key: Option<SecretString>,
+    model: Option<String>,
+    settings: Option<&uira_core::schema::OpencodeSettings>,
+) -> ProviderConfig {
+    let mut provider_config = ProviderConfig {
+        provider: uira_types::Provider::OpenCode,
+        api_key,
+        model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
+        ..Default::default()
+    };
+
+    if let Some(opencode) = settings {
+        provider_config.base_url = Some(opencode_base_url(opencode));
+        provider_config.timeout_seconds = Some(opencode.timeout_secs);
+    }
+
+    provider_config
+}
+
+fn opencode_base_url(settings: &uira_core::schema::OpencodeSettings) -> String {
+    format!("http://{}:{}/v1", settings.host, settings.port)
+}
+
+fn maybe_autostart_opencode_server(settings: Option<&uira_core::schema::OpencodeSettings>) {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::process::{Command, Stdio};
+
+    let Some(settings) = settings else {
+        return;
+    };
+
+    if !settings.auto_start {
+        return;
+    }
+
+    let host_port = format!("{}:{}", settings.host, settings.port);
+    let is_running = host_port
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .map(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok())
+        .unwrap_or(false);
+
+    if is_running {
+        return;
+    }
+
+    let args = opencode_server_start_args(settings);
+    if let Err(error) = Command::new("opencode")
+        .args(&args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        tracing::warn!(
+            "Failed to auto-start OpenCode server with `opencode {}`: {}",
+            args.join(" "),
+            error
+        );
+    }
+}
+
+fn opencode_server_start_args(settings: &uira_core::schema::OpencodeSettings) -> Vec<String> {
+    vec![
+        "serve".to_string(),
+        "--host".to_string(),
+        settings.host.clone(),
+        "--port".to_string(),
+        settings.port.to_string(),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_opencode_provider_config, opencode_base_url, opencode_server_start_args,
+    };
+    use uira_core::schema::OpencodeSettings;
+
+    #[test]
+    fn opencode_provider_config_applies_uira_settings() {
+        let settings = OpencodeSettings {
+            host: "192.168.0.50".to_string(),
+            port: 7777,
+            timeout_secs: 45,
+            auto_start: false,
+        };
+
+        let provider_config = build_opencode_provider_config(
+            None,
+            Some("opencode/gpt-5-nano".to_string()),
+            Some(&settings),
+        );
+
+        assert_eq!(
+            provider_config.base_url,
+            Some("http://192.168.0.50:7777/v1".to_string())
+        );
+        assert_eq!(provider_config.timeout_seconds, Some(45));
+        assert_eq!(provider_config.model, "opencode/gpt-5-nano");
+    }
+
+    #[test]
+    fn opencode_base_url_includes_host_and_port() {
+        let settings = OpencodeSettings {
+            host: "localhost".to_string(),
+            port: 4097,
+            timeout_secs: 120,
+            auto_start: true,
+        };
+
+        assert_eq!(opencode_base_url(&settings), "http://localhost:4097/v1");
+    }
+
+    #[test]
+    fn opencode_server_start_args_match_settings() {
+        let settings = OpencodeSettings {
+            host: "127.0.0.1".to_string(),
+            port: 5001,
+            timeout_secs: 120,
+            auto_start: true,
+        };
+
+        assert_eq!(
+            opencode_server_start_args(&settings),
+            vec!["serve", "--host", "127.0.0.1", "--port", "5001"]
+        );
     }
 }
 
