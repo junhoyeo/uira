@@ -554,80 +554,13 @@ impl ChannelBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channels::{
-        ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
-    };
-    use crate::testing::MockModelClient;
-    use async_trait::async_trait;
+    use crate::channels::{ChannelMessage, ChannelResponse, ChannelType};
+    use crate::testing::{MockChannel, MockModelClient};
     use chrono::Utc;
     use std::sync::Mutex;
-    use tokio::sync::mpsc;
     use tokio::time::{sleep, Duration, Instant};
     use uira_core::schema::GatewaySettings;
     use uira_providers::ProviderError;
-
-    struct MockChannel {
-        channel_type: ChannelType,
-        started: bool,
-        message_tx: Option<mpsc::Sender<ChannelMessage>>,
-        message_rx: Option<mpsc::Receiver<ChannelMessage>>,
-        sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
-    }
-
-    impl MockChannel {
-        fn new(channel_type: ChannelType) -> Self {
-            let (tx, rx) = mpsc::channel(32);
-            Self {
-                channel_type,
-                started: false,
-                message_tx: Some(tx),
-                message_rx: Some(rx),
-                sent_messages: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        fn sender(&self) -> mpsc::Sender<ChannelMessage> {
-            self.message_tx.clone().expect("sender already taken")
-        }
-
-        fn sent_messages(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
-            self.sent_messages.clone()
-        }
-    }
-
-    #[async_trait]
-    impl Channel for MockChannel {
-        fn channel_type(&self) -> ChannelType {
-            self.channel_type.clone()
-        }
-
-        fn capabilities(&self) -> ChannelCapabilities {
-            ChannelCapabilities {
-                max_message_length: 4096,
-                supports_markdown: true,
-            }
-        }
-
-        async fn start(&mut self) -> Result<(), ChannelError> {
-            self.started = true;
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<(), ChannelError> {
-            self.started = false;
-            self.message_tx.take();
-            Ok(())
-        }
-
-        async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
-            self.sent_messages.lock().unwrap().push(response);
-            Ok(())
-        }
-
-        fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
-            self.message_rx.take()
-        }
-    }
 
     fn make_channel_message(
         sender: &str,
@@ -1006,7 +939,7 @@ mod tests {
 
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
-        let sent_messages = channel.sent_messages();
+        let sent_messages = channel.sent_messages_shared();
 
         bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
@@ -1034,7 +967,7 @@ mod tests {
 
         let channel = MockChannel::new(ChannelType::Slack);
         let tx = channel.sender();
-        let sent_messages = channel.sent_messages();
+        let sent_messages = channel.sent_messages_shared();
 
         bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
@@ -1060,7 +993,7 @@ mod tests {
 
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
-        let sent_messages = channel.sent_messages();
+        let sent_messages = channel.sent_messages_shared();
 
         bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
 
@@ -1182,7 +1115,7 @@ mod tests {
 
         let chan_a = MockChannel::new(ChannelType::Telegram);
         let tx_a = chan_a.sender();
-        let sent_a = chan_a.sent_messages();
+        let sent_a = chan_a.sent_messages_shared();
         bridge
             .register_channel(Box::new(chan_a), "bot-a".to_string())
             .await
@@ -1190,7 +1123,7 @@ mod tests {
 
         let chan_b = MockChannel::new(ChannelType::Telegram);
         let _tx_b = chan_b.sender();
-        let sent_b = chan_b.sent_messages();
+        let sent_b = chan_b.sent_messages_shared();
         bridge
             .register_channel(Box::new(chan_b), "bot-b".to_string())
             .await

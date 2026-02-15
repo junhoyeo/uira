@@ -163,6 +163,14 @@ impl MockChannel {
     pub fn sent_message_count(&self) -> usize {
         self.sent_messages.lock().unwrap().len()
     }
+
+    pub fn sender(&self) -> mpsc::Sender<ChannelMessage> {
+        self.message_tx.clone().expect("sender already taken")
+    }
+
+    pub fn sent_messages_shared(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
+        self.sent_messages.clone()
+    }
 }
 
 #[async_trait]
