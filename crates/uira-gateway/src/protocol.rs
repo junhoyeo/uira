@@ -14,6 +14,9 @@ pub enum GatewayMessage {
         session_id: String,
         content: String,
     },
+    SubscribeEvents {
+        session_id: String,
+    },
     ListSessions,
     DestroySession {
         session_id: String,
@@ -36,6 +39,16 @@ pub enum GatewayResponse {
         sessions: Vec<SessionInfoResponse>,
     },
     MessageSent {
+        session_id: String,
+    },
+    EventsSubscribed {
+        session_id: String,
+    },
+    AgentEvent {
+        session_id: String,
+        event: serde_json::Value,
+    },
+    EventStreamEnded {
         session_id: String,
     },
     SessionDestroyed {
@@ -105,6 +118,18 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_subscribe_events() {
+        let json = r#"{"type": "subscribe_events", "session_id": "gw_ses_1"}"#;
+        let msg: GatewayMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            GatewayMessage::SubscribeEvents { session_id } => {
+                assert_eq!(session_id, "gw_ses_1");
+            }
+            _ => panic!("Expected SubscribeEvents"),
+        }
+    }
+
+    #[test]
     fn test_deserialize_destroy_session() {
         let json = r#"{"type": "destroy_session", "session_id": "abc"}"#;
         let msg: GatewayMessage = serde_json::from_str(json).unwrap();
@@ -149,5 +174,34 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"sessions_list\""));
         assert!(json.contains("\"id\":\"s1\""));
+    }
+
+    #[test]
+    fn test_serialize_agent_event() {
+        let resp = GatewayResponse::AgentEvent {
+            session_id: "gw_ses_1".to_string(),
+            event: serde_json::json!({"type": "content_delta", "delta": "Hello"}),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"agent_event\""));
+        assert!(json.contains("\"session_id\":\"gw_ses_1\""));
+    }
+
+    #[test]
+    fn test_serialize_events_subscribed() {
+        let resp = GatewayResponse::EventsSubscribed {
+            session_id: "gw_ses_1".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"events_subscribed\""));
+    }
+
+    #[test]
+    fn test_serialize_event_stream_ended() {
+        let resp = GatewayResponse::EventStreamEnded {
+            session_id: "gw_ses_1".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"event_stream_ended\""));
     }
 }

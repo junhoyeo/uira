@@ -7,8 +7,10 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use uira_core::schema::GatewaySettings;
 
@@ -169,38 +171,109 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 }
 
 async fn handle_socket(
-    mut socket: WebSocket,
+    socket: WebSocket,
     session_manager: Arc<SessionManager>,
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
 ) {
-    while let Some(msg) = socket.recv().await {
-        let text = match msg {
-            Ok(Message::Text(text)) => text.to_string(),
-            Ok(Message::Close(_)) => break,
-            Err(_) => break,
-            _ => continue,
-        };
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+    let (tx, mut rx) = mpsc::channel::<String>(64);
+    let mut event_tasks = Vec::new();
 
-        let response = match serde_json::from_str::<GatewayMessage>(&text) {
-            Ok(gateway_msg) => handle_message(gateway_msg, &session_manager, &channels).await,
-            Err(e) => GatewayResponse::Error {
-                message: format!("Invalid JSON: {}", e),
-            },
-        };
-
-        let response_json = match serde_json::to_string(&response) {
-            Ok(json) => json,
-            Err(_) => {
-                r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
+    loop {
+        tokio::select! {
+            outbound = rx.recv() => {
+                match outbound {
+                    Some(message) => {
+                        if ws_sender.send(Message::text(message)).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
             }
-        };
-        if socket
-            .send(Message::text(response_json))
-            .await
-            .is_err()
-        {
-            break;
+            inbound = ws_receiver.next() => {
+                let text = match inbound {
+                    Some(Ok(Message::Text(text))) => text.to_string(),
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Err(_)) => break,
+                    None => break,
+                    _ => continue,
+                };
+
+                match serde_json::from_str::<GatewayMessage>(&text) {
+                    Ok(GatewayMessage::SubscribeEvents { session_id }) => {
+                        match session_manager.take_event_stream(&session_id).await {
+                            Some(mut event_stream) => {
+                                let ack = GatewayResponse::EventsSubscribed {
+                                    session_id: session_id.clone(),
+                                };
+                                if tx.send(serialize_response(&ack)).await.is_err() {
+                                    break;
+                                }
+
+                                let tx_clone = tx.clone();
+                                let stream_session_id = session_id.clone();
+                                event_tasks.push(tokio::spawn(async move {
+                                    while let Some(event) = event_stream.next().await {
+                                        let event_json = serde_json::to_value(&event)
+                                            .unwrap_or(serde_json::Value::Null);
+                                        let response = GatewayResponse::AgentEvent {
+                                            session_id: stream_session_id.clone(),
+                                            event: event_json,
+                                        };
+
+                                        if tx_clone.send(serialize_response(&response)).await.is_err() {
+                                            return;
+                                        }
+                                    }
+
+                                    let ended = GatewayResponse::EventStreamEnded {
+                                        session_id: stream_session_id,
+                                    };
+                                    let _ = tx_clone.send(serialize_response(&ended)).await;
+                                }));
+                            }
+                            None => {
+                                let err = GatewayResponse::Error {
+                                    message: format!(
+                                        "Event stream not available for session '{}' (already subscribed or session not found)",
+                                        session_id
+                                    ),
+                                };
+                                if tx.send(serialize_response(&err)).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Ok(gateway_msg) => {
+                        let response = handle_message(gateway_msg, &session_manager, &channels).await;
+                        if tx.send(serialize_response(&response)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let err = GatewayResponse::Error {
+                            message: format!("Invalid JSON: {}", e),
+                        };
+                        if tx.send(serialize_response(&err)).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    for task in event_tasks {
+        task.abort();
+    }
+}
+
+fn serialize_response(response: &GatewayResponse) -> String {
+    match serde_json::to_string(response) {
+        Ok(json) => json,
+        Err(_) => r#"{"type":"error","message":"Internal serialization error"}"#.to_string(),
     }
 }
 
@@ -238,6 +311,12 @@ async fn handle_message(
             Err(e) => GatewayResponse::Error {
                 message: e.to_string(),
             },
+        },
+        GatewayMessage::SubscribeEvents { session_id } => GatewayResponse::Error {
+            message: format!(
+                "subscribe_events must be handled by the WebSocket event stream loop: {}",
+                session_id
+            ),
         },
         GatewayMessage::DestroySession { session_id } => {
             match manager.destroy_session(&session_id).await {
@@ -285,6 +364,7 @@ async fn handle_message(
 mod tests {
     use super::*;
     use futures_util::{SinkExt, StreamExt};
+    use tokio::time::{timeout, Duration};
     use tokio_tungstenite::tungstenite;
     use tungstenite::client::IntoClientRequest;
 
@@ -323,6 +403,29 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
+    async fn recv_until_type(
+        ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        expected_type: &str,
+    ) -> serde_json::Value {
+        for _ in 0..40 {
+            let maybe_frame = timeout(Duration::from_millis(500), ws.next()).await;
+            let frame = match maybe_frame {
+                Ok(Some(Ok(frame))) => frame,
+                Ok(Some(Err(error))) => panic!("WebSocket receive error: {}", error),
+                Ok(None) => panic!("WebSocket closed before receiving {}", expected_type),
+                Err(_) => continue,
+            };
+
+            let value: serde_json::Value =
+                serde_json::from_str(&frame.into_text().unwrap()).unwrap();
+            if value["type"].as_str() == Some(expected_type) {
+                return value;
+            }
+        }
+
+        panic!("Timed out waiting for response type {}", expected_type);
+    }
+
     #[tokio::test]
     async fn test_create_session() {
         let url = start_test_server().await;
@@ -359,6 +462,104 @@ mod tests {
         let resp = send_and_recv(&mut ws, &msg).await;
         assert_eq!(resp["type"], "message_sent");
         assert_eq!(resp["session_id"], session_id);
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_events_streams_agent_events() {
+        let url = start_test_server().await;
+        let mut ws = connect(&url).await;
+
+        let create_resp = send_and_recv(&mut ws, r#"{"type": "create_session"}"#).await;
+        let session_id = create_resp["session_id"].as_str().unwrap().to_string();
+
+        let subscribe_msg = format!(
+            r#"{{"type": "subscribe_events", "session_id": "{}"}}"#,
+            session_id
+        );
+        let subscribe_resp = send_and_recv(&mut ws, &subscribe_msg).await;
+        assert_eq!(subscribe_resp["type"], "events_subscribed");
+        assert_eq!(subscribe_resp["session_id"].as_str(), Some(session_id.as_str()));
+
+        ws.send(tungstenite::Message::Text(
+            r#"{"type": "list_sessions"}"#.to_string().into(),
+        ))
+        .await
+        .unwrap();
+        let list_resp = recv_until_type(&mut ws, "sessions_list").await;
+        assert_eq!(list_resp["type"], "sessions_list");
+
+        let send_msg = format!(
+            r#"{{"type": "send_message", "session_id": "{}", "content": "hello"}}"#,
+            session_id
+        );
+        ws.send(tungstenite::Message::Text(send_msg.into()))
+            .await
+            .unwrap();
+
+        let mut got_message_sent = false;
+        let mut got_agent_event = false;
+
+        for _ in 0..30 {
+            let maybe_frame = timeout(Duration::from_millis(500), ws.next()).await;
+            let frame = match maybe_frame {
+                Ok(Some(Ok(frame))) => frame,
+                Ok(Some(Err(error))) => panic!("WebSocket receive error: {}", error),
+                Ok(None) => break,
+                Err(_) => continue,
+            };
+
+            let value: serde_json::Value =
+                serde_json::from_str(&frame.into_text().unwrap()).unwrap();
+            match value["type"].as_str() {
+                Some("message_sent") => {
+                    if value["session_id"].as_str() == Some(session_id.as_str()) {
+                        got_message_sent = true;
+                    }
+                }
+                Some("agent_event") => {
+                    if value["session_id"].as_str() == Some(session_id.as_str()) {
+                        got_agent_event = true;
+                    }
+                }
+                _ => {}
+            }
+
+            if got_message_sent && got_agent_event {
+                break;
+            }
+        }
+
+        assert!(got_message_sent, "expected message_sent response");
+        assert!(got_agent_event, "expected at least one agent_event response");
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_events_twice_returns_error() {
+        let url = start_test_server().await;
+        let mut ws = connect(&url).await;
+
+        let create_resp = send_and_recv(&mut ws, r#"{"type": "create_session"}"#).await;
+        let session_id = create_resp["session_id"].as_str().unwrap().to_string();
+
+        let subscribe_msg = format!(
+            r#"{{"type": "subscribe_events", "session_id": "{}"}}"#,
+            session_id
+        );
+        ws.send(tungstenite::Message::Text(subscribe_msg.clone().into()))
+            .await
+            .unwrap();
+        let first = recv_until_type(&mut ws, "events_subscribed").await;
+        assert_eq!(first["type"], "events_subscribed");
+
+        ws.send(tungstenite::Message::Text(subscribe_msg.into()))
+            .await
+            .unwrap();
+        let second = recv_until_type(&mut ws, "error").await;
+        assert_eq!(second["type"], "error");
+        assert!(second["message"]
+            .as_str()
+            .unwrap()
+            .contains("Event stream not available"));
     }
 
     #[tokio::test]
