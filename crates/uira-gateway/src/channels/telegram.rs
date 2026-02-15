@@ -4,6 +4,8 @@
 //! allowing Uira to receive and send messages via the Telegram Bot API.
 
 use std::collections::HashMap;
+
+#[cfg(test)]
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -33,6 +35,7 @@ pub struct TelegramChannel {
     message_tx: Option<mpsc::Sender<ChannelMessage>>,
     message_rx: Option<mpsc::Receiver<ChannelMessage>>,
     bot_handle: Option<JoinHandle<()>>,
+    #[cfg(test)]
     sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
 }
 
@@ -45,9 +48,22 @@ impl TelegramChannel {
             message_tx: Some(tx),
             message_rx: Some(rx),
             bot_handle: None,
+            #[cfg(test)]
             sent_messages: Arc::new(Mutex::new(Vec::new())),
         }
     }
+}
+
+fn floor_char_boundary(s: &str, max_len: usize) -> usize {
+    if max_len >= s.len() {
+        return s.len();
+    }
+
+    let mut i = max_len;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// Check whether a user is allowed based on the allowed_users list.
@@ -92,10 +108,11 @@ pub fn chunk_message(text: &str, max_len: usize) -> Vec<String> {
             break;
         }
 
-        let split_at = remaining[..max_len]
+        let safe_max = floor_char_boundary(remaining, max_len);
+        let split_at = remaining[..safe_max]
             .rfind('\n')
             .map(|pos| pos + 1)
-            .unwrap_or(max_len);
+            .unwrap_or(safe_max);
 
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk.to_string());
@@ -257,10 +274,8 @@ impl Channel for TelegramChannel {
                 .map_err(|e| ChannelError::SendFailed(format!("Telegram send error: {e}")))?;
         }
 
-        self.sent_messages
-            .lock()
-            .unwrap()
-            .push(response);
+        #[cfg(test)]
+        self.sent_messages.lock().unwrap().push(response);
 
         Ok(())
     }
@@ -345,6 +360,32 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), 4096);
         assert_eq!(chunks[1].len(), 904);
+    }
+
+    #[test]
+    fn test_chunk_message_unicode() {
+        let text = "🎉".repeat(2000);
+        let chunks = chunk_message(&text, 4096);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4096);
+        }
+
+        let rejoined = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
+    fn test_chunk_message_cjk() {
+        let text = "你".repeat(2000);
+        let chunks = chunk_message(&text, 4096);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4096);
+        }
+
+        let rejoined = chunks.concat();
+        assert_eq!(rejoined, text);
     }
 
     #[test]

@@ -296,14 +296,29 @@ fn chunk_message(content: &str, max_len: usize) -> Vec<&str> {
     chunks
 }
 
+fn floor_char_boundary(text: &str, max_len: usize) -> usize {
+    if max_len >= text.len() {
+        return text.len();
+    }
+
+    let mut i = max_len;
+    while i > 0 && !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 fn find_split_point(text: &str, max_len: usize) -> usize {
-    if let Some(pos) = text[..max_len].rfind('\n') {
+    let safe_max = floor_char_boundary(text, max_len);
+    let prefix = &text[..safe_max];
+
+    if let Some(pos) = prefix.rfind('\n') {
         return pos + 1;
     }
-    if let Some(pos) = text[..max_len].rfind(' ') {
+    if let Some(pos) = prefix.rfind(' ') {
         return pos + 1;
     }
-    max_len
+    safe_max
 }
 
 #[cfg(test)]
@@ -464,6 +479,32 @@ mod tests {
 
         let chunks = chunk_message(&msg, 4000);
         assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn test_chunk_message_unicode() {
+        let text = "🎉".repeat(2000);
+        let chunks = chunk_message(&text, 4000);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4000);
+        }
+
+        let rejoined: String = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
+    fn test_chunk_message_cjk() {
+        let text = "你".repeat(2000);
+        let chunks = chunk_message(&text, 4000);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4000);
+        }
+
+        let rejoined: String = chunks.concat();
+        assert_eq!(rejoined, text);
     }
 
     #[test]
