@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uira_core::schema::SlackChannelConfig;
 
 use super::channel::Channel;
@@ -57,10 +57,51 @@ impl Channel for SlackChannel {
             .clone()
             .ok_or_else(|| ChannelError::Other("Message sender already taken".into()))?;
         let allowed_channels = self.config.allowed_channels.clone();
+        let http_client = self.http_client.clone();
+        let app_token = self.config.app_token.clone();
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_socket_mode_loop(&ws_url, tx, &allowed_channels).await {
-                error!("Socket Mode loop exited with error: {e}");
+            let mut backoff_secs = 1u64;
+            const MAX_BACKOFF_SECS: u64 = 60;
+
+            let mut current_url = ws_url;
+
+            loop {
+                match run_socket_mode_loop(&current_url, tx.clone(), &allowed_channels).await {
+                    Ok(()) => {
+                        info!("Socket Mode loop ended; reconnecting");
+                    }
+                    Err(e) => {
+                        warn!("Socket Mode loop exited with error: {e}");
+                    }
+                }
+
+                if tx.is_closed() {
+                    info!("Message receiver closed, stopping Slack reconnect loop");
+                    break;
+                }
+
+                info!(
+                    backoff_secs,
+                    "Reconnecting to Slack Socket Mode after backoff"
+                );
+                tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
+
+                if tx.is_closed() {
+                    info!("Message receiver closed during backoff, stopping Slack reconnect loop");
+                    break;
+                }
+
+                match request_socket_mode_url(&http_client, &app_token).await {
+                    Ok(url) => {
+                        current_url = url;
+                        backoff_secs = 1;
+                    }
+                    Err(e) => {
+                        warn!("Failed to request new Socket Mode URL: {e}");
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                    }
+                }
             }
         });
 
