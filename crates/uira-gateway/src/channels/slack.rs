@@ -173,7 +173,13 @@ async fn run_socket_mode_loop(
 
         let text = match msg {
             tokio_tungstenite::tungstenite::Message::Text(t) => t,
-            tokio_tungstenite::tungstenite::Message::Ping(_) => continue,
+            tokio_tungstenite::tungstenite::Message::Ping(payload) => {
+                if let Err(e) = ws_sink.send(tokio_tungstenite::tungstenite::Message::Pong(payload)).await {
+                    warn!("Failed to send Pong: {e}");
+                    break;
+                }
+                continue;
+            }
             tokio_tungstenite::tungstenite::Message::Close(_) => {
                 info!("WebSocket closed by server");
                 break;
