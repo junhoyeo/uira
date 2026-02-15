@@ -16,6 +16,13 @@ pub enum SkillError {
         source: std::io::Error,
     },
 
+    #[error("Skill file too large: {path} ({size} bytes exceeds maximum {max_size} bytes)")]
+    FileTooLarge {
+        path: PathBuf,
+        size: u64,
+        max_size: u64,
+    },
+
     #[error("Skill not found: {0}")]
     NotFound(String),
 }

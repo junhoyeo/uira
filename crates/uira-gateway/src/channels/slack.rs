@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uira_core::schema::SlackChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 const SLACK_MAX_MESSAGE_LENGTH: usize = 4000;
 const CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
@@ -57,10 +57,51 @@ impl Channel for SlackChannel {
             .clone()
             .ok_or_else(|| ChannelError::Other("Message sender already taken".into()))?;
         let allowed_channels = self.config.allowed_channels.clone();
+        let http_client = self.http_client.clone();
+        let app_token = self.config.app_token.clone();
 
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_socket_mode_loop(&ws_url, tx, &allowed_channels).await {
-                error!("Socket Mode loop exited with error: {e}");
+            let mut backoff_secs = 1u64;
+            const MAX_BACKOFF_SECS: u64 = 60;
+
+            let mut current_url = ws_url;
+
+            loop {
+                match run_socket_mode_loop(&current_url, tx.clone(), &allowed_channels).await {
+                    Ok(()) => {
+                        info!("Socket Mode loop ended; reconnecting");
+                    }
+                    Err(e) => {
+                        warn!("Socket Mode loop exited with error: {e}");
+                    }
+                }
+
+                if tx.is_closed() {
+                    info!("Message receiver closed, stopping Slack reconnect loop");
+                    break;
+                }
+
+                info!(
+                    backoff_secs,
+                    "Reconnecting to Slack Socket Mode after backoff"
+                );
+                tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
+
+                if tx.is_closed() {
+                    info!("Message receiver closed during backoff, stopping Slack reconnect loop");
+                    break;
+                }
+
+                match request_socket_mode_url(&http_client, &app_token).await {
+                    Ok(url) => {
+                        current_url = url;
+                        backoff_secs = 1;
+                    }
+                    Err(e) => {
+                        warn!("Failed to request new Socket Mode URL: {e}");
+                        backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
+                    }
+                }
             }
         });
 
@@ -172,7 +213,13 @@ async fn run_socket_mode_loop(
 
         let text = match msg {
             tokio_tungstenite::tungstenite::Message::Text(t) => t,
-            tokio_tungstenite::tungstenite::Message::Ping(_) => continue,
+            tokio_tungstenite::tungstenite::Message::Ping(payload) => {
+                if let Err(e) = ws_sink.send(tokio_tungstenite::tungstenite::Message::Pong(payload)).await {
+                    warn!("Failed to send Pong: {e}");
+                    break;
+                }
+                continue;
+            }
             tokio_tungstenite::tungstenite::Message::Close(_) => {
                 info!("WebSocket closed by server");
                 break;
@@ -269,9 +316,24 @@ fn is_channel_allowed(channel_id: &str, allowed_channels: &[String]) -> bool {
 }
 
 fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
-    let secs: f64 = ts.parse().unwrap_or(0.0);
-    let secs_i64 = secs as i64;
-    let nanos = ((secs - secs_i64 as f64) * 1_000_000_000.0) as u32;
+    // Slack timestamps are "EPOCH.SEQUENCE" format (e.g., "1234567890.123456")
+    // Parse as two parts to avoid f64 precision loss
+    let parts: Vec<&str> = ts.split('.').collect();
+    
+    let secs_i64 = parts
+        .first()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    
+    let nanos = parts
+        .get(1)
+        .and_then(|s| {
+            // Pad or truncate to 9 digits for nanoseconds
+            let padded = format!("{:0<9}", s);
+            padded[..9].parse::<u32>().ok()
+        })
+        .unwrap_or(0);
+    
     chrono::DateTime::from_timestamp(secs_i64, nanos).unwrap_or_default()
 }
 
@@ -299,13 +361,16 @@ fn chunk_message(content: &str, max_len: usize) -> Vec<&str> {
 }
 
 fn find_split_point(text: &str, max_len: usize) -> usize {
-    if let Some(pos) = text[..max_len].rfind('\n') {
+    let safe_max = floor_char_boundary(text, max_len);
+    let prefix = &text[..safe_max];
+
+    if let Some(pos) = prefix.rfind('\n') {
         return pos + 1;
     }
-    if let Some(pos) = text[..max_len].rfind(' ') {
+    if let Some(pos) = prefix.rfind(' ') {
         return pos + 1;
     }
-    max_len
+    safe_max
 }
 
 #[cfg(test)]
@@ -469,12 +534,45 @@ mod tests {
     }
 
     #[test]
+    fn test_chunk_message_unicode() {
+        let text = "🎉".repeat(2000);
+        let chunks = chunk_message(&text, 4000);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4000);
+        }
+
+        let rejoined: String = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
+    fn test_chunk_message_cjk() {
+        let text = "你".repeat(2000);
+        let chunks = chunk_message(&text, 4000);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4000);
+        }
+
+        let rejoined: String = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
     fn test_parse_slack_timestamp() {
         let ts = parse_slack_timestamp("1234567890.123456");
         assert_eq!(ts.timestamp(), 1234567890);
 
         let ts_zero = parse_slack_timestamp("invalid");
         assert_eq!(ts_zero.timestamp(), 0);
+    }
+
+    #[test]
+    fn test_parse_slack_timestamp_short_fraction() {
+        let ts = parse_slack_timestamp("1234567890.1");
+        assert_eq!(ts.timestamp(), 1234567890);
+        assert_eq!(ts.timestamp_subsec_nanos(), 100000000); // "1" → "100000000"
     }
 
     #[test]
@@ -501,9 +599,11 @@ mod tests {
     #[test]
     fn test_slack_channel_type() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let channel = SlackChannel::new(config);
         assert_eq!(channel.channel_type(), ChannelType::Slack);
@@ -512,9 +612,11 @@ mod tests {
     #[test]
     fn test_slack_capabilities() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let channel = SlackChannel::new(config);
         let caps = channel.capabilities();
@@ -525,9 +627,11 @@ mod tests {
     #[test]
     fn test_take_message_receiver() {
         let config = SlackChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "xoxb-test".to_string(),
             app_token: "xapp-test".to_string(),
             allowed_channels: vec![],
+            active_skills: vec![],
         };
         let mut channel = SlackChannel::new(config);
         assert!(channel.take_message_receiver().is_some());

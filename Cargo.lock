@@ -5851,6 +5851,8 @@ dependencies = [
  "tracing",
  "uira-agent",
  "uira-core",
+ "uira-orchestration",
+ "uira-providers",
  "uira-types",
 ]
 

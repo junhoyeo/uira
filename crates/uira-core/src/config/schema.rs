@@ -957,6 +957,26 @@ pub struct GatewaySettings {
     /// Maximum number of concurrent sessions
     #[serde(default = "default_max_sessions")]
     pub max_sessions: usize,
+
+    /// Default model for gateway sessions
+    #[serde(default = "default_gateway_model")]
+    pub model: String,
+
+    /// Default provider for gateway sessions
+    #[serde(default = "default_gateway_provider")]
+    pub provider: String,
+
+    /// Optional authentication token for gateway access
+    #[serde(default)]
+    pub auth_token: Option<String>,
+
+    /// Idle timeout in seconds before a session is cleaned up
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_secs: Option<u64>,
+
+    /// Working directory for gateway-spawned sessions
+    #[serde(default)]
+    pub working_directory: Option<String>,
 }
 
 impl Default for GatewaySettings {
@@ -966,6 +986,11 @@ impl Default for GatewaySettings {
             host: default_gateway_host(),
             port: default_gateway_port(),
             max_sessions: default_max_sessions(),
+            model: default_gateway_model(),
+            provider: default_gateway_provider(),
+            auth_token: None,
+            idle_timeout_secs: default_idle_timeout(),
+            working_directory: None,
         }
     }
 }
@@ -982,6 +1007,18 @@ fn default_max_sessions() -> usize {
     10
 }
 
+fn default_gateway_model() -> String {
+    "claude-sonnet-4-20250514".to_string()
+}
+
+fn default_gateway_provider() -> String {
+    "anthropic".to_string()
+}
+
+fn default_idle_timeout() -> Option<u64> {
+    Some(1800)
+}
+
 // ============================================================================
 // Channel Configuration
 // ============================================================================
@@ -989,38 +1026,51 @@ fn default_max_sessions() -> usize {
 /// Channel settings for multi-channel messaging
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChannelSettings {
-    /// Telegram channel configuration
     #[serde(default)]
     pub telegram: Option<TelegramChannelConfig>,
 
-    /// Slack channel configuration
+    #[serde(default)]
+    pub telegram_accounts: Vec<TelegramChannelConfig>,
+
     #[serde(default)]
     pub slack: Option<SlackChannelConfig>,
+
+    #[serde(default)]
+    pub slack_accounts: Vec<SlackChannelConfig>,
 }
 
-/// Telegram bot configuration
+fn default_account_id() -> String {
+    "default".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramChannelConfig {
-    /// Telegram bot token from @BotFather
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+
     pub bot_token: String,
 
-    /// List of allowed Telegram user IDs (empty = allow all)
     #[serde(default)]
     pub allowed_users: Vec<String>,
+
+    #[serde(default)]
+    pub active_skills: Vec<String>,
 }
 
-/// Slack bot configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackChannelConfig {
-    /// Slack bot token (xoxb-...)
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+
     pub bot_token: String,
 
-    /// Slack app-level token for Socket Mode (xapp-...)
     pub app_token: String,
 
-    /// List of allowed Slack channel IDs (empty = allow all)
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+
+    #[serde(default)]
+    pub active_skills: Vec<String>,
 }
 
 // ============================================================================
@@ -1386,6 +1436,11 @@ theme_colors:
         assert_eq!(settings.host, "127.0.0.1");
         assert_eq!(settings.port, 18789);
         assert_eq!(settings.max_sessions, 10);
+        assert_eq!(settings.model, "claude-sonnet-4-20250514");
+        assert_eq!(settings.provider, "anthropic");
+        assert!(settings.auth_token.is_none());
+        assert_eq!(settings.idle_timeout_secs, Some(1800));
+        assert!(settings.working_directory.is_none());
     }
 
     #[test]

@@ -94,6 +94,7 @@ When updating AGENTS.md files, follow these principles:
 3. Update documentation if behavior changes
 4. Ensure all tests pass: `cargo test --workspace`
 5. Run clippy: `cargo clippy -- -D warnings`
+6. **Always use merge commits** when merging PRs (`gh pr merge --merge`). Never squash or rebase merge.
 
 ## Coding Conventions
 

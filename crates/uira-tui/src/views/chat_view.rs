@@ -646,3 +646,41 @@ fn summarize_tool_output(output: &str) -> String {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ChatView;
+    use crate::Theme;
+
+    #[test]
+    fn clamp_then_sync_enables_follow_at_bottom() {
+        let mut view = ChatView::new(Theme::default());
+        view.total_lines = 100;
+        view.viewport_height = 20;
+        view.scroll_offset = 500;
+        view.auto_follow = false;
+        view.user_scrolled = true;
+
+        view.clamp_scroll_offset();
+        view.sync_follow_with_position();
+
+        assert_eq!(view.scroll_offset, 80);
+        assert!(view.auto_follow);
+        assert!(!view.user_scrolled);
+    }
+
+    #[test]
+    fn sync_keeps_manual_scroll_state_when_not_at_bottom() {
+        let mut view = ChatView::new(Theme::default());
+        view.total_lines = 100;
+        view.viewport_height = 20;
+        view.scroll_offset = 10;
+        view.auto_follow = false;
+        view.user_scrolled = true;
+
+        view.sync_follow_with_position();
+
+        assert!(!view.auto_follow);
+        assert!(view.user_scrolled);
+    }
+}

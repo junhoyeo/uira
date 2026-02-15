@@ -4,6 +4,8 @@
 //! allowing Uira to receive and send messages via the Telegram Bot API.
 
 use std::collections::HashMap;
+
+#[cfg(test)]
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -17,7 +19,7 @@ use uira_core::schema::TelegramChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 /// Maximum message length for Telegram messages (in characters).
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -33,6 +35,7 @@ pub struct TelegramChannel {
     message_tx: Option<mpsc::Sender<ChannelMessage>>,
     message_rx: Option<mpsc::Receiver<ChannelMessage>>,
     bot_handle: Option<JoinHandle<()>>,
+    #[cfg(test)]
     sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
 }
 
@@ -45,6 +48,7 @@ impl TelegramChannel {
             message_tx: Some(tx),
             message_rx: Some(rx),
             bot_handle: None,
+            #[cfg(test)]
             sent_messages: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -92,10 +96,11 @@ pub fn chunk_message(text: &str, max_len: usize) -> Vec<String> {
             break;
         }
 
-        let split_at = remaining[..max_len]
+        let safe_max = floor_char_boundary(remaining, max_len);
+        let split_at = remaining[..safe_max]
             .rfind('\n')
             .map(|pos| pos + 1)
-            .unwrap_or(max_len);
+            .unwrap_or(safe_max);
 
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk.to_string());
@@ -115,7 +120,7 @@ pub fn telegram_message_to_channel_message(
     let text = msg.text()?;
     let from = msg.from.as_ref()?;
 
-    let sender = from.username.as_deref().unwrap_or("unknown").to_string();
+    let sender = from.id.to_string();
 
     let mut metadata = HashMap::new();
     metadata.insert("chat_id".to_string(), msg.chat.id.to_string());
@@ -163,7 +168,9 @@ impl Channel for TelegramChannel {
             .get_me()
             .await
             .map_err(|e| ChannelError::ConnectionFailed(format!("Failed to get bot info: {e}")))?;
-        let bot_username = me.username().to_string();
+        let bot_username = me
+            .username()
+            .to_string();
 
         info!(
             "Telegram bot @{} started, listening for messages",
@@ -177,37 +184,47 @@ impl Channel for TelegramChannel {
         let allowed_users = self.config.allowed_users.clone();
 
         let handle = tokio::spawn(async move {
-            let handler = Update::filter_message().endpoint(move |_bot: Bot, msg: Message| {
-                let tx = message_tx.clone();
-                let allowed = allowed_users.clone();
-                let bot_uname = bot_username.clone();
+            let handler = Update::filter_message().endpoint(
+                move |_bot: Bot, msg: Message| {
+                    let tx = message_tx.clone();
+                    let allowed = allowed_users.clone();
+                    let bot_uname = bot_username.clone();
 
-                async move {
-                    if let Some(from) = &msg.from {
-                        if !is_user_allowed(&allowed, from.username.as_deref(), from.id.0) {
-                            debug!(
-                                "Ignoring message from non-allowed user: {:?} (id: {})",
-                                from.username, from.id
-                            );
+                    async move {
+                        if let Some(from) = &msg.from {
+                            if !is_user_allowed(
+                                &allowed,
+                                from.username.as_deref(),
+                                from.id.0,
+                            ) {
+                                debug!(
+                                    "Ignoring message from non-allowed user: {:?} (id: {})",
+                                    from.username, from.id
+                                );
+                                return Ok(());
+                            }
+                        } else {
+                            warn!("Ignoring message with no sender");
                             return Ok(());
                         }
-                    } else {
-                        warn!("Ignoring message with no sender");
-                        return Ok(());
-                    }
 
-                    if let Some(channel_msg) = telegram_message_to_channel_message(&msg, &bot_uname)
-                    {
-                        if let Err(e) = tx.send(channel_msg).await {
-                            error!("Failed to forward Telegram message: {}", e);
+                        if let Some(channel_msg) =
+                            telegram_message_to_channel_message(&msg, &bot_uname)
+                        {
+                            if let Err(e) = tx.send(channel_msg).await {
+                                error!("Failed to forward Telegram message: {}", e);
+                            }
                         }
+
+                        respond(())
                     }
+                },
+            );
 
-                    respond(())
-                }
-            });
-
-            Dispatcher::builder(bot, handler).build().dispatch().await;
+            Dispatcher::builder(bot, handler)
+                .build()
+                .dispatch()
+                .await;
         });
 
         self.bot_handle = Some(handle);
@@ -228,9 +245,10 @@ impl Channel for TelegramChannel {
     async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
         let bot = Bot::new(&self.config.bot_token);
 
-        let chat_id: i64 = response.recipient.parse().map_err(|e| {
-            ChannelError::SendFailed(format!("Invalid chat_id '{}': {e}", response.recipient))
-        })?;
+        let chat_id: i64 = response
+            .recipient
+            .parse()
+            .map_err(|e| ChannelError::SendFailed(format!("Invalid chat_id '{}': {e}", response.recipient)))?;
 
         let chunks = chunk_message(&response.content, TELEGRAM_MAX_MESSAGE_LENGTH);
 
@@ -240,6 +258,7 @@ impl Channel for TelegramChannel {
                 .map_err(|e| ChannelError::SendFailed(format!("Telegram send error: {e}")))?;
         }
 
+        #[cfg(test)]
         self.sent_messages.lock().unwrap().push(response);
 
         Ok(())
@@ -256,8 +275,10 @@ mod tests {
 
     fn test_config() -> TelegramChannelConfig {
         TelegramChannelConfig {
+            account_id: "default".to_string(),
             bot_token: "test:fake-token".to_string(),
             allowed_users: Vec::new(),
+            active_skills: Vec::new(),
         }
     }
 
@@ -326,6 +347,32 @@ mod tests {
     }
 
     #[test]
+    fn test_chunk_message_unicode() {
+        let text = "🎉".repeat(2000);
+        let chunks = chunk_message(&text, 4096);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4096);
+        }
+
+        let rejoined = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
+    fn test_chunk_message_cjk() {
+        let text = "你".repeat(2000);
+        let chunks = chunk_message(&text, 4096);
+
+        for chunk in &chunks {
+            assert!(chunk.len() <= 4096);
+        }
+
+        let rejoined = chunks.concat();
+        assert_eq!(rejoined, text);
+    }
+
+    #[test]
     fn test_is_user_allowed_empty_list() {
         assert!(is_user_allowed(&[], Some("anyone"), 12345));
         assert!(is_user_allowed(&[], None, 12345));
@@ -359,7 +406,11 @@ mod tests {
 
     #[test]
     fn test_is_user_allowed_multiple_entries() {
-        let allowed = vec!["alice".to_string(), "12345".to_string(), "@bob".to_string()];
+        let allowed = vec![
+            "alice".to_string(),
+            "12345".to_string(),
+            "@bob".to_string(),
+        ];
         assert!(is_user_allowed(&allowed, Some("alice"), 99));
         assert!(is_user_allowed(&allowed, Some("unknown"), 12345));
         assert!(is_user_allowed(&allowed, Some("bob"), 99));

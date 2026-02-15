@@ -11,12 +11,12 @@ use uira_agent::{
     RecursiveAgentExecutor, TelemetryConfig,
 };
 use uira_orchestration::{get_agent_definitions, ModelRegistry};
+use uira_types::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
 };
 use uira_sandbox::SandboxPolicy;
-use uira_types::ExecutionResult;
 
 mod commands;
 mod config;
@@ -686,7 +686,7 @@ async fn run_config(
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_core::loader::load_config;
-    use uira_hooks::GoalRunner;
+                    use uira_hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {
@@ -904,7 +904,9 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
                 uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                     "completed".green()
                 }
-                uira_orchestration::background_agent::BackgroundTaskStatus::Error => "error".red(),
+                uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
+                    "error".red()
+                }
                 uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                     "cancelled".dimmed()
                 }
@@ -1018,7 +1020,11 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
                 .find(|s| s.name == *name)
                 .ok_or_else(|| format!("Skill not found: {}", name))?;
 
-            println!("{} {}", "Skill:".cyan().bold(), skill.name.yellow().bold());
+            println!(
+                "{} {}",
+                "Skill:".cyan().bold(),
+                skill.name.yellow().bold()
+            );
             println!("{}", "─".repeat(80).dimmed());
 
             let content = std::fs::read_to_string(&skill.path)?;
@@ -1106,29 +1112,194 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
 }
 
 async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error::Error>> {
-    use uira_gateway::GatewayServer;
+    use std::collections::HashMap;
+    use uira_gateway::channel_bridge::ChannelSkillConfig;
+    use uira_gateway::{
+        Channel, ChannelBridge, GatewayServer, SkillLoader, SlackChannel, TelegramChannel,
+    };
 
     match command {
-        GatewayCommands::Start { host, port } => {
+        GatewayCommands::Start {
+            host,
+            port,
+            auth_token,
+        } => {
             let config = uira_core::loader::load_config(None).ok();
-            let gateway_settings = config
+            let mut gateway_settings = config
                 .as_ref()
                 .map(|c| &c.gateway)
                 .cloned()
                 .unwrap_or_default();
 
-            let bind_host = host.as_deref().unwrap_or(&gateway_settings.host);
+            // Warn if gateway.enabled is false in config (but proceed since
+            // the user explicitly ran `gateway start`)
+            if config.is_some() && !gateway_settings.enabled {
+                eprintln!(
+                    "⚠ gateway.enabled is false in config — starting anyway due to explicit CLI invocation. \
+                     Set `gateway.enabled: true` in uira.yml to suppress this warning."
+                );
+            }
+
+            let bind_host = host
+                .clone()
+                .unwrap_or_else(|| gateway_settings.host.clone());
             let bind_port = port.unwrap_or(gateway_settings.port);
 
-            println!(
-                "{}",
-                format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+            if auth_token.is_some() {
+                gateway_settings.auth_token = auth_token.clone();
+            }
+
+            let outbound_channels: Arc<tokio::sync::RwLock<HashMap<String, Arc<dyn Channel>>>> =
+                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+            let server = GatewayServer::new_with_settings(gateway_settings)
+                .with_channels(outbound_channels.clone());
+            let session_manager = server.session_manager();
+
+            let channel_settings = config
+                .as_ref()
+                .map(|c| c.channels.clone())
+                .unwrap_or_default();
+
+            let mut telegram_configs = Vec::new();
+            if let Some(tg) = channel_settings.telegram {
+                telegram_configs.push(tg);
+            }
+            telegram_configs.extend(channel_settings.telegram_accounts);
+
+            let mut slack_configs = Vec::new();
+            if let Some(sl) = channel_settings.slack {
+                slack_configs.push(sl);
+            }
+            slack_configs.extend(channel_settings.slack_accounts);
+
+            let has_channels = !telegram_configs.is_empty() || !slack_configs.is_empty();
+
+            let mut bridge = if has_channels {
+                let mut channel_active_skills: HashMap<String, Vec<String>> = HashMap::new();
+
+                for cfg in &telegram_configs {
+                    if !cfg.active_skills.is_empty() {
+                        channel_active_skills
+                            .entry("telegram".to_string())
+                            .or_default()
+                            .extend(cfg.active_skills.iter().cloned());
+                    }
+                }
+                for cfg in &slack_configs {
+                    if !cfg.active_skills.is_empty() {
+                        channel_active_skills
+                            .entry("slack".to_string())
+                            .or_default()
+                            .extend(cfg.active_skills.iter().cloned());
+                    }
+                }
+
+                for skills in channel_active_skills.values_mut() {
+                    skills.sort();
+                    skills.dedup();
+                }
+
+                let skill_config = if !channel_active_skills.is_empty() {
+                    let skill_paths = config
+                        .as_ref()
+                        .map(|c| c.skills.paths.clone())
+                        .unwrap_or_default();
+
+                    SkillLoader::new(&skill_paths)
+                        .and_then(|loader| {
+                            ChannelSkillConfig::from_active_skills(
+                                Some(&loader),
+                                channel_active_skills,
+                            )
+                        })
+                        .unwrap_or_else(|e| {
+                            tracing::warn!("Failed to load channel skills: {e}");
+                            ChannelSkillConfig::new()
+                        })
+                } else {
+                    ChannelSkillConfig::new()
+                };
+
+                Some(
+                    ChannelBridge::with_skill_config(session_manager, skill_config)
+                        .with_outbound_channels(outbound_channels.clone()),
+                )
+            } else {
+                None
+            };
+
+            let mut channel_count = 0usize;
+
+            if let Some(ref mut bridge) = bridge {
+                for tg_config in telegram_configs {
+                    let account_id = tg_config.account_id.clone();
+                    let channel = TelegramChannel::new(tg_config);
+                    match bridge
+                        .register_channel(Box::new(channel), account_id.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!(account_id = %account_id, "Telegram channel registered");
+                            channel_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                account_id = %account_id,
+                                error = %e,
+                                "Failed to register Telegram channel"
+                            );
+                        }
+                    }
+                }
+
+                for sl_config in slack_configs {
+                    let account_id = sl_config.account_id.clone();
+                    let channel = SlackChannel::new(sl_config);
+                    match bridge
+                        .register_channel(Box::new(channel), account_id.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!(account_id = %account_id, "Slack channel registered");
+                            channel_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                account_id = %account_id,
+                                error = %e,
+                                "Failed to register Slack channel"
+                            );
+                        }
+                    }
+                }
+            }
+
+            if channel_count > 0 {
+                println!(
+                    "{}",
+                    format!(
+                        "Gateway started on ws://{}:{} ({channel_count} channel(s) active)",
+                        bind_host, bind_port,
+                    )
                     .green()
                     .bold()
-            );
+                );
+            } else {
+                println!(
+                    "{}",
+                    format!("Gateway started on ws://{}:{}", bind_host, bind_port)
+                        .green()
+                        .bold()
+                );
+            }
 
-            let server = GatewayServer::new(gateway_settings.max_sessions);
-            server.start(bind_host, bind_port).await?;
+            server.start(&bind_host, bind_port).await?;
+
+            if let Some(mut bridge) = bridge {
+                bridge.stop().await;
+                tracing::info!("Channel bridge stopped");
+            }
 
             Ok(())
         }
@@ -1141,7 +1312,6 @@ async fn run_interactive(
     tracing_rx: Option<UnboundedReceiver<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::{
-        event::{DisableMouseCapture, EnableMouseCapture},
         execute,
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     };
@@ -1169,7 +1339,7 @@ async fn run_interactive(
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1191,22 +1361,13 @@ async fn run_interactive(
         let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
     }
 
-    if let Some(ref cfg) = uira_config {
-        let keybinds = uira_tui::KeybindConfig::from_config(&cfg.keybinds);
-        app.configure_keybinds(keybinds);
-    }
-
     let result = app
         .run_with_agent(&mut terminal, agent_config, client, tracing_rx)
         .await;
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     result.map_err(|e| e.into())
@@ -1237,7 +1398,6 @@ fn build_theme_overrides(
         warning: uira_config.and_then(|cfg| cfg.theme_colors.warning.clone()),
         success: uira_config.and_then(|cfg| cfg.theme_colors.success.clone()),
         borders: uira_config.and_then(|cfg| cfg.theme_colors.borders.clone()),
-        ..Default::default()
     }
 }
 

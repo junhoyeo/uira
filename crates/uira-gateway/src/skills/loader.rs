@@ -4,6 +4,8 @@ use super::discovery::{discover_skills, SkillInfo};
 use super::error::SkillError;
 use super::parser::{parse_skill, Skill};
 
+const MAX_SKILL_FILE_SIZE: u64 = 1_048_576;
+
 /// Loads and manages discovered skills.
 pub struct SkillLoader {
     pub discovered: Vec<SkillInfo>,
@@ -26,6 +28,20 @@ impl SkillLoader {
                 .iter()
                 .find(|s| s.name == *name)
                 .ok_or_else(|| SkillError::NotFound(name.clone()))?;
+
+            let file_size = std::fs::metadata(&info.path)
+                .map_err(|e| SkillError::IoError {
+                    path: info.path.clone(),
+                    source: e,
+                })?
+                .len();
+            if file_size > MAX_SKILL_FILE_SIZE {
+                return Err(SkillError::FileTooLarge {
+                    path: info.path.clone(),
+                    size: file_size,
+                    max_size: MAX_SKILL_FILE_SIZE,
+                });
+            }
 
             let content = std::fs::read_to_string(&info.path).map_err(|e| SkillError::IoError {
                 path: info.path.clone(),

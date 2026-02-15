@@ -4,7 +4,7 @@ use crate::config::SessionConfig;
 
 /// Inbound messages from WebSocket clients
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GatewayMessage {
     CreateSession {
         #[serde(default)]
@@ -14,9 +14,17 @@ pub enum GatewayMessage {
         session_id: String,
         content: String,
     },
+    SubscribeEvents {
+        session_id: String,
+    },
     ListSessions,
     DestroySession {
         session_id: String,
+    },
+    SendOutbound {
+        channel_type: String,
+        recipient: String,
+        text: String,
     },
 }
 
@@ -24,11 +32,35 @@ pub enum GatewayMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayResponse {
-    SessionCreated { session_id: String },
-    SessionsList { sessions: Vec<SessionInfoResponse> },
-    MessageSent { session_id: String },
-    SessionDestroyed { session_id: String },
-    Error { message: String },
+    SessionCreated {
+        session_id: String,
+    },
+    SessionsList {
+        sessions: Vec<SessionInfoResponse>,
+    },
+    MessageSent {
+        session_id: String,
+    },
+    EventsSubscribed {
+        session_id: String,
+    },
+    AgentEvent {
+        session_id: String,
+        event: serde_json::Value,
+    },
+    EventStreamEnded {
+        session_id: String,
+    },
+    SessionDestroyed {
+        session_id: String,
+    },
+    OutboundSent {
+        channel_type: String,
+        recipient: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +68,7 @@ pub struct SessionInfoResponse {
     pub id: String,
     pub status: String,
     pub created_at: String,
+    pub last_message_at: String,
 }
 
 #[cfg(test)]
@@ -85,6 +118,18 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_subscribe_events() {
+        let json = r#"{"type": "subscribe_events", "session_id": "gw_ses_1"}"#;
+        let msg: GatewayMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            GatewayMessage::SubscribeEvents { session_id } => {
+                assert_eq!(session_id, "gw_ses_1");
+            }
+            _ => panic!("Expected SubscribeEvents"),
+        }
+    }
+
+    #[test]
     fn test_deserialize_destroy_session() {
         let json = r#"{"type": "destroy_session", "session_id": "abc"}"#;
         let msg: GatewayMessage = serde_json::from_str(json).unwrap();
@@ -121,12 +166,50 @@ mod tests {
         let resp = GatewayResponse::SessionsList {
             sessions: vec![SessionInfoResponse {
                 id: "s1".to_string(),
-                status: "Active".to_string(),
+                status: "active".to_string(),
                 created_at: "2025-01-01T00:00:00Z".to_string(),
+                last_message_at: "2025-01-01T00:00:00Z".to_string(),
             }],
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"sessions_list\""));
         assert!(json.contains("\"id\":\"s1\""));
+    }
+
+    #[test]
+    fn test_serialize_agent_event() {
+        let resp = GatewayResponse::AgentEvent {
+            session_id: "gw_ses_1".to_string(),
+            event: serde_json::json!({"type": "content_delta", "delta": "Hello"}),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"agent_event\""));
+        assert!(json.contains("\"session_id\":\"gw_ses_1\""));
+    }
+
+    #[test]
+    fn test_serialize_events_subscribed() {
+        let resp = GatewayResponse::EventsSubscribed {
+            session_id: "gw_ses_1".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"events_subscribed\""));
+    }
+
+    #[test]
+    fn test_serialize_event_stream_ended() {
+        let resp = GatewayResponse::EventStreamEnded {
+            session_id: "gw_ses_1".to_string(),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"type\":\"event_stream_ended\""));
+    }
+
+    #[test]
+    fn test_deny_unknown_fields() {
+        // Test that unknown fields are rejected
+        let json = r#"{"type": "send_message", "session_id": "abc", "content": "hello", "extra_field": true}"#;
+        let result = serde_json::from_str::<GatewayMessage>(json);
+        assert!(result.is_err(), "Should reject unknown fields");
     }
 }

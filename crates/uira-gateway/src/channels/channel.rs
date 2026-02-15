@@ -22,83 +22,8 @@ pub trait Channel: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MockChannel;
     use chrono::Utc;
-    use std::sync::{Arc, Mutex};
-
-    struct MockChannel {
-        channel_type: ChannelType,
-        started: bool,
-        message_tx: Option<mpsc::Sender<ChannelMessage>>,
-        message_rx: Option<mpsc::Receiver<ChannelMessage>>,
-        sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
-    }
-
-    impl MockChannel {
-        fn new(channel_type: ChannelType) -> Self {
-            let (tx, rx) = mpsc::channel(32);
-            Self {
-                channel_type,
-                started: false,
-                message_tx: Some(tx),
-                message_rx: Some(rx),
-                sent_messages: Arc::new(Mutex::new(Vec::new())),
-            }
-        }
-
-        async fn inject_message(&self, content: &str, sender: &str) {
-            if let Some(tx) = &self.message_tx {
-                let msg = ChannelMessage {
-                    sender: sender.to_string(),
-                    content: content.to_string(),
-                    channel_type: self.channel_type.clone(),
-                    channel_id: "mock-channel".to_string(),
-                    timestamp: Utc::now(),
-                    metadata: Default::default(),
-                };
-                tx.send(msg).await.unwrap();
-            }
-        }
-    }
-
-    #[async_trait]
-    impl Channel for MockChannel {
-        fn channel_type(&self) -> ChannelType {
-            self.channel_type.clone()
-        }
-
-        fn capabilities(&self) -> ChannelCapabilities {
-            ChannelCapabilities {
-                max_message_length: 4096,
-                supports_markdown: true,
-            }
-        }
-
-        async fn start(&mut self) -> Result<(), ChannelError> {
-            if self.started {
-                return Err(ChannelError::Other("Already started".to_string()));
-            }
-            self.started = true;
-            Ok(())
-        }
-
-        async fn stop(&mut self) -> Result<(), ChannelError> {
-            if !self.started {
-                return Err(ChannelError::ChannelClosed);
-            }
-            self.started = false;
-            self.message_tx.take();
-            Ok(())
-        }
-
-        async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
-            self.sent_messages.lock().unwrap().push(response);
-            Ok(())
-        }
-
-        fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
-            self.message_rx.take()
-        }
-    }
 
     #[tokio::test]
     async fn test_mock_channel_lifecycle() {
@@ -137,7 +62,7 @@ mod tests {
         };
         channel.send_message(response).await.unwrap();
 
-        let sent = channel.sent_messages.lock().unwrap();
+        let sent = channel.sent_messages();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].content, "reply");
         assert_eq!(sent[0].recipient, "user1");
