@@ -19,7 +19,7 @@ use uira_core::schema::TelegramChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 /// Maximum message length for Telegram messages (in characters).
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -52,18 +52,6 @@ impl TelegramChannel {
             sent_messages: Arc::new(Mutex::new(Vec::new())),
         }
     }
-}
-
-fn floor_char_boundary(s: &str, max_len: usize) -> usize {
-    if max_len >= s.len() {
-        return s.len();
-    }
-
-    let mut i = max_len;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 /// Check whether a user is allowed based on the allowed_users list.

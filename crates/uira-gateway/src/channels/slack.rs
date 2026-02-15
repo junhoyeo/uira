@@ -9,7 +9,7 @@ use uira_core::schema::SlackChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 const SLACK_MAX_MESSAGE_LENGTH: usize = 4000;
 const CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
@@ -356,18 +356,6 @@ fn chunk_message(content: &str, max_len: usize) -> Vec<&str> {
     }
 
     chunks
-}
-
-fn floor_char_boundary(text: &str, max_len: usize) -> usize {
-    if max_len >= text.len() {
-        return text.len();
-    }
-
-    let mut i = max_len;
-    while i > 0 && !text.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
 }
 
 fn find_split_point(text: &str, max_len: usize) -> usize {
