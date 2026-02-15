@@ -365,7 +365,7 @@ impl ChannelBridge {
                     continue;
                 }
 
-                cleanup_counter += 1;
+                cleanup_counter = cleanup_counter.wrapping_add(1);
                 if cleanup_counter.is_multiple_of(100) {
                     rate_limiter.cleanup_stale();
                 }
