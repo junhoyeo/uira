@@ -1426,7 +1426,41 @@ fn maybe_autostart_opencode_server(settings: Option<&uira_core::schema::Opencode
             args.join(" "),
             error
         );
+        return;
     }
+
+    let startup_timeout = Duration::from_secs(settings.timeout_secs.min(10));
+    if !wait_for_listener(&host_port, startup_timeout) {
+        tracing::warn!(
+            "OpenCode auto-start did not become ready at {} within {}s",
+            host_port,
+            startup_timeout.as_secs()
+        );
+    }
+}
+
+fn wait_for_listener(host_port: &str, timeout: Duration) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::thread;
+    use std::time::Instant;
+
+    let Some(addr) = host_port
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+    else {
+        return false;
+    };
+
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    false
 }
 
 fn opencode_server_start_args(settings: &uira_core::schema::OpencodeSettings) -> Vec<String> {
@@ -1443,7 +1477,10 @@ fn opencode_server_start_args(settings: &uira_core::schema::OpencodeSettings) ->
 mod tests {
     use super::{
         build_opencode_provider_config, opencode_base_url, opencode_server_start_args,
+        wait_for_listener,
     };
+    use std::net::TcpListener;
+    use std::time::Duration;
     use uira_core::schema::OpencodeSettings;
 
     #[test]
@@ -1494,6 +1531,14 @@ mod tests {
             opencode_server_start_args(&settings),
             vec!["serve", "--host", "127.0.0.1", "--port", "5001"]
         );
+    }
+
+    #[test]
+    fn wait_for_listener_detects_ready_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(wait_for_listener(&addr.to_string(), Duration::from_millis(300)));
+        drop(listener);
     }
 }
 
