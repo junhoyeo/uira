@@ -674,6 +674,33 @@ mod tests {
         assert!(limiter.check_and_record(&key2));
     }
 
+    #[test]
+    fn test_rate_limiter_cleanup_stale() {
+        let mut limiter = RateLimiter::new(2, Duration::from_millis(1));
+        let key1 = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user1".to_string(),
+        );
+        let key2 = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user2".to_string(),
+        );
+
+        limiter.check_and_record(&key1);
+        limiter.check_and_record(&key2);
+        assert_eq!(limiter.timestamps.len(), 2);
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        limiter.cleanup_stale();
+        assert!(
+            limiter.timestamps.is_empty(),
+            "cleanup_stale should remove all expired entries"
+        );
+    }
+
     #[tokio::test]
     async fn test_same_sender_reuses_session() {
         let sm = test_session_manager(100);
