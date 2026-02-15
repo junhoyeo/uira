@@ -268,7 +268,7 @@ impl SessionManager {
             .values()
             .map(|session| session.info.clone())
             .collect();
-        infos.sort_by(|a, b| a.id.cmp(&b.id));
+        infos.sort_by(|a, b| a.created_at.cmp(&b.created_at));
         infos
     }
 
@@ -339,6 +339,11 @@ impl SessionManager {
     /// Get the number of active sessions.
     pub async fn session_count(&self) -> usize {
         self.sessions.read().await.len()
+    }
+
+    /// Get the maximum number of sessions allowed.
+    pub fn max_sessions(&self) -> usize {
+        self.max_sessions
     }
 
     /// Get the config for a specific session (for testing/inspection).

@@ -29,6 +29,7 @@ struct HealthResponse {
     status: &'static str,
     uptime_secs: u64,
     active_sessions: usize,
+    max_sessions: usize,
     version: &'static str,
 }
 
@@ -107,11 +108,13 @@ impl GatewayServer {
 
 async fn health_handler(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     let active_sessions = state.session_manager.session_count().await;
+    let max_sessions = state.session_manager.max_sessions();
     let uptime_secs = state.start_time.elapsed().as_secs();
     Json(HealthResponse {
         status: "ok",
         uptime_secs,
         active_sessions,
+        max_sessions,
         version: env!("CARGO_PKG_VERSION"),
     })
 }
@@ -128,7 +131,7 @@ async fn ws_handler(
         match auth_header {
             Some(value) if value.starts_with("Bearer ") => {
                 let token = &value[7..];
-                if token != expected_token.as_str() {
+                if !constant_time_eq(token, expected_token.as_str()) {
                     return axum::http::StatusCode::UNAUTHORIZED.into_response();
                 }
             }
@@ -530,6 +533,7 @@ mod tests {
         assert_eq!(body["status"], "ok");
         assert!(body["uptime_secs"].is_u64());
         assert_eq!(body["active_sessions"], 0);
+        assert_eq!(body["max_sessions"], 10);
         assert!(body["version"].is_string());
         assert!(!body["version"].as_str().unwrap().is_empty());
     }
