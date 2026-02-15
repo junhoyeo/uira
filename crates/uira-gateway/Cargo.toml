@@ -27,6 +27,8 @@ teloxide = { workspace = true }
 uira-agent = { workspace = true }
 uira-types = { workspace = true }
 uira-core = { workspace = true }
+uira-providers = { workspace = true }
+uira-orchestration = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

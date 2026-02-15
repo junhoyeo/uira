@@ -45,3 +45,19 @@ pub struct ChannelCapabilities {
     pub max_message_length: usize,
     pub supports_markdown: bool,
 }
+
+/// Floors a string to a valid UTF-8 character boundary.
+///
+/// If `max_len` is within the string, returns the largest valid boundary ≤ `max_len`.
+/// Otherwise, returns the full string length.
+pub fn floor_char_boundary(text: &str, max_len: usize) -> usize {
+    if max_len >= text.len() {
+        return text.len();
+    }
+
+    let mut i = max_len;
+    while i > 0 && !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}

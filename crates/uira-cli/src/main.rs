@@ -1115,18 +1115,23 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
     use uira_gateway::GatewayServer;
 
     match command {
-        GatewayCommands::Start { host, port } => {
+        GatewayCommands::Start { host, port, auth_token } => {
             let config = uira_core::loader::load_config(None).ok();
-            let gateway_settings = config
+            let mut gateway_settings = config
                 .as_ref()
                 .map(|c| &c.gateway)
                 .cloned()
                 .unwrap_or_default();
 
             let bind_host = host
-                .as_deref()
-                .unwrap_or(&gateway_settings.host);
+                .clone()
+                .unwrap_or_else(|| gateway_settings.host.clone());
             let bind_port = port.unwrap_or(gateway_settings.port);
+
+            // CLI auth_token overrides config
+            if auth_token.is_some() {
+                gateway_settings.auth_token = auth_token.clone();
+            }
 
             println!(
                 "{}",
@@ -1135,8 +1140,8 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                     .bold()
             );
 
-            let server = GatewayServer::new(gateway_settings.max_sessions);
-            server.start(bind_host, bind_port).await?;
+            let server = GatewayServer::new_with_settings(gateway_settings);
+            server.start(&bind_host, bind_port).await?;
 
             Ok(())
         }

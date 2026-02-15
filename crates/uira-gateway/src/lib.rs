@@ -17,3 +17,6 @@ pub use protocol::{GatewayMessage, GatewayResponse};
 pub use server::GatewayServer;
 pub use session_manager::{SessionInfo, SessionManager, SessionStatus};
 pub use skills::*;
+
+#[cfg(test)]
+pub mod testing;
