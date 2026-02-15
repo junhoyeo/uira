@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uira_agent::EventStream;
 use uira_types::ThreadEvent;
 
@@ -19,6 +20,44 @@ use crate::skills::{get_context_injection, SkillError, SkillLoader};
 type SenderSessionMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
 type SessionRouteMap = Arc<RwLock<HashMap<String, (String, String, String)>>>;
 type ChannelMap = Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>;
+
+struct RateLimiter {
+    max_messages: usize,
+    window: Duration,
+    timestamps: HashMap<(String, String, String), Vec<Instant>>,
+}
+
+impl RateLimiter {
+    fn new(max_messages: usize, window: Duration) -> Self {
+        Self {
+            max_messages,
+            window,
+            timestamps: HashMap::new(),
+        }
+    }
+
+    fn check_and_record(&mut self, key: &(String, String, String)) -> bool {
+        let now = Instant::now();
+        let entries = self.timestamps.entry(key.clone()).or_default();
+
+        entries.retain(|&ts| now.duration_since(ts) < self.window);
+
+        if entries.len() >= self.max_messages {
+            return false;
+        }
+
+        entries.push(now);
+        true
+    }
+
+    fn cleanup_stale(&mut self) {
+        let now = Instant::now();
+        self.timestamps.retain(|_, entries| {
+            entries.retain(|&ts| now.duration_since(ts) < self.window);
+            !entries.is_empty()
+        });
+    }
+}
 
 /// Per-channel skill configuration with pre-resolved context injection strings.
 #[derive(Debug, Clone, Default)]
@@ -115,6 +154,8 @@ pub struct ChannelBridge {
 
 impl ChannelBridge {
     const MAX_PENDING_TEXT_BYTES: usize = 64 * 1024;
+    const RATE_LIMIT_MESSAGES: usize = 10;
+    const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
     /// Create a new ChannelBridge backed by the given SessionManager.
     pub fn new(session_manager: Arc<SessionManager>) -> Self {
@@ -300,6 +341,12 @@ impl ChannelBridge {
 
         let handle = tokio::spawn(async move {
             let mut rx = rx;
+            let mut rate_limiter = RateLimiter::new(
+                ChannelBridge::RATE_LIMIT_MESSAGES,
+                Duration::from_secs(ChannelBridge::RATE_LIMIT_WINDOW_SECS),
+            );
+            let mut cleanup_counter = 0u32;
+
             while let Some(msg) = rx.recv().await {
                 let channel_type_str = msg.channel_type.to_string();
                 let key = (
@@ -307,6 +354,21 @@ impl ChannelBridge {
                     account_id.clone(),
                     msg.sender.clone(),
                 );
+
+                if !rate_limiter.check_and_record(&key) {
+                    warn!(
+                        channel_type = %key.0,
+                        account_id = %key.1,
+                        sender = %key.2,
+                        "Rate limited: dropping inbound message from sender"
+                    );
+                    continue;
+                }
+
+                cleanup_counter += 1;
+                if cleanup_counter.is_multiple_of(100) {
+                    rate_limiter.cleanup_stale();
+                }
 
                 let (session_id, is_new_session) = {
                     let mut write_guard = sender_sessions.write().await;
@@ -461,12 +523,31 @@ impl ChannelBridge {
             guard.clear();
         }
 
-        {
+        let stopped_channels = {
             let mut guard = self.channels.write().await;
-            guard.clear();
-        }
+            let mut stopped_channels = 0usize;
 
-        info!("ChannelBridge stopped, all listeners aborted and state cleared");
+            for ((channel_type, account_id), channel) in guard.drain() {
+                let strong_count = Arc::strong_count(&channel);
+                if strong_count > 1 {
+                    warn!(
+                        channel_type = %channel_type,
+                        account_id = %account_id,
+                        strong_count,
+                        "Channel has outstanding references; shutdown may be delayed"
+                    );
+                }
+                drop(channel);
+                stopped_channels += 1;
+            }
+
+            stopped_channels
+        };
+
+        info!(
+            stopped_channels,
+            "ChannelBridge stopped, listeners aborted and state cleared"
+        );
     }
 }
 
@@ -636,6 +717,28 @@ mod tests {
         assert_eq!(sm.session_count().await, 1);
 
         bridge.stop().await;
+    }
+
+    #[test]
+    fn test_rate_limiter() {
+        let mut limiter = RateLimiter::new(3, Duration::from_secs(60));
+        let key = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user1".to_string(),
+        );
+
+        assert!(limiter.check_and_record(&key));
+        assert!(limiter.check_and_record(&key));
+        assert!(limiter.check_and_record(&key));
+        assert!(!limiter.check_and_record(&key));
+
+        let key2 = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user2".to_string(),
+        );
+        assert!(limiter.check_and_record(&key2));
     }
 
     #[tokio::test]
