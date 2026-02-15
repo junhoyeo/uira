@@ -20,6 +20,7 @@ use crate::skills::{get_context_injection, SkillError, SkillLoader};
 type SenderSessionMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
 type SessionRouteMap = Arc<RwLock<HashMap<String, (String, String, String)>>>;
 type ChannelMap = Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>;
+type OutboundChannelMap = Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>;
 
 struct RateLimiter {
     max_messages: usize,
@@ -147,6 +148,7 @@ pub struct ChannelBridge {
     sender_sessions: SenderSessionMap,
     session_routes: SessionRouteMap,
     channels: ChannelMap,
+    outbound_channels: Option<OutboundChannelMap>,
     channel_handles: Vec<JoinHandle<()>>,
     response_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     skill_config: Arc<ChannelSkillConfig>,
@@ -171,10 +173,16 @@ impl ChannelBridge {
             sender_sessions: Arc::new(RwLock::new(HashMap::new())),
             session_routes: Arc::new(RwLock::new(HashMap::new())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            outbound_channels: None,
             channel_handles: Vec::new(),
             response_handles: Arc::new(RwLock::new(Vec::new())),
             skill_config: Arc::new(skill_config),
         }
+    }
+
+    pub fn with_outbound_channels(mut self, outbound_channels: OutboundChannelMap) -> Self {
+        self.outbound_channels = Some(outbound_channels);
+        self
     }
 
     fn spawn_response_delivery_task(
@@ -326,9 +334,15 @@ impl ChannelBridge {
             .ok_or_else(|| GatewayError::ServerError("Channel has no message receiver".into()))?;
 
         let channel: Arc<dyn Channel> = Arc::from(channel);
+        let outbound_channel = channel.clone();
         {
             let mut channels = self.channels.write().await;
             channels.insert((channel_type.clone(), account_id.clone()), channel);
+        }
+
+        if let Some(outbound_channels) = &self.outbound_channels {
+            let mut outbound = outbound_channels.write().await;
+            outbound.entry(channel_type.clone()).or_insert(outbound_channel);
         }
 
         let session_manager = self.session_manager.clone();

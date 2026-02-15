@@ -1115,7 +1115,7 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
     use std::collections::HashMap;
     use uira_gateway::channel_bridge::ChannelSkillConfig;
     use uira_gateway::{
-        ChannelBridge, GatewayServer, SkillLoader, SlackChannel, TelegramChannel,
+        Channel, ChannelBridge, GatewayServer, SkillLoader, SlackChannel, TelegramChannel,
     };
 
     match command {
@@ -1140,7 +1140,11 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                 gateway_settings.auth_token = auth_token.clone();
             }
 
-            let server = GatewayServer::new_with_settings(gateway_settings);
+            let outbound_channels: Arc<tokio::sync::RwLock<HashMap<String, Arc<dyn Channel>>>> =
+                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+            let server = GatewayServer::new_with_settings(gateway_settings)
+                .with_channels(outbound_channels.clone());
             let session_manager = server.session_manager();
 
             let channel_settings = config
@@ -1208,10 +1212,10 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
                     ChannelSkillConfig::new()
                 };
 
-                Some(ChannelBridge::with_skill_config(
-                    session_manager,
-                    skill_config,
-                ))
+                Some(
+                    ChannelBridge::with_skill_config(session_manager, skill_config)
+                        .with_outbound_channels(outbound_channels.clone()),
+                )
             } else {
                 None
             };
