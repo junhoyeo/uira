@@ -152,8 +152,14 @@ impl SessionManager {
         let relay_handle = tokio::spawn(async move {
             let mut event_stream = event_stream;
             while let Some(event) = event_stream.next().await {
-                let event_json = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
-                let _ = relay_broadcast_tx.send(event_json);
+                match serde_json::to_value(&event) {
+                    Ok(event_json) => {
+                        let _ = relay_broadcast_tx.send(event_json);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Failed to serialize agent event; skipping");
+                    }
+                }
             }
         });
 
