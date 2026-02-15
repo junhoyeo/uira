@@ -352,7 +352,10 @@ impl ChannelBridge {
             return;
         };
 
-        let capabilities = channel.capabilities();
+        let capabilities = {
+            let guard = channel.lock().await;
+            guard.capabilities()
+        };
         let content = adapt_content_for_capabilities(content, &capabilities);
         if content.is_empty() {
             debug!(
