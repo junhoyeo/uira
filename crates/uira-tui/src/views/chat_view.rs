@@ -520,6 +520,65 @@ impl ChatView {
             return self.add_message_border(lines, &msg);
         }
 
+        if msg.role == "assistant" {
+            let segments = split_thinking_blocks(&msg.content);
+            let has_thinking_blocks = segments.iter().any(|(is_thinking, _)| *is_thinking);
+
+            if has_thinking_blocks {
+                let thinking_style = Style::default()
+                    .fg(self.theme.borders)
+                    .add_modifier(Modifier::ITALIC);
+                let mut lines = Vec::new();
+                let mut has_rendered_assistant_content = false;
+
+                for (is_thinking, segment) in segments {
+                    if segment.is_empty() {
+                        continue;
+                    }
+
+                    if is_thinking {
+                        lines.extend(wrap_message(
+                            "thinking: ",
+                            &segment,
+                            content_width,
+                            thinking_style,
+                        ));
+                    } else {
+                        let segment_prefix = if has_rendered_assistant_content {
+                            ""
+                        } else {
+                            role_prefix.as_str()
+                        };
+                        lines.extend(render_message_markdown(
+                            segment_prefix,
+                            &segment,
+                            content_width,
+                            style,
+                            &self.theme,
+                        ));
+                        has_rendered_assistant_content = true;
+                    }
+                }
+
+                if lines.is_empty() {
+                    lines = render_message_markdown(
+                        &role_prefix,
+                        &msg.content,
+                        content_width,
+                        style,
+                        &self.theme,
+                    );
+                }
+
+                let border_color = self.border_color_for_message(&msg);
+                if let Some(footer) = self.render_turn_footer(&msg, border_color) {
+                    lines.push(footer);
+                }
+
+                return self.add_message_border(lines, &msg);
+            }
+        }
+
         if msg.role == "assistant" || msg.role == "system" {
             let mut lines = render_message_markdown(
                 &role_prefix,
@@ -768,6 +827,53 @@ fn render_message_markdown(
     markdown_lines
 }
 
+fn split_thinking_blocks(content: &str) -> Vec<(bool, String)> {
+    if content.contains("&lt;thinking&gt;") || content.contains("&lt;/thinking&gt;") {
+        return split_thinking_blocks_with_markers(
+            content,
+            "&lt;thinking&gt;",
+            "&lt;/thinking&gt;",
+        );
+    }
+
+    split_thinking_blocks_with_markers(content, "<thinking>", "</thinking>")
+}
+
+fn split_thinking_blocks_with_markers(
+    content: &str,
+    open_tag: &str,
+    close_tag: &str,
+) -> Vec<(bool, String)> {
+    let mut segments = Vec::new();
+    let mut remaining = content;
+
+    while let Some(start) = remaining.find(open_tag) {
+        if start > 0 {
+            segments.push((false, remaining[..start].to_string()));
+        }
+
+        remaining = &remaining[start + open_tag.len()..];
+        if let Some(end) = remaining.find(close_tag) {
+            segments.push((true, remaining[..end].to_string()));
+            remaining = &remaining[end + close_tag.len()..];
+        } else {
+            segments.push((true, remaining.to_string()));
+            remaining = "";
+            break;
+        }
+    }
+
+    if !remaining.is_empty() {
+        segments.push((false, remaining.to_string()));
+    }
+
+    if segments.is_empty() {
+        segments.push((false, content.to_string()));
+    }
+
+    segments
+}
+
 fn truncate_chars(input: &str, max_chars: usize) -> String {
     let mut chars = input.chars();
     let mut output: String = chars.by_ref().take(max_chars).collect();
@@ -940,5 +1046,57 @@ mod tests {
             .any(|span| span.content.contains("thinking..."));
         assert!(queued);
         assert!(thinking);
+    }
+
+    #[test]
+    fn split_thinking_blocks_handles_mixed_content() {
+        let segments = split_thinking_blocks("before<thinking>inner</thinking>after");
+
+        assert_eq!(
+            segments,
+            vec![
+                (false, "before".to_string()),
+                (true, "inner".to_string()),
+                (false, "after".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn split_thinking_blocks_handles_multiple_blocks() {
+        let segments = split_thinking_blocks("<thinking>a</thinking>x<thinking>b</thinking>");
+
+        assert_eq!(
+            segments,
+            vec![
+                (true, "a".to_string()),
+                (false, "x".to_string()),
+                (true, "b".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn split_thinking_blocks_handles_unclosed_tag() {
+        let segments = split_thinking_blocks("hello <thinking>draft");
+
+        assert_eq!(
+            segments,
+            vec![(false, "hello ".to_string()), (true, "draft".to_string())]
+        );
+    }
+
+    #[test]
+    fn split_thinking_blocks_handles_escaped_tags() {
+        let segments = split_thinking_blocks("start&lt;thinking&gt;idea&lt;/thinking&gt;end");
+
+        assert_eq!(
+            segments,
+            vec![
+                (false, "start".to_string()),
+                (true, "idea".to_string()),
+                (false, "end".to_string())
+            ]
+        );
     }
 }
