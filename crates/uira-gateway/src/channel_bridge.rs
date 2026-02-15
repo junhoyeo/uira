@@ -3,13 +3,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 use uira_agent::EventStream;
 use uira_types::ThreadEvent;
 
-use crate::channels::{Channel, ChannelResponse};
+use crate::channels::{Channel, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;
@@ -19,7 +19,59 @@ use crate::skills::{get_context_injection, SkillError, SkillLoader};
 // Type aliases for complex types
 type SenderSessionMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
 type SessionRouteMap = Arc<RwLock<HashMap<String, (String, String, String)>>>;
-type ChannelMap = Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>;
+type SharedChannelInner = Arc<Mutex<Box<dyn Channel>>>;
+type ChannelMap = Arc<RwLock<HashMap<(String, String), SharedChannelInner>>>;
+type OutboundChannelMap = Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>;
+
+struct SharedChannelProxy {
+    inner: SharedChannelInner,
+    channel_type: ChannelType,
+    capabilities: ChannelCapabilities,
+}
+
+impl SharedChannelProxy {
+    fn new(
+        inner: SharedChannelInner,
+        channel_type: ChannelType,
+        capabilities: ChannelCapabilities,
+    ) -> Self {
+        Self {
+            inner,
+            channel_type,
+            capabilities,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Channel for SharedChannelProxy {
+    fn channel_type(&self) -> ChannelType {
+        self.channel_type.clone()
+    }
+
+    fn capabilities(&self) -> ChannelCapabilities {
+        self.capabilities.clone()
+    }
+
+    async fn start(&mut self) -> Result<(), crate::channels::ChannelError> {
+        let mut guard = self.inner.lock().await;
+        guard.start().await
+    }
+
+    async fn stop(&mut self) -> Result<(), crate::channels::ChannelError> {
+        let mut guard = self.inner.lock().await;
+        guard.stop().await
+    }
+
+    async fn send_message(&self, response: ChannelResponse) -> Result<(), crate::channels::ChannelError> {
+        let guard = self.inner.lock().await;
+        guard.send_message(response).await
+    }
+
+    fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
+        None
+    }
+}
 
 struct RateLimiter {
     max_messages: usize,
@@ -147,6 +199,7 @@ pub struct ChannelBridge {
     sender_sessions: SenderSessionMap,
     session_routes: SessionRouteMap,
     channels: ChannelMap,
+    outbound_channels: Option<OutboundChannelMap>,
     channel_handles: Vec<JoinHandle<()>>,
     response_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     skill_config: Arc<ChannelSkillConfig>,
@@ -171,10 +224,16 @@ impl ChannelBridge {
             sender_sessions: Arc::new(RwLock::new(HashMap::new())),
             session_routes: Arc::new(RwLock::new(HashMap::new())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            outbound_channels: None,
             channel_handles: Vec::new(),
             response_handles: Arc::new(RwLock::new(Vec::new())),
             skill_config: Arc::new(skill_config),
         }
+    }
+
+    pub fn with_outbound_channels(mut self, outbound_channels: OutboundChannelMap) -> Self {
+        self.outbound_channels = Some(outbound_channels);
+        self
     }
 
     fn spawn_response_delivery_task(
@@ -298,7 +357,12 @@ impl ChannelBridge {
             recipient: channel_id,
         };
 
-        if let Err(e) = channel.send_message(response).await {
+        let send_result = {
+            let guard = channel.lock().await;
+            guard.send_message(response).await
+        };
+
+        if let Err(e) = send_result {
             error!(
                 session_id = %session_id,
                 channel_type = %channel_type,
@@ -315,7 +379,9 @@ impl ChannelBridge {
         mut channel: Box<dyn Channel>,
         account_id: String,
     ) -> Result<(), GatewayError> {
-        let channel_type = channel.channel_type().to_string();
+        let channel_type = channel.channel_type();
+        let channel_type_key = channel_type.to_string();
+        let channel_capabilities = channel.capabilities();
         channel
             .start()
             .await
@@ -325,10 +391,25 @@ impl ChannelBridge {
             .take_message_receiver()
             .ok_or_else(|| GatewayError::ServerError("Channel has no message receiver".into()))?;
 
-        let channel: Arc<dyn Channel> = Arc::from(channel);
+        let shared_channel: SharedChannelInner = Arc::new(Mutex::new(channel));
+        let outbound_channel: Arc<dyn Channel> = Arc::new(SharedChannelProxy::new(
+            shared_channel.clone(),
+            channel_type,
+            channel_capabilities,
+        ));
         {
             let mut channels = self.channels.write().await;
-            channels.insert((channel_type.clone(), account_id.clone()), channel);
+            channels.insert(
+                (channel_type_key.clone(), account_id.clone()),
+                shared_channel,
+            );
+        }
+
+        if let Some(outbound_channels) = &self.outbound_channels {
+            let mut outbound = outbound_channels.write().await;
+            outbound
+                .entry(channel_type_key.clone())
+                .or_insert(outbound_channel);
         }
 
         let session_manager = self.session_manager.clone();
@@ -337,7 +418,6 @@ impl ChannelBridge {
         let channels = self.channels.clone();
         let response_handles = self.response_handles.clone();
         let skill_config = self.skill_config.clone();
-        let account_id = account_id.clone();
 
         let handle = tokio::spawn(async move {
             let mut rx = rx;
@@ -365,7 +445,7 @@ impl ChannelBridge {
                     continue;
                 }
 
-                cleanup_counter += 1;
+                cleanup_counter = cleanup_counter.wrapping_add(1);
                 if cleanup_counter.is_multiple_of(100) {
                     rate_limiter.cleanup_stale();
                 }
@@ -425,6 +505,7 @@ impl ChannelBridge {
                                 session_routes.clone(),
                             );
                             let mut handles = response_handles.write().await;
+                            handles.retain(|h| !h.is_finished());
                             handles.push(delivery_handle);
                         }
                         None => {
@@ -523,26 +604,29 @@ impl ChannelBridge {
             guard.clear();
         }
 
-        let stopped_channels = {
+        let channels_to_stop = {
             let mut guard = self.channels.write().await;
-            let mut stopped_channels = 0usize;
-
-            for ((channel_type, account_id), channel) in guard.drain() {
-                let strong_count = Arc::strong_count(&channel);
-                if strong_count > 1 {
-                    warn!(
-                        channel_type = %channel_type,
-                        account_id = %account_id,
-                        strong_count,
-                        "Channel has outstanding references; shutdown may be delayed"
-                    );
-                }
-                drop(channel);
-                stopped_channels += 1;
-            }
-
-            stopped_channels
+            guard.drain().collect::<Vec<_>>()
         };
+
+        let mut stopped_channels = 0usize;
+        for ((channel_type, account_id), channel) in channels_to_stop {
+            let mut guard = channel.lock().await;
+            if let Err(e) = guard.stop().await {
+                warn!(
+                    channel_type = %channel_type,
+                    account_id = %account_id,
+                    error = %e,
+                    "Failed to stop channel cleanly"
+                );
+            }
+            stopped_channels += 1;
+        }
+
+        if let Some(outbound_channels) = &self.outbound_channels {
+            let mut guard = outbound_channels.write().await;
+            guard.clear();
+        }
 
         info!(
             stopped_channels,
@@ -672,6 +756,33 @@ mod tests {
             "user2".to_string(),
         );
         assert!(limiter.check_and_record(&key2));
+    }
+
+    #[test]
+    fn test_rate_limiter_cleanup_stale() {
+        let mut limiter = RateLimiter::new(2, Duration::from_millis(1));
+        let key1 = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user1".to_string(),
+        );
+        let key2 = (
+            "telegram".to_string(),
+            "bot1".to_string(),
+            "user2".to_string(),
+        );
+
+        limiter.check_and_record(&key1);
+        limiter.check_and_record(&key2);
+        assert_eq!(limiter.timestamps.len(), 2);
+
+        std::thread::sleep(Duration::from_millis(5));
+
+        limiter.cleanup_stale();
+        assert!(
+            limiter.timestamps.is_empty(),
+            "cleanup_stale should remove all expired entries"
+        );
     }
 
     #[tokio::test]
