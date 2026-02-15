@@ -78,6 +78,10 @@ pub struct UiraConfig {
     /// Provider-specific settings
     #[serde(default)]
     pub providers: ProvidersSettings,
+
+    /// TUI keybindings configuration
+    #[serde(default)]
+    pub keybinds: KeybindsConfig,
 }
 
 impl Default for UiraConfig {
@@ -100,6 +104,7 @@ impl Default for UiraConfig {
             gateway: GatewaySettings::default(),
             channels: ChannelSettings::default(),
             providers: ProvidersSettings::default(),
+            keybinds: KeybindsConfig::default(),
         }
     }
 }
@@ -1016,6 +1021,37 @@ pub struct SlackChannelConfig {
     /// List of allowed Slack channel IDs (empty = allow all)
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+}
+
+// ============================================================================
+// Keybindings Configuration
+// ============================================================================
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct KeybindsConfig {
+    #[serde(default)]
+    pub scroll_up: Option<String>,
+
+    #[serde(default)]
+    pub scroll_down: Option<String>,
+
+    #[serde(default)]
+    pub page_up: Option<String>,
+
+    #[serde(default)]
+    pub page_down: Option<String>,
+
+    #[serde(default)]
+    pub command_palette: Option<String>,
+
+    #[serde(default)]
+    pub toggle_sidebar: Option<String>,
+
+    #[serde(default)]
+    pub collapse_tools: Option<String>,
+
+    #[serde(default)]
+    pub expand_tools: Option<String>,
 }
 
 #[cfg(test)]

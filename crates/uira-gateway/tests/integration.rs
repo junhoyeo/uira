@@ -38,9 +38,7 @@ async fn start_test_server() -> String {
 
 async fn connect(
     url: &str,
-) -> tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-> {
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(format!("{}/ws", url))
         .await
         .unwrap();
@@ -124,11 +122,7 @@ impl Channel for MockChannel {
     }
 }
 
-fn make_channel_message(
-    sender: &str,
-    content: &str,
-    channel_type: ChannelType,
-) -> ChannelMessage {
+fn make_channel_message(sender: &str, content: &str, channel_type: ChannelType) -> ChannelMessage {
     ChannelMessage {
         sender: sender.to_string(),
         content: content.to_string(),
@@ -300,11 +294,7 @@ async fn test_multiple_channels_simultaneous_routing() {
 
     // Send from Slack user "bob"
     slack_tx
-        .send(make_channel_message(
-            "bob",
-            "slack hey",
-            ChannelType::Slack,
-        ))
+        .send(make_channel_message("bob", "slack hey", ChannelType::Slack))
         .await
         .unwrap();
 

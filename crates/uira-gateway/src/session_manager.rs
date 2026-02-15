@@ -89,13 +89,20 @@ impl SessionManager {
     /// List all active sessions.
     pub async fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.read().await;
-        let mut infos: Vec<SessionInfo> = sessions.values().map(|session| session.info.clone()).collect();
+        let mut infos: Vec<SessionInfo> = sessions
+            .values()
+            .map(|session| session.info.clone())
+            .collect();
         infos.sort_by(|a, b| a.id.cmp(&b.id));
         infos
     }
 
     /// Send a message to a specific session.
-    pub async fn send_message(&self, session_id: &str, message: String) -> Result<(), GatewayError> {
+    pub async fn send_message(
+        &self,
+        session_id: &str,
+        message: String,
+    ) -> Result<(), GatewayError> {
         let sender = {
             let sessions = self.sessions.read().await;
             let session = sessions
@@ -201,7 +208,9 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_nonexistent_session() {
         let manager = SessionManager::new(10);
-        let result = manager.send_message("nonexistent", "hello".to_string()).await;
+        let result = manager
+            .send_message("nonexistent", "hello".to_string())
+            .await;
         assert!(matches!(result, Err(GatewayError::SessionNotFound(_))));
     }
 

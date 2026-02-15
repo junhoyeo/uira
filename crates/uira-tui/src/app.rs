@@ -1,7 +1,9 @@
 //! Main TUI application
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
+};
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
@@ -30,6 +32,7 @@ use uira_types::{
     TodoItem, TodoPriority, TodoStatus,
 };
 
+use crate::keybinds::KeybindConfig;
 use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
     ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
@@ -41,6 +44,14 @@ use crate::{AppEvent, Theme, ThemeOverrides};
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
 /// Maximum image size for prompt attachments (10MB)
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+/// Terminal width threshold for narrow layout (<80 cols)
+const NARROW_THRESHOLD: u16 = 80;
+/// Terminal width threshold for wide layout (>120 cols)
+const WIDE_THRESHOLD: u16 = 120;
+/// Sidebar width for wide terminals
+const SIDEBAR_WIDTH_WIDE: u16 = 40;
+/// Sidebar width for standard terminals (when shown)
+const SIDEBAR_WIDTH_STANDARD: u16 = 30;
 
 #[derive(Clone, Debug)]
 struct PendingImage {
@@ -801,6 +812,13 @@ pub struct App {
     message_queue: MessageQueue,
     #[allow(dead_code)]
     toast_manager: ToastManager,
+    keybinds: KeybindConfig,
+    /// Prompt history for Up/Down navigation
+    prompt_history: Vec<String>,
+    /// Current position in history (None = not browsing, Some(idx) = browsing)
+    history_index: Option<usize>,
+    /// Saved input when entering history mode
+    history_stash: String,
 }
 
 impl App {
@@ -844,6 +862,10 @@ impl App {
             pending_images: Vec::new(),
             message_queue: MessageQueue::default(),
             toast_manager: ToastManager::new(),
+            keybinds: KeybindConfig::default(),
+            prompt_history: Self::load_prompt_history().unwrap_or_default(),
+            history_index: None,
+            history_stash: String::new(),
         }
     }
 
@@ -866,6 +888,10 @@ impl App {
         self.toast_manager
             .show(format!("Theme: {}", theme_name), ToastVariant::Info, 2000);
         Ok(())
+    }
+
+    pub fn configure_keybinds(&mut self, keybinds: KeybindConfig) {
+        self.keybinds = keybinds;
     }
 
     pub fn with_model(mut self, model: &str) -> Self {
@@ -895,6 +921,9 @@ impl App {
                     Event::Mouse(mouse) => match mouse.kind {
                         MouseEventKind::ScrollUp => self.chat_view.scroll_up(),
                         MouseEventKind::ScrollDown => self.chat_view.scroll_down(),
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            self.handle_mouse_click_event(mouse.column, mouse.row);
+                        }
                         _ => {}
                     },
                     _ => {}
@@ -976,16 +1005,26 @@ impl App {
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
             || self.current_model.is_some();
-        let show_sidebar = if area.width > 120 {
-            self.show_todo_sidebar
-        } else {
-            self.show_todo_sidebar && has_sidebar_content
+
+        // Responsive sidebar logic based on terminal width
+        let show_sidebar = match area.width {
+            // Narrow (<80): sidebar always hidden
+            w if w < NARROW_THRESHOLD => false,
+            // Standard (80-120): sidebar shown only if toggled AND has content
+            w if w < WIDE_THRESHOLD => self.show_todo_sidebar && has_sidebar_content,
+            // Wide (>120): sidebar shown by default when content exists
+            _ => self.show_todo_sidebar && has_sidebar_content,
         };
 
         let main_area = if show_sidebar {
+            let sidebar_width = match area.width {
+                w if w < NARROW_THRESHOLD => SIDEBAR_WIDTH_STANDARD,
+                w if w < WIDE_THRESHOLD => SIDEBAR_WIDTH_STANDARD,
+                _ => SIDEBAR_WIDTH_WIDE,
+            };
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(40), Constraint::Length(40)])
+                .constraints([Constraint::Min(40), Constraint::Length(sidebar_width)])
                 .split(area);
             self.render_sidebar(frame, h_chunks[1]);
             h_chunks[0]
@@ -1047,6 +1086,8 @@ impl App {
             AgentState::Failed => ("Failed", self.theme.error),
         };
 
+        let is_narrow = area.width < NARROW_THRESHOLD;
+
         let mut spans = vec![
             Span::styled(
                 format!(" {} ", state_str.0),
@@ -1057,37 +1098,44 @@ impl App {
             Span::raw(" "),
             Span::styled(&self.status, Style::default().fg(self.theme.fg)),
             Span::raw(" | "),
-            Span::styled(
-                format!("branch: {}", self.current_branch),
-                Style::default().fg(self.theme.accent),
-            ),
         ];
 
-        // Show pending approval count
-        let pending = self.approval_overlay.pending_count();
-        if pending > 0 {
-            spans.push(Span::raw(" | "));
-            spans.push(Span::styled(
-                format!("{} pending approval(s)", pending),
-                Style::default().fg(self.theme.warning),
-            ));
-        }
+        let branch_display = if is_narrow {
+            self.current_branch.chars().take(10).collect::<String>()
+        } else {
+            self.current_branch.clone()
+        };
+        spans.push(Span::styled(
+            format!("branch: {}", branch_display),
+            Style::default().fg(self.theme.accent),
+        ));
 
-        let queued = self.message_queue.len();
-        if queued > 0 {
-            spans.push(Span::raw(" | "));
-            spans.push(Span::styled(
-                format!("({} queued)", queued),
-                Style::default().fg(self.theme.warning),
-            ));
-        }
+        if !is_narrow {
+            let pending = self.approval_overlay.pending_count();
+            if pending > 0 {
+                spans.push(Span::raw(" | "));
+                spans.push(Span::styled(
+                    format!("{} pending approval(s)", pending),
+                    Style::default().fg(self.theme.warning),
+                ));
+            }
 
-        if self.chat_view.user_scrolled {
-            spans.push(Span::raw(" | "));
-            spans.push(Span::styled(
-                "[↓ Scroll to bottom]",
-                Style::default().fg(self.theme.warning),
-            ));
+            let queued = self.message_queue.len();
+            if queued > 0 {
+                spans.push(Span::raw(" | "));
+                spans.push(Span::styled(
+                    format!("({} queued)", queued),
+                    Style::default().fg(self.theme.warning),
+                ));
+            }
+
+            if self.chat_view.user_scrolled {
+                spans.push(Span::raw(" | "));
+                spans.push(Span::styled(
+                    "[↓ Scroll to bottom]",
+                    Style::default().fg(self.theme.warning),
+                ));
+            }
         }
 
         let status = Paragraph::new(Line::from(spans))
@@ -1097,18 +1145,26 @@ impl App {
     }
 
     fn render_input(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let is_narrow = area.width < NARROW_THRESHOLD;
+
         let pending_label = if self.pending_images.is_empty() {
             String::new()
         } else {
             format!(" | {} image(s) attached", self.pending_images.len())
         };
 
-        let model_prefix = self
-            .current_model
-            .as_ref()
-            .map(|model| format!("model: {} | ", model))
-            .unwrap_or_default();
-        let title = if self.approval_overlay.is_active() {
+        let model_prefix = if is_narrow {
+            String::new()
+        } else {
+            self.current_model
+                .as_ref()
+                .map(|model| format!("model: {} | ", model))
+                .unwrap_or_default()
+        };
+
+        let title = if is_narrow {
+            " Input ".to_string()
+        } else if self.approval_overlay.is_active() {
             format!(
                 " Input ({}approval overlay active{}) ",
                 model_prefix, pending_label
@@ -1414,6 +1470,59 @@ impl App {
         }
     }
 
+    fn load_prompt_history() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let history_path = dirs::home_dir()
+            .ok_or("Could not determine home directory")?
+            .join(".uira")
+            .join("prompt_history.jsonl");
+
+        if !history_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = std::fs::read_to_string(&history_path)?;
+        let mut history = Vec::new();
+
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                if let Some(prompt) = json.get("prompt").and_then(|v| v.as_str()) {
+                    history.push(prompt.to_string());
+                }
+            }
+        }
+
+        Ok(history)
+    }
+
+    fn save_prompt_history(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+        let uira_dir = home.join(".uira");
+        std::fs::create_dir_all(&uira_dir)?;
+
+        let history_path = uira_dir.join("prompt_history.jsonl");
+
+        // Keep only the last 1000 entries
+        let to_save: Vec<_> = self
+            .prompt_history
+            .iter()
+            .rev()
+            .take(1000)
+            .rev()
+            .cloned()
+            .collect();
+
+        let mut file = std::fs::File::create(&history_path)?;
+        for prompt in to_save {
+            let json = serde_json::json!({ "prompt": prompt });
+            writeln!(file, "{}", json)?;
+        }
+
+        Ok(())
+    }
+
     fn is_agent_busy(&self) -> bool {
         matches!(
             self.agent_state,
@@ -1486,6 +1595,176 @@ impl App {
         }
     }
 
+    fn handle_mouse_click_event(&mut self, column: u16, row: u16) {
+        let terminal_size = crossterm::terminal::size().unwrap_or((80, 24));
+        let area = Rect::new(0, 0, terminal_size.0, terminal_size.1);
+        
+        let has_sidebar_content = !self.todos.is_empty()
+            || !self.modified_files.is_empty()
+            || self.current_model.is_some();
+        let show_sidebar = if area.width > 120 {
+            self.show_todo_sidebar
+        } else {
+            self.show_todo_sidebar && has_sidebar_content
+        };
+
+        let (main_area, sidebar_area) = if show_sidebar {
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(40), Constraint::Length(40)])
+                .split(area);
+            (h_chunks[0], Some(h_chunks[1]))
+        } else {
+            (area, None)
+        };
+
+        let chat_area = if self.approval_overlay.is_active() {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(3),
+                    Constraint::Length(INLINE_APPROVAL_HEIGHT),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                ])
+                .split(main_area);
+            chunks[0]
+        } else {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                ])
+                .split(main_area);
+            chunks[0]
+        };
+
+        self.handle_mouse_click(column, row, chat_area, sidebar_area);
+    }
+
+    fn handle_mouse_click(&mut self, column: u16, row: u16, main_area: Rect, sidebar_area: Option<Rect>) {
+        // Check if click is in sidebar
+        if let Some(sidebar) = sidebar_area {
+            if column >= sidebar.x && column < sidebar.x + sidebar.width
+                && row >= sidebar.y && row < sidebar.y + sidebar.height
+            {
+                self.handle_sidebar_click(row, sidebar);
+                return;
+            }
+        }
+
+        // Check if click is in chat area
+        if column >= main_area.x && column < main_area.x + main_area.width
+            && row >= main_area.y && row < main_area.y + main_area.height
+        {
+            self.handle_chat_click(row, main_area);
+        }
+    }
+
+    fn handle_chat_click(&mut self, row: u16, chat_area: Rect) {
+        // Chat area has borders, so inner area starts at y+1
+        let inner_y = chat_area.y + 1;
+        let inner_height = chat_area.height.saturating_sub(2);
+        
+        if row < inner_y || row >= inner_y + inner_height {
+            return;
+        }
+
+        // Calculate relative row within the chat viewport
+        let relative_row = (row - inner_y) as usize;
+        
+        // Calculate absolute line in the rendered content
+        let absolute_line = self.chat_view.scroll_offset + relative_row;
+        
+        if let Some(message_index) = self.chat_view.get_message_index_at_line(absolute_line) {
+            let has_tool_output = self.chat_view.messages.get(message_index)
+                .map(|msg| msg.tool_output.is_some())
+                .unwrap_or(false);
+            
+            if has_tool_output {
+                if let Some(msg) = self.chat_view.messages.get_mut(message_index) {
+                    if let Some(tool_output) = msg.tool_output.as_mut() {
+                        tool_output.collapsed = !tool_output.collapsed;
+                        let action = if tool_output.collapsed { "Collapsed" } else { "Expanded" };
+                        let tool_name = tool_output.tool_name.clone();
+                        self.chat_view.invalidate_render_cache();
+                        self.status = format!("{} {} output", action, tool_name);
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_sidebar_click(&mut self, row: u16, sidebar_area: Rect) {
+        // Sidebar has borders, inner area starts at y+1
+        let inner_y = sidebar_area.y + 1;
+        
+        if row < inner_y {
+            return;
+        }
+
+        let relative_row = (row - inner_y) as usize;
+        
+        // Calculate which section header was clicked based on row position
+        // We need to track the current line as we build the sidebar
+        let mut current_line = 0;
+        
+        // Section 1: Context header at line 0
+        if relative_row == current_line {
+            self.sidebar_sections[0] = !self.sidebar_sections[0];
+            let state = if self.sidebar_sections[0] { "expanded" } else { "collapsed" };
+            self.status = format!("Context section {}", state);
+            return;
+        }
+        current_line += 1;
+        
+        // Skip Context content if expanded
+        if self.sidebar_sections[0] {
+            let context_lines = 3; // Model, Branch, and possibly token info
+            let token_info = self.status.clone();
+            let extra_lines = if token_info.contains("tokens") { 1 } else { 0 };
+            current_line += context_lines + extra_lines + 1; // +1 for blank line
+        }
+        
+        // Section 2: MCP header
+        if relative_row == current_line {
+            self.sidebar_sections[1] = !self.sidebar_sections[1];
+            let state = if self.sidebar_sections[1] { "expanded" } else { "collapsed" };
+            self.status = format!("MCP section {}", state);
+            return;
+        }
+        current_line += 1;
+        
+        // Skip MCP content if expanded
+        if self.sidebar_sections[1] {
+            current_line += 2; // "No MCP servers" + blank line
+        }
+        
+        // Section 3: Todos header
+        if relative_row == current_line {
+            self.sidebar_sections[2] = !self.sidebar_sections[2];
+            let state = if self.sidebar_sections[2] { "expanded" } else { "collapsed" };
+            self.status = format!("Todos section {}", state);
+            return;
+        }
+        current_line += 1;
+        
+        // Skip Todos content if expanded
+        if self.sidebar_sections[2] {
+            let todo_lines = if self.todos.is_empty() { 1 } else { self.todos.len() };
+            current_line += todo_lines + 1; // +1 for blank line
+        }
+        
+        // Section 4: Files header
+        if relative_row == current_line {
+            self.sidebar_sections[3] = !self.sidebar_sections[3];
+            let state = if self.sidebar_sections[3] { "expanded" } else { "collapsed" };
+            self.status = format!("Files section {}", state);
+        }
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
         if self.command_palette.is_active() {
             match self.command_palette.handle_key(key.code) {
@@ -1522,13 +1801,26 @@ impl App {
                     self.status = "Screen refresh requested".to_string();
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
-                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    if KeybindConfig::matches_any(
+                        &self.keybinds.expand_tools,
+                        key.code,
+                        key.modifiers,
+                    ) {
                         self.status = self.chat_view.expand_all_tool_outputs();
-                    } else {
+                    } else if KeybindConfig::matches_any(
+                        &self.keybinds.collapse_tools,
+                        key.code,
+                        key.modifiers,
+                    ) {
                         self.status = self.chat_view.collapse_all_tool_outputs();
                     }
                 }
-                KeyCode::Char('p') | KeyCode::Char('k') => {
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.command_palette,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
                     self.command_palette.open();
                     return KeyAction::None;
                 }
@@ -1581,6 +1873,11 @@ impl App {
             let char_count = self.input.chars().count();
             match key.code {
                 KeyCode::Char(c) => {
+                    // Exit history mode when typing
+                    if self.history_index.is_some() {
+                        self.history_stash = self.input.clone();
+                        self.history_index = None;
+                    }
                     let byte_pos = self
                         .input
                         .char_indices()
@@ -1660,18 +1957,82 @@ impl App {
                     }
                 }
                 KeyCode::Esc => {
-                    self.should_quit = true;
+                    // Exit history mode if active, otherwise quit
+                    if self.history_index.is_some() {
+                        self.history_index = None;
+                        self.input = self.history_stash.clone();
+                        self.cursor_pos = self.input.chars().count();
+                    } else {
+                        self.should_quit = true;
+                    }
                 }
                 KeyCode::Up => {
-                    self.chat_view.scroll_up();
+                    // History navigation when input is empty
+                    if self.input.is_empty() && self.history_index.is_none() {
+                        // Enter history mode
+                        if !self.prompt_history.is_empty() {
+                            self.history_stash = String::new();
+                            let idx = self.prompt_history.len() - 1;
+                            self.history_index = Some(idx);
+                            self.input = self.prompt_history[idx].clone();
+                            self.cursor_pos = self.input.chars().count();
+                        }
+                    } else if let Some(idx) = self.history_index {
+                        // Navigate backward in history
+                        if idx > 0 {
+                            self.history_index = Some(idx - 1);
+                            self.input = self.prompt_history[idx - 1].clone();
+                            self.cursor_pos = self.input.chars().count();
+                        }
+                    } else {
+                        // Not in history mode, scroll chat
+                        self.chat_view.scroll_up();
+                    }
                 }
                 KeyCode::Down => {
+                    // History navigation
+                    if let Some(idx) = self.history_index {
+                        if idx < self.prompt_history.len() - 1 {
+                            // Navigate forward in history
+                            self.history_index = Some(idx + 1);
+                            self.input = self.prompt_history[idx + 1].clone();
+                            self.cursor_pos = self.input.chars().count();
+                        } else {
+                            // Exit history mode, restore stashed input
+                            self.history_index = None;
+                            self.input = self.history_stash.clone();
+                            self.cursor_pos = self.input.chars().count();
+                        }
+                    } else {
+                        // Not in history mode, scroll chat
+                        self.chat_view.scroll_down();
+                    }
+                }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.scroll_up,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
+                    self.chat_view.scroll_up();
+                }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.scroll_down,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
                     self.chat_view.scroll_down();
                 }
-                KeyCode::PageUp => {
+                _ if KeybindConfig::matches_any(&self.keybinds.page_up, key.code, key.modifiers) => {
                     self.chat_view.page_up();
                 }
-                KeyCode::PageDown => {
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.page_down,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
                     self.chat_view.page_down();
                 }
                 _ => {}
@@ -1872,6 +2233,14 @@ impl App {
             self.handle_slash_command(&input);
             return;
         }
+
+        // Add to prompt history and reset history navigation
+        if !input.trim().is_empty() {
+            self.prompt_history.push(input.clone());
+            let _ = self.save_prompt_history();
+        }
+        self.history_index = None;
+        self.history_stash.clear();
 
         let pending_images = std::mem::take(&mut self.pending_images);
         let has_images = !pending_images.is_empty();

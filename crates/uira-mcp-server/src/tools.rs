@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::Command;
-use uira_oxc::{LintRule, Linter, Severity};
 use uira_orchestration::{LspClient, LspClientImpl, ToolContent, ToolOutput};
+use uira_oxc::{LintRule, Linter, Severity};
 use walkdir::WalkDir;
 
 use uira_core::load_config;

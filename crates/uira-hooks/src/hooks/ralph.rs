@@ -700,7 +700,7 @@ impl RalphHook {
         text: &str,
         promise: &str,
         todo_counts: Option<(usize, usize)>,
-    goals_result: Option<&crate::VerificationResult>,
+        goals_result: Option<&crate::VerificationResult>,
     ) -> CompletionSignals {
         let mut signals = CompletionSignals::default();
 
@@ -795,9 +795,7 @@ impl RalphHook {
         false
     }
 
-    pub async fn check_goals_from_config(
-        directory: &str,
-) -> Option<crate::VerificationResult> {
+    pub async fn check_goals_from_config(directory: &str) -> Option<crate::VerificationResult> {
         let config_path = std::path::Path::new(directory).join("uira.yml");
         if !config_path.exists() {
             return None;
@@ -815,14 +813,14 @@ impl RalphHook {
             return None;
         }
 
-    let runner = crate::GoalRunner::new(directory);
+        let runner = crate::GoalRunner::new(directory);
         Some(runner.check_all(goals).await)
     }
 
     pub fn build_verification_feedback(
         signals: &CompletionSignals,
         state: &RalphState,
-    goals_result: &Option<crate::VerificationResult>,
+        goals_result: &Option<crate::VerificationResult>,
     ) -> String {
         let mut feedback = Vec::new();
 
@@ -1475,9 +1473,9 @@ More output"#;
             ..Default::default()
         };
 
-    let goals_result = crate::VerificationResult {
+        let goals_result = crate::VerificationResult {
             all_passed: false,
-        results: vec![crate::GoalCheckResult {
+            results: vec![crate::GoalCheckResult {
                 name: "pixel-match".to_string(),
                 score: 85.0,
                 target: 99.0,
@@ -1520,9 +1518,9 @@ More output"#;
 
     #[test]
     fn test_detect_completion_signals_with_goals_passing() {
-    let goals_result = crate::VerificationResult {
+        let goals_result = crate::VerificationResult {
             all_passed: true,
-        results: vec![crate::GoalCheckResult {
+            results: vec![crate::GoalCheckResult {
                 name: "test".to_string(),
                 score: 100.0,
                 target: 95.0,

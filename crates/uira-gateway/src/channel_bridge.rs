@@ -100,10 +100,7 @@ impl ChannelBridge {
                     "Routing message to session"
                 );
 
-                if let Err(e) = session_manager
-                    .send_message(&session_id, msg.content)
-                    .await
-                {
+                if let Err(e) = session_manager.send_message(&session_id, msg.content).await {
                     error!(
                         session_id = %session_id,
                         error = %e,
@@ -120,11 +117,7 @@ impl ChannelBridge {
     }
 
     /// Returns the session_id for a given sender, if one exists.
-    pub async fn get_session_for_sender(
-        &self,
-        channel_type: &str,
-        sender: &str,
-    ) -> Option<String> {
+    pub async fn get_session_for_sender(&self, channel_type: &str, sender: &str) -> Option<String> {
         let guard = self.sender_sessions.read().await;
         guard
             .get(&(channel_type.to_string(), sender.to_string()))
@@ -145,13 +138,13 @@ impl ChannelBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channels::{
+        ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
+    };
     use async_trait::async_trait;
     use chrono::Utc;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
-    use crate::channels::{
-        ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
-    };
 
     struct MockChannel {
         channel_type: ChannelType,
@@ -212,7 +205,11 @@ mod tests {
         }
     }
 
-    fn make_channel_message(sender: &str, content: &str, channel_type: ChannelType) -> ChannelMessage {
+    fn make_channel_message(
+        sender: &str,
+        content: &str,
+        channel_type: ChannelType,
+    ) -> ChannelMessage {
         ChannelMessage {
             sender: sender.to_string(),
             content: content.to_string(),
@@ -233,9 +230,13 @@ mod tests {
 
         bridge.register_channel(Box::new(channel)).await.unwrap();
 
-        tx.send(make_channel_message("user1", "hello", ChannelType::Telegram))
-            .await
-            .unwrap();
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
 
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -325,9 +326,13 @@ mod tests {
 
         bridge.register_channel(Box::new(channel)).await.unwrap();
 
-        tx.send(make_channel_message("user1", "hello", ChannelType::Telegram))
-            .await
-            .unwrap();
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         assert!(bridge

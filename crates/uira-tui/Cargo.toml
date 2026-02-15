@@ -24,6 +24,7 @@ pulldown-cmark = "0.13"
 tracing = "0.1"
 tempfile = { workspace = true }
 base64 = "0.22"
+dirs = "5"
 
 [dev-dependencies]
 tokio = { workspace = true }

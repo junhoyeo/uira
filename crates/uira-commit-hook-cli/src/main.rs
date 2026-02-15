@@ -19,10 +19,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
+use uira_agent::{init_subscriber, TelemetryConfig};
 use uira_orchestration::features::builtin_skills::{create_builtin_skills, get_builtin_skill};
 use uira_orchestration::features::uira_state::has_uira_state;
 use uira_orchestration::{create_uira_session, get_agent_definitions, AgentConfig, SessionOptions};
-use uira_agent::{init_subscriber, TelemetryConfig};
 
 #[derive(Parser)]
 #[command(name = "uira-commit-hook-cli")]
@@ -633,10 +633,8 @@ fn agent_command(action: AgentCommands) -> anyhow::Result<()> {
             sorted_agents.sort_by_key(|(name, _)| name.as_str());
 
             // Group agents by base name
-            let mut groups: std::collections::HashMap<
-                String,
-                Vec<(&String, &AgentConfig)>,
-            > = std::collections::HashMap::new();
+            let mut groups: std::collections::HashMap<String, Vec<(&String, &AgentConfig)>> =
+                std::collections::HashMap::new();
 
             for (name, config) in &sorted_agents {
                 let base_name = name.split('-').next().unwrap_or(name).to_string();
@@ -1288,7 +1286,7 @@ goals:
             Ok(())
         }
         GoalsCommands::Check { name } => {
-    let runner = uira_hooks::GoalRunner::new(&cwd);
+            let runner = uira_hooks::GoalRunner::new(&cwd);
 
             let goals_to_check: Vec<_> = if let Some(ref n) = name {
                 goals.iter().filter(|g| g.name == *n).cloned().collect()
@@ -1341,7 +1339,7 @@ goals:
             interval,
             max_iterations,
         } => {
-    let runner = uira_hooks::GoalRunner::new(&cwd);
+            let runner = uira_hooks::GoalRunner::new(&cwd);
 
             println!("{}", "⚡ Watching Goals".bold());
             println!(
@@ -1350,7 +1348,7 @@ goals:
             );
             println!();
 
-    let options = uira_hooks::VerifyOptions {
+            let options = uira_hooks::VerifyOptions {
                 check_interval_secs: interval,
                 max_iterations,
                 max_duration: None,

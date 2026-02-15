@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uira_permissions::{Action as PermissionAction, PermissionEvaluator};
-use uira_types::{ApprovalRequirement, ReviewDecision, ToolOutput};
 use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
+use uira_types::{ApprovalRequirement, ReviewDecision, ToolOutput};
 
 use crate::tools::approval_cache::{ApprovalCache, ApprovalKey, CacheDecision};
 use crate::tools::comment_hook::CommentChecker;

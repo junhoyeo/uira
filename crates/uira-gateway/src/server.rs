@@ -68,11 +68,7 @@ async fn handle_socket(mut socket: WebSocket, session_manager: Arc<SessionManage
         };
 
         let response_json = serde_json::to_string(&response).unwrap_or_default();
-        if socket
-            .send(Message::text(response_json))
-            .await
-            .is_err()
-        {
+        if socket.send(Message::text(response_json)).await.is_err() {
             break;
         }
     }
@@ -138,7 +134,10 @@ mod tests {
         format!("ws://127.0.0.1:{}", addr.port())
     }
 
-    async fn connect(url: &str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    async fn connect(
+        url: &str,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         let (ws_stream, _) = tokio_tungstenite::connect_async(format!("{}/ws", url))
             .await
             .unwrap();
@@ -146,7 +145,9 @@ mod tests {
     }
 
     async fn send_and_recv(
-        ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         msg: &str,
     ) -> serde_json::Value {
         ws.send(tungstenite::Message::Text(msg.into()))

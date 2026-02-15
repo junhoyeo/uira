@@ -1,5 +1,5 @@
-use crate::events::Event;
 use crate::events::subscriber::{EventHandler, HandlerResult};
+use crate::events::Event;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -96,8 +96,8 @@ impl SubscriberRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventCategory;
     use crate::events::subscriber::SubscriptionFilter;
+    use crate::events::EventCategory;
     use async_trait::async_trait;
 
     struct TestHandler {

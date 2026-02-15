@@ -247,6 +247,10 @@ impl ChatView {
         Some(self.messages.len() - 1)
     }
 
+    pub fn get_message_index_at_line(&self, line: usize) -> Option<usize> {
+        self.line_message_index.get(line).and_then(|&idx| idx)
+    }
+
     pub fn append_streaming_delta(&mut self, delta: &str, max_size: usize) {
         if let Some(ref mut buffer) = self.streaming_buffer {
             if buffer.len() + delta.len() <= max_size {

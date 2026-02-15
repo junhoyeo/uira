@@ -1191,6 +1191,11 @@ async fn run_interactive(
         let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
     }
 
+    if let Some(ref cfg) = uira_config {
+        let keybinds = uira_tui::KeybindConfig::from_config(&cfg.keybinds);
+        app.configure_keybinds(keybinds);
+    }
+
     let result = app
         .run_with_agent(&mut terminal, agent_config, client, tracing_rx)
         .await;
