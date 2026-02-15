@@ -8,10 +8,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, ListState, Paragraph, Wrap},
     Terminal,
 };
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,7 +32,7 @@ use uira_types::{
 
 use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
-    ToastManager, ToastVariant, MODEL_GROUPS,
+    ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
 };
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, Theme, ThemeOverrides};
@@ -789,6 +789,12 @@ pub struct App {
     todos: Vec<TodoItem>,
     show_todo_sidebar: bool,
     todo_list_state: ListState,
+    /// Collapse state for sidebar sections: [Context, MCP, Todos, Files]
+    sidebar_sections: [bool; 4],
+    /// Files modified by tool calls (Edit, Write)
+    modified_files: HashSet<String>,
+    /// Pending tool call paths: tool_call_id -> file_path
+    pending_tool_paths: HashMap<String, String>,
     theme: Theme,
     theme_overrides: ThemeOverrides,
     pending_images: Vec<PendingImage>,
@@ -830,6 +836,9 @@ impl App {
             todos: Vec::new(),
             show_todo_sidebar: true,
             todo_list_state: ListState::default(),
+            sidebar_sections: [true; 4],
+            modified_files: HashSet::new(),
+            pending_tool_paths: HashMap::new(),
             theme,
             theme_overrides: ThemeOverrides::default(),
             pending_images: Vec::new(),
@@ -964,40 +973,59 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let area = frame.area();
 
-        let main_area = if self.show_todo_sidebar && !self.todos.is_empty() {
+        let has_sidebar_content = !self.todos.is_empty()
+            || !self.modified_files.is_empty()
+            || self.current_model.is_some();
+        let show_sidebar = if area.width > 120 {
+            self.show_todo_sidebar
+        } else {
+            self.show_todo_sidebar && has_sidebar_content
+        };
+
+        let main_area = if show_sidebar {
             let h_chunks = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
+                .constraints([Constraint::Min(40), Constraint::Length(40)])
                 .split(area);
-            self.render_todo_sidebar(frame, h_chunks[1]);
+            self.render_sidebar(frame, h_chunks[1]);
             h_chunks[0]
         } else {
             area
         };
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(3),
-                Constraint::Length(1),
-                Constraint::Length(3),
-            ])
-            .split(main_area);
+        if self.approval_overlay.is_active() {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(3),
+                    Constraint::Length(INLINE_APPROVAL_HEIGHT),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                ])
+                .split(main_area);
 
-        self.chat_view.render_chat(frame, chunks[0]);
-        self.render_status(frame, chunks[1]);
-        self.render_input(frame, chunks[2]);
+            self.chat_view.render_chat(frame, chunks[0]);
+            self.approval_overlay.render(frame, chunks[1]);
+            self.render_status(frame, chunks[2]);
+            self.render_input(frame, chunks[3]);
+        } else {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                ])
+                .split(main_area);
 
-        // Tick and render toasts before overlays
+            self.chat_view.render_chat(frame, chunks[0]);
+            self.render_status(frame, chunks[1]);
+            self.render_input(frame, chunks[2]);
+        }
+
         self.toast_manager.tick();
         self.toast_manager.render(frame, area, &self.theme);
 
-        // Render approval overlay on top if active
-        if self.approval_overlay.is_active() {
-            self.approval_overlay.render(frame, area);
-        }
-
-        // Render model selector overlay on top
         if self.model_selector.is_active() {
             self.model_selector.render(frame, area);
         }
@@ -1128,64 +1156,175 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
-    fn render_todo_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let outer_block = Block::default()
+            .title(" Info ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(self.theme.borders));
+        let inner = outer_block.inner(area);
+        frame.render_widget(outer_block, area);
+
+        let mut lines: Vec<Line> = Vec::new();
+        let max_width = inner.width as usize;
+
+        // Section 1: Context
+        let ctx_arrow = if self.sidebar_sections[0] {
+            "▼"
+        } else {
+            "▶"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} Context", ctx_arrow),
+                Style::default().fg(self.theme.accent),
+            ),
+            Span::styled(" [1]", Style::default().fg(self.theme.text_muted)),
+        ]));
+        if self.sidebar_sections[0] {
+            let model = self.current_model.as_deref().unwrap_or("not connected");
+            lines.push(Line::from(Span::styled(
+                format!("  Model: {}", model),
+                Style::default().fg(self.theme.fg),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Branch: {}", self.current_branch),
+                Style::default().fg(self.theme.fg),
+            )));
+            let token_info = self.status.clone();
+            if token_info.contains("tokens") {
+                lines.push(Line::from(Span::styled(
+                    format!("  {}", token_info),
+                    Style::default().fg(self.theme.text_muted),
+                )));
+            }
+            lines.push(Line::from(""));
+        }
+
+        // Section 2: MCP
+        let mcp_arrow = if self.sidebar_sections[1] {
+            "▼"
+        } else {
+            "▶"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} MCP", mcp_arrow),
+                Style::default().fg(self.theme.accent),
+            ),
+            Span::styled(" [2]", Style::default().fg(self.theme.text_muted)),
+        ]));
+        if self.sidebar_sections[1] {
+            lines.push(Line::from(Span::styled(
+                "  ○ No MCP servers",
+                Style::default().fg(self.theme.text_muted),
+            )));
+            lines.push(Line::from(""));
+        }
+
+        // Section 3: Todos
         let completed = self
             .todos
             .iter()
             .filter(|t| t.status == TodoStatus::Completed)
             .count();
         let total = self.todos.len();
-        let title = format!(" Todos ({}/{}) ", completed, total);
+        let todo_arrow = if self.sidebar_sections[2] {
+            "▼"
+        } else {
+            "▶"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} Todos ({}/{})", todo_arrow, completed, total),
+                Style::default().fg(self.theme.accent),
+            ),
+            Span::styled(" [3]", Style::default().fg(self.theme.text_muted)),
+        ]));
+        if self.sidebar_sections[2] {
+            if self.todos.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  No todos",
+                    Style::default().fg(self.theme.text_muted),
+                )));
+            } else {
+                for todo in &self.todos {
+                    let (indicator, status_color) = match todo.status {
+                        TodoStatus::Completed => ("✓", self.theme.success),
+                        TodoStatus::InProgress => ("•", self.theme.warning),
+                        TodoStatus::Cancelled => ("✗", self.theme.borders),
+                        TodoStatus::Pending => (" ", self.theme.borders),
+                    };
 
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(self.theme.borders));
+                    let (priority_marker, color) = match (todo.status, todo.priority) {
+                        (TodoStatus::Completed, _) | (TodoStatus::Cancelled, _) => {
+                            ("", status_color)
+                        }
+                        (_, TodoPriority::High) => ("⚡", self.theme.error),
+                        (_, TodoPriority::Medium) => ("•", self.theme.warning),
+                        (_, TodoPriority::Low) => ("", status_color),
+                    };
 
-        let inner = block.inner(area);
-        let max_width = inner.width.saturating_sub(1) as usize;
-
-        let items: Vec<ListItem> = self
-            .todos
-            .iter()
-            .map(|todo| {
-                let (indicator, status_color) = match todo.status {
-                    TodoStatus::Completed => ("✓", self.theme.success),
-                    TodoStatus::InProgress => ("•", self.theme.warning),
-                    TodoStatus::Cancelled => ("✗", self.theme.borders),
-                    TodoStatus::Pending => (" ", self.theme.borders),
-                };
-
-                // Priority marker and color override
-                let (priority_marker, color) = match (todo.status, todo.priority) {
-                    (TodoStatus::Completed, _) => ("", status_color),
-                    (TodoStatus::Cancelled, _) => ("", status_color),
-                    (_, TodoPriority::High) => ("⚡ ", self.theme.error),
-                    (_, TodoPriority::Medium) => ("• ", self.theme.warning),
-                    (_, TodoPriority::Low) => ("", status_color),
-                };
-
-                let prefix = format!("[{}] {}", indicator, priority_marker);
-                let prefix_chars = prefix.chars().count();
-                let content_chars = todo.content.chars().count();
-                let content =
-                    if prefix_chars + content_chars > max_width && max_width > prefix_chars + 3 {
-                        let truncate_len = max_width.saturating_sub(prefix_chars + 3);
-                        let truncated: String = todo.content.chars().take(truncate_len).collect();
-                        format!("{}...", truncated)
+                    let prefix = format!("  [{}] {}", indicator, priority_marker);
+                    let prefix_len = prefix.chars().count();
+                    let avail = max_width.saturating_sub(prefix_len);
+                    let content = if todo.content.chars().count() > avail && avail > 3 {
+                        let trunc: String = todo.content.chars().take(avail - 3).collect();
+                        format!("{}...", trunc)
                     } else {
                         todo.content.clone()
                     };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(prefix, Style::default().fg(color)),
-                    Span::styled(content, Style::default().fg(color)),
-                ]))
-            })
-            .collect();
+                    lines.push(Line::from(vec![
+                        Span::styled(prefix, Style::default().fg(color)),
+                        Span::styled(content, Style::default().fg(color)),
+                    ]));
+                }
+            }
+            lines.push(Line::from(""));
+        }
 
-        let list = List::new(items).block(block);
-        frame.render_widget(list, area);
+        // Section 4: Files
+        let file_count = self.modified_files.len();
+        let files_arrow = if self.sidebar_sections[3] {
+            "▼"
+        } else {
+            "▶"
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} Files ({})", files_arrow, file_count),
+                Style::default().fg(self.theme.accent),
+            ),
+            Span::styled(" [4]", Style::default().fg(self.theme.text_muted)),
+        ]));
+        if self.sidebar_sections[3] {
+            if self.modified_files.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  No modified files",
+                    Style::default().fg(self.theme.text_muted),
+                )));
+            } else {
+                let mut sorted: Vec<&String> = self.modified_files.iter().collect();
+                sorted.sort();
+                for path in sorted {
+                    let display = path.rsplit('/').next().unwrap_or(path);
+                    let avail = max_width.saturating_sub(4);
+                    let display = if display.chars().count() > avail && avail > 3 {
+                        let trunc: String = display.chars().take(avail - 3).collect();
+                        format!("{}...", trunc)
+                    } else {
+                        display.to_string()
+                    };
+                    lines.push(Line::from(Span::styled(
+                        format!("  • {}", display),
+                        Style::default().fg(self.theme.text_muted),
+                    )));
+                }
+            }
+        }
+
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, inner);
     }
 
     fn ensure_todo_selection(&mut self) {
@@ -1419,6 +1558,18 @@ impl App {
                 }
                 KeyCode::Char(c) if c.eq_ignore_ascii_case(&'d') => {
                     self.mark_selected_todo_done();
+                    return KeyAction::None;
+                }
+                KeyCode::Char(c @ '1'..='4') => {
+                    let idx = (c as usize) - ('1' as usize);
+                    self.sidebar_sections[idx] = !self.sidebar_sections[idx];
+                    let names = ["Context", "MCP", "Todos", "Files"];
+                    let state = if self.sidebar_sections[idx] {
+                        "expanded"
+                    } else {
+                        "collapsed"
+                    };
+                    self.status = format!("{} section {}", names[idx], state);
                     return KeyAction::None;
                 }
                 _ => {}
@@ -2391,7 +2542,21 @@ impl App {
                     .append_thinking_delta(&thinking, MAX_STREAMING_BUFFER_SIZE);
             }
             ThreadEvent::ItemStarted { item } => match item {
-                Item::ToolCall { id, name, .. } => {
+                Item::ToolCall {
+                    id,
+                    name,
+                    ref input,
+                } => {
+                    if matches!(name.as_str(), "Edit" | "Write") {
+                        if let Some(path) = input
+                            .get("file_path")
+                            .or_else(|| input.get("filePath"))
+                            .or_else(|| input.get("path"))
+                            .and_then(|v| v.as_str())
+                        {
+                            self.pending_tool_paths.insert(id.clone(), path.to_string());
+                        }
+                    }
                     self.chat_view.tool_call_names.insert(id, name.clone());
                     self.agent_state = AgentState::ExecutingTool;
                     self.status = format!("Executing: {}", name);
@@ -2425,6 +2590,13 @@ impl App {
                     output,
                     is_error,
                 } => {
+                    if !is_error {
+                        if let Some(path) = self.pending_tool_paths.remove(&tool_call_id) {
+                            self.modified_files.insert(path);
+                        }
+                    } else {
+                        self.pending_tool_paths.remove(&tool_call_id);
+                    }
                     let tool_name = self
                         .chat_view
                         .tool_call_names

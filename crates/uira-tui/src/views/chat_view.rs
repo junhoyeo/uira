@@ -6,7 +6,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use crate::widgets::{markdown::render_markdown, ChatMessage};
+use crate::widgets::{markdown::render_markdown, tool_renderers, ChatMessage};
 use crate::Theme;
 
 pub struct ChatView {
@@ -401,16 +401,26 @@ impl ChatView {
         };
 
         if let Some(tool_output) = &msg.tool_output {
-            let body = if tool_output.collapsed {
-                format!(
+            if tool_output.collapsed {
+                let body = format!(
                     "▶ {}: {} [Tab/Enter to expand]",
                     tool_output.tool_name, tool_output.summary
-                )
-            } else {
-                format!("▼ {}:\n{}", tool_output.tool_name, msg.content)
-            };
+                );
+                return wrap_message(&role_prefix, &body, inner_width, style);
+            }
 
-            return wrap_message(&role_prefix, &body, inner_width, style);
+            let header = format!("▼ {}:", tool_output.tool_name);
+            let mut lines = vec![Line::from(vec![
+                Span::styled(role_prefix, style.add_modifier(Modifier::BOLD)),
+                Span::styled(header, style),
+            ])];
+            lines.extend(tool_renderers::render_tool_output(
+                &tool_output.tool_name,
+                &msg.content,
+                inner_width,
+                &self.theme,
+            ));
+            return lines;
         }
 
         if msg.role == "assistant" || msg.role == "system" {

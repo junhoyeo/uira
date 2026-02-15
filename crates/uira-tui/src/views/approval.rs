@@ -1,14 +1,15 @@
-//! Approval overlay with queue-based modal (Codex pattern)
+//! Inline approval prompt with queue management
 //!
 //! This module implements the ApprovalOverlay which displays tool approval
-//! requests as a centered modal with keyboard shortcuts.
+//! requests as an inline prompt at the bottom of the chat area, showing
+//! tool-specific context (filepath for edits, command for bash).
 
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
     Frame,
 };
@@ -16,6 +17,9 @@ use tokio::sync::oneshot;
 use uira_types::ReviewDecision;
 
 use crate::Theme;
+
+/// Height of the inline approval prompt (2 border lines + 5 content lines)
+pub const INLINE_APPROVAL_HEIGHT: u16 = 7;
 
 /// Approval request with response channel
 pub struct ApprovalRequest {
@@ -192,29 +196,16 @@ impl ApprovalOverlay {
         }
     }
 
-    /// Render the overlay
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         if let Some(ref request) = self.current {
-            // Calculate centered modal dimensions
-            let width = 70.min(area.width.saturating_sub(4));
-            let height = 18.min(area.height.saturating_sub(4));
-            let x = (area.width.saturating_sub(width)) / 2;
-            let y = (area.height.saturating_sub(height)) / 2;
-            let modal_area = Rect::new(x, y, width, height);
-
-            // Clear the background
-            frame.render_widget(Clear, modal_area);
-
-            // Render the modal
             frame.render_widget(
-                ApprovalModal {
+                InlineApprovalPrompt {
                     request,
                     selected: self.selected,
-                    scroll: self.scroll,
                     queue_count: self.queue.len(),
                     theme: &self.theme,
                 },
-                modal_area,
+                area,
             );
         }
     }
@@ -226,18 +217,78 @@ impl Default for ApprovalOverlay {
     }
 }
 
-/// The approval modal widget
-struct ApprovalModal<'a> {
+fn extract_context(tool_name: &str, input: &serde_json::Value) -> String {
+    let name_lower = tool_name.to_lowercase();
+    let file_keys = ["filePath", "file_path", "path", "filename"];
+    let cmd_keys = ["command", "cmd"];
+
+    if name_lower.contains("edit")
+        || name_lower.contains("write")
+        || name_lower.contains("file")
+        || name_lower.contains("read")
+        || name_lower.contains("create")
+    {
+        for key in &file_keys {
+            if let Some(path) = input.get(*key).and_then(|v| v.as_str()) {
+                return format!("  \u{25b8} {}", path);
+            }
+        }
+    }
+
+    if name_lower.contains("bash")
+        || name_lower.contains("command")
+        || name_lower.contains("exec")
+        || name_lower.contains("shell")
+        || name_lower.contains("run")
+    {
+        for key in &cmd_keys {
+            if let Some(cmd) = input.get(*key).and_then(|v| v.as_str()) {
+                return format!("  $ {}", truncate_first_line(cmd, 80));
+            }
+        }
+    }
+
+    for key in &file_keys {
+        if let Some(path) = input.get(*key).and_then(|v| v.as_str()) {
+            return format!("  \u{25b8} {}", path);
+        }
+    }
+    for key in &cmd_keys {
+        if let Some(cmd) = input.get(*key).and_then(|v| v.as_str()) {
+            return format!("  $ {}", truncate_first_line(cmd, 80));
+        }
+    }
+
+    if let Some(obj) = input.as_object() {
+        for (key, value) in obj.iter().take(1) {
+            if let Some(s) = value.as_str() {
+                return format!("  {}: {}", key, truncate_first_line(s, 60));
+            }
+        }
+    }
+
+    format!("  {}", tool_name)
+}
+
+fn truncate_first_line(s: &str, max_chars: usize) -> String {
+    let first_line = s.lines().next().unwrap_or(s);
+    if first_line.chars().count() <= max_chars {
+        first_line.to_string()
+    } else {
+        let truncated: String = first_line.chars().take(max_chars).collect();
+        format!("{}\u{2026}", truncated)
+    }
+}
+
+struct InlineApprovalPrompt<'a> {
     request: &'a ApprovalRequest,
     selected: usize,
-    scroll: u16,
     queue_count: usize,
     theme: &'a Theme,
 }
 
-impl Widget for ApprovalModal<'_> {
+impl Widget for InlineApprovalPrompt<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Modal border with title
         let title = if self.queue_count > 0 {
             format!(
                 " Approve: {} (+{} more) ",
@@ -250,57 +301,42 @@ impl Widget for ApprovalModal<'_> {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.theme.borders));
+            .border_style(Style::default().fg(self.theme.warning));
 
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Split inner area into sections
+        if inner.height < 3 || inner.width == 0 {
+            return;
+        }
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2), // Reason
-                Constraint::Min(5),    // Input JSON
-                Constraint::Length(1), // Separator
-                Constraint::Length(2), // Buttons
+                Constraint::Length(1), // Context (filepath/command)
+                Constraint::Length(1), // Reason
+                Constraint::Min(0),    // Spacer
+                Constraint::Length(1), // Buttons
                 Constraint::Length(1), // Help text
             ])
             .split(inner);
 
-        // Reason section
-        let reason_text = format!("Reason: {}", self.request.reason);
-        let reason = Paragraph::new(reason_text)
-            .style(Style::default().fg(self.theme.fg))
-            .wrap(Wrap { trim: true });
-        reason.render(chunks[0], buf);
+        let context = extract_context(&self.request.tool_name, &self.request.input);
+        let context_para = Paragraph::new(context).style(
+            Style::default()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+        context_para.render(chunks[0], buf);
 
-        // Input JSON section
-        let input_str = serde_json::to_string_pretty(&self.request.input)
-            .unwrap_or_else(|_| self.request.input.to_string());
-        let input_lines: Vec<Line> = input_str
-            .lines()
-            .skip(self.scroll as usize)
-            .take(chunks[1].height as usize)
-            .map(|line| Line::from(Span::styled(line, Style::default().fg(self.theme.accent))))
-            .collect();
+        let reason = Paragraph::new(format!("  {}", self.request.reason))
+            .style(Style::default().fg(self.theme.fg));
+        reason.render(chunks[1], buf);
 
-        let input_block = Block::default()
-            .title(" Input ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.theme.borders));
-
-        let input_inner = input_block.inner(chunks[1]);
-        input_block.render(chunks[1], buf);
-
-        let input_para = Paragraph::new(input_lines);
-        input_para.render(input_inner, buf);
-
-        // Buttons section
         self.render_buttons(chunks[3], buf);
 
-        // Help text
         let help = Paragraph::new(
-            "↑↓/jk: scroll | ←→/hl/Tab: select | Enter: confirm | y: yes | a: all | n/Esc: no",
+            "y: approve | a: always | n/Esc: reject | \u{2190}\u{2192}/Tab: select | Enter: confirm",
         )
         .style(Style::default().fg(self.theme.borders))
         .alignment(Alignment::Center);
@@ -308,11 +344,11 @@ impl Widget for ApprovalModal<'_> {
     }
 }
 
-impl ApprovalModal<'_> {
+impl InlineApprovalPrompt<'_> {
     fn render_buttons(&self, area: Rect, buf: &mut Buffer) {
-        let buttons = [("[Y]es", 0), ("[A]ll", 1), ("[N]o", 2)];
+        let buttons = [("[Y]es", 0), ("[A]lways", 1), ("[N]o", 2)];
 
-        let button_width = 12;
+        let button_width = 14;
         let total_width = buttons.len() as u16 * button_width;
         let start_x = area.x + (area.width.saturating_sub(total_width)) / 2;
 
@@ -328,7 +364,6 @@ impl ApprovalModal<'_> {
                 Style::default().fg(self.theme.fg)
             };
 
-            // Pad label to center in button width
             let padded = format!("{:^width$}", label, width = button_width as usize - 2);
             buf.set_string(x, area.y, &padded, style);
         }
