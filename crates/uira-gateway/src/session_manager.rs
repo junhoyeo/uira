@@ -208,13 +208,24 @@ impl SessionManager {
                 };
 
                 for session_id in idle_session_ids {
-                    if let Err(error) = manager.destroy_session(&session_id).await {
-                        if !matches!(error, GatewayError::SessionNotFound(_)) {
-                            tracing::debug!(
-                                session_id,
-                                error = %error,
-                                "Failed to destroy idle gateway session"
-                            );
+                    // Re-check under read lock before destroying to avoid race condition
+                    let still_idle = {
+                        let sessions = manager.sessions.read().await;
+                        sessions.get(&session_id).map_or(false, |s| {
+                            let idle = now.signed_duration_since(s.info.last_message_at);
+                            idle > idle_timeout
+                        })
+                    };
+                    
+                    if still_idle {
+                        if let Err(error) = manager.destroy_session(&session_id).await {
+                            if !matches!(error, GatewayError::SessionNotFound(_)) {
+                                tracing::debug!(
+                                    session_id,
+                                    error = %error,
+                                    "Failed to destroy idle gateway session"
+                                );
+                            }
                         }
                     }
                 }
@@ -243,6 +254,7 @@ impl SessionManager {
         agent_control.store(true, Ordering::SeqCst);
         drop(agent_input_tx);
 
+        let abort_handle = agent_handle.abort_handle();
         match timeout(Duration::from_secs(5), agent_handle).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
@@ -252,6 +264,7 @@ impl SessionManager {
                 )));
             }
             Err(_) => {
+                abort_handle.abort();
                 return Err(GatewayError::SessionShutdownFailed(
                     "Timed out waiting for agent shutdown".to_string(),
                 ));
@@ -315,10 +328,14 @@ impl SessionManager {
             agent_control.store(true, Ordering::SeqCst);
             drop(agent_input_tx);
 
+            let abort_handle = agent_handle.abort_handle();
             match timeout(Duration::from_secs(10), agent_handle).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => shutdown_errors.push(format!("Agent task join error: {}", error)),
-                Err(_) => shutdown_errors.push("Timed out waiting for agent shutdown".to_string()),
+                Err(_) => {
+                    abort_handle.abort();
+                    shutdown_errors.push("Timed out waiting for agent shutdown".to_string());
+                }
             }
         }
 
