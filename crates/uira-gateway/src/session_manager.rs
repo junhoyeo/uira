@@ -24,6 +24,16 @@ pub enum SessionStatus {
     ShuttingDown,
 }
 
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SessionStatus::Active => write!(f, "active"),
+            SessionStatus::Idle => write!(f, "idle"),
+            SessionStatus::ShuttingDown => write!(f, "shutting_down"),
+        }
+    }
+}
+
 /// Information about a managed session
 #[derive(Debug, Clone)]
 pub struct SessionInfo {

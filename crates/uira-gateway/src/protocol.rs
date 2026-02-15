@@ -55,6 +55,7 @@ pub struct SessionInfoResponse {
     pub id: String,
     pub status: String,
     pub created_at: String,
+    pub last_message_at: String,
 }
 
 #[cfg(test)]
@@ -140,8 +141,9 @@ mod tests {
         let resp = GatewayResponse::SessionsList {
             sessions: vec![SessionInfoResponse {
                 id: "s1".to_string(),
-                status: "Active".to_string(),
+                status: "active".to_string(),
                 created_at: "2025-01-01T00:00:00Z".to_string(),
+                last_message_at: "2025-01-01T00:00:00Z".to_string(),
             }],
         };
         let json = serde_json::to_string(&resp).unwrap();

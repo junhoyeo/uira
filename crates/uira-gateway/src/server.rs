@@ -191,8 +191,9 @@ async fn handle_message(
                     .into_iter()
                     .map(|s| SessionInfoResponse {
                         id: s.id,
-                        status: format!("{:?}", s.status),
+                        status: s.status.to_string(),
                         created_at: s.created_at.to_rfc3339(),
+                        last_message_at: s.last_message_at.to_rfc3339(),
                     })
                     .collect(),
             }
