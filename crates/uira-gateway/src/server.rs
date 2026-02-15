@@ -23,6 +23,7 @@ use crate::session_manager::SessionManager;
 
 /// Maximum size (in bytes) for a single WS frame payload.
 const MAX_WS_FRAME_SIZE: usize = 128 * 1024; // 128 KB
+const MAX_MESSAGE_CONTENT_SIZE: usize = 64 * 1024;
 
 struct AppState {
     session_manager: Arc<SessionManager>,
@@ -352,11 +353,19 @@ async fn handle_message(
         GatewayMessage::SendMessage {
             session_id,
             content,
-        } => match manager.send_message(&session_id, content).await {
-            Ok(()) => GatewayResponse::MessageSent { session_id },
-            Err(e) => GatewayResponse::Error {
-                message: e.to_string(),
-            },
+        } => {
+            if content.len() > MAX_MESSAGE_CONTENT_SIZE {
+                return GatewayResponse::Error {
+                    message: "Message content exceeds maximum size (64KB)".to_string(),
+                };
+            }
+
+            match manager.send_message(&session_id, content).await {
+                Ok(()) => GatewayResponse::MessageSent { session_id },
+                Err(e) => GatewayResponse::Error {
+                    message: e.to_string(),
+                },
+            }
         },
         GatewayMessage::SubscribeEvents { session_id } => GatewayResponse::Error {
             message: format!(
@@ -651,6 +660,30 @@ mod tests {
         .await;
         assert_eq!(resp["type"], "error");
         assert!(resp["message"].as_str().unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_content_too_large() {
+        let url = start_test_server().await;
+        let mut ws = connect(&url).await;
+
+        let create_resp = send_and_recv(&mut ws, r#"{"type": "create_session"}"#).await;
+        let session_id = create_resp["session_id"].as_str().unwrap();
+        let content = "a".repeat(MAX_MESSAGE_CONTENT_SIZE + 1);
+
+        let msg = serde_json::json!({
+            "type": "send_message",
+            "session_id": session_id,
+            "content": content,
+        })
+        .to_string();
+
+        let resp = send_and_recv(&mut ws, &msg).await;
+        assert_eq!(resp["type"], "error");
+        assert_eq!(
+            resp["message"].as_str().unwrap(),
+            "Message content exceeds maximum size (64KB)"
+        );
     }
 
     // -- Auth helpers & tests ------------------------------------------------
