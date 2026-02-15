@@ -93,8 +93,9 @@ impl ChannelSkillConfig {
 
 /// Routes messages between Channel implementations and the SessionManager.
 ///
-/// Maintains a `(channel_type, account_id, sender_id) -> session_id` mapping so that
-/// each unique sender on each account is automatically associated with a persistent session.
+/// Maintains sender affinity via `(channel_type, account_id, sender_id) -> session_id` so that
+/// each unique sender on each account is associated with a persistent session, and separately
+/// routes responses via `session_id -> (channel_type, account_id, channel_id)`.
 /// Multiple accounts of the same channel type (e.g., two Telegram bots) are supported
 /// by keying channels on `(channel_type, account_id)`.
 pub struct ChannelBridge {
@@ -224,7 +225,7 @@ impl ChannelBridge {
             routes.get(session_id).cloned()
         };
 
-        let Some((channel_type, account_id, sender_id)) = route else {
+        let Some((channel_type, account_id, channel_id)) = route else {
             error!(session_id = %session_id, "Missing channel route for session response");
             return;
         };
@@ -248,7 +249,7 @@ impl ChannelBridge {
 
         let response = ChannelResponse {
             content,
-            recipient: sender_id,
+            recipient: channel_id,
         };
 
         if let Err(e) = channel.send_message(response).await {
@@ -337,7 +338,14 @@ impl ChannelBridge {
 
                 {
                     let mut routes = session_routes.write().await;
-                    routes.insert(session_id.clone(), key.clone());
+                    routes.insert(
+                        session_id.clone(),
+                        (
+                            channel_type_str.clone(),
+                            account_id.clone(),
+                            msg.channel_id.clone(),
+                        ),
+                    );
                 }
 
                 if is_new_session {
@@ -858,7 +866,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_routes_agent_response_back_to_originating_sender() {
+    async fn test_routes_agent_response_back_to_originating_channel() {
         let sm = test_session_manager_with_mock_client(MockModelClient::new("hello from mock"));
         let mut bridge = ChannelBridge::new(sm);
 
@@ -877,14 +885,14 @@ mod tests {
         .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
-        assert_eq!(sent[0].recipient, "user1");
+        assert_eq!(sent[0].recipient, "test-channel");
         assert_eq!(sent[0].content.trim_end(), "hello from mock");
 
         bridge.stop().await;
     }
 
     #[tokio::test]
-    async fn test_routes_agent_error_back_to_originating_sender() {
+    async fn test_routes_agent_error_back_to_originating_channel() {
         let sm = test_session_manager_with_mock_client(MockModelClient::new("unused").with_error(
             ProviderError::InvalidResponse("mock upstream failure".to_string()),
         ));
@@ -905,14 +913,14 @@ mod tests {
         .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
-        assert_eq!(sent[0].recipient, "user_err");
+        assert_eq!(sent[0].recipient, "test-channel");
         assert!(sent[0].content.contains("mock upstream failure"));
 
         bridge.stop().await;
     }
 
     #[tokio::test]
-    async fn test_multiple_sessions_on_same_channel_route_responses_to_correct_senders() {
+    async fn test_multiple_sessions_on_same_channel_route_responses_to_channel() {
         let sm = test_session_manager_with_mock_client(MockModelClient::new("shared response"));
         let mut bridge = ChannelBridge::new(sm.clone());
 
@@ -934,10 +942,11 @@ mod tests {
             .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 2).await;
-        let alice_count = sent.iter().filter(|msg| msg.recipient == "alice").count();
-        let bob_count = sent.iter().filter(|msg| msg.recipient == "bob").count();
-        assert_eq!(alice_count, 1);
-        assert_eq!(bob_count, 1);
+        let channel_count = sent
+            .iter()
+            .filter(|msg| msg.recipient == "test-channel")
+            .count();
+        assert_eq!(channel_count, 2);
 
         let alice_session = bridge
             .get_session_for_sender("telegram", "default", "alice")
@@ -1058,7 +1067,7 @@ mod tests {
             .unwrap();
 
         let messages_a = wait_for_sent_message_count(&sent_a, 1).await;
-        assert_eq!(messages_a[0].recipient, "alice");
+        assert_eq!(messages_a[0].recipient, "test-channel");
         assert_eq!(messages_a[0].content.trim_end(), "multi-account reply");
 
         let messages_b = sent_b.lock().unwrap().clone();
