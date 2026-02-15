@@ -108,6 +108,8 @@ pub struct ChannelBridge {
 }
 
 impl ChannelBridge {
+    const MAX_PENDING_TEXT_BYTES: usize = 64 * 1024;
+
     /// Create a new ChannelBridge backed by the given SessionManager.
     pub fn new(session_manager: Arc<SessionManager>) -> Self {
         Self::with_skill_config(session_manager, ChannelSkillConfig::default())
@@ -141,6 +143,15 @@ impl ChannelBridge {
                 match event {
                     ThreadEvent::ContentDelta { delta } => {
                         pending_text.push_str(&delta);
+                        if pending_text.len() >= Self::MAX_PENDING_TEXT_BYTES {
+                            ChannelBridge::flush_response(
+                                &session_id,
+                                &mut pending_text,
+                                &channels,
+                                &session_routes,
+                            )
+                            .await;
+                        }
                     }
                     ThreadEvent::TurnCompleted { .. } | ThreadEvent::ThreadCompleted { .. } => {
                         ChannelBridge::flush_response(
@@ -291,14 +302,11 @@ impl ChannelBridge {
                     msg.sender.clone(),
                 );
 
-                let session_id = {
-                    let read_guard = sender_sessions.read().await;
-                    read_guard.get(&key).cloned()
-                };
-
-                let (session_id, is_new_session) = match session_id {
-                    Some(id) => (id, false),
-                    None => {
+                let (session_id, is_new_session) = {
+                    let mut write_guard = sender_sessions.write().await;
+                    if let Some(existing_id) = write_guard.get(&key) {
+                        (existing_id.clone(), false)
+                    } else {
                         let session_config =
                             skill_config.session_config_for_channel(&channel_type_str);
                         match session_manager.create_session(session_config).await {
@@ -310,7 +318,6 @@ impl ChannelBridge {
                                     session_id = %id,
                                     "Created new session for sender"
                                 );
-                                let mut write_guard = sender_sessions.write().await;
                                 write_guard.insert(key.clone(), id.clone());
                                 (id, true)
                             }
