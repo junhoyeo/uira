@@ -273,9 +273,24 @@ fn is_channel_allowed(channel_id: &str, allowed_channels: &[String]) -> bool {
 }
 
 fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
-    let secs: f64 = ts.parse().unwrap_or(0.0);
-    let secs_i64 = secs as i64;
-    let nanos = ((secs - secs_i64 as f64) * 1_000_000_000.0) as u32;
+    // Slack timestamps are "EPOCH.SEQUENCE" format (e.g., "1234567890.123456")
+    // Parse as two parts to avoid f64 precision loss
+    let parts: Vec<&str> = ts.split('.').collect();
+    
+    let secs_i64 = parts
+        .get(0)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    
+    let nanos = parts
+        .get(1)
+        .and_then(|s| {
+            // Pad or truncate to 9 digits for nanoseconds
+            let padded = format!("{:<09}", s);
+            padded[..9].parse::<u32>().ok()
+        })
+        .unwrap_or(0);
+    
     chrono::DateTime::from_timestamp(secs_i64, nanos).unwrap_or_default()
 }
 

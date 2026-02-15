@@ -4,7 +4,7 @@ use crate::config::SessionConfig;
 
 /// Inbound messages from WebSocket clients
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GatewayMessage {
     CreateSession {
         #[serde(default)]
@@ -203,5 +203,13 @@ mod tests {
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"event_stream_ended\""));
+    }
+
+    #[test]
+    fn test_deny_unknown_fields() {
+        // Test that unknown fields are rejected
+        let json = r#"{"type": "send_message", "session_id": "abc", "content": "hello", "extra_field": true}"#;
+        let result = serde_json::from_str::<GatewayMessage>(json);
+        assert!(result.is_err(), "Should reject unknown fields");
     }
 }
