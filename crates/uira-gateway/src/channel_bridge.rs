@@ -15,6 +15,11 @@ use crate::error::GatewayError;
 use crate::session_manager::SessionManager;
 use crate::skills::{get_context_injection, SkillError, SkillLoader};
 
+// Type aliases for complex types
+type SenderSessionMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
+type SessionRouteMap = Arc<RwLock<HashMap<String, (String, String, String)>>>;
+type ChannelMap = Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>;
+
 /// Per-channel skill configuration with pre-resolved context injection strings.
 #[derive(Debug, Clone, Default)]
 pub struct ChannelSkillConfig {
@@ -100,9 +105,9 @@ impl ChannelSkillConfig {
 /// by keying channels on `(channel_type, account_id)`.
 pub struct ChannelBridge {
     session_manager: Arc<SessionManager>,
-    sender_sessions: Arc<RwLock<HashMap<(String, String, String), String>>>,
-    session_routes: Arc<RwLock<HashMap<String, (String, String, String)>>>,
-    channels: Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
+    sender_sessions: SenderSessionMap,
+    session_routes: SessionRouteMap,
+    channels: ChannelMap,
     channel_handles: Vec<JoinHandle<()>>,
     response_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     skill_config: Arc<ChannelSkillConfig>,
@@ -134,8 +139,8 @@ impl ChannelBridge {
     fn spawn_response_delivery_task(
         session_id: String,
         mut event_stream: EventStream,
-        channels: Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
-        session_routes: Arc<RwLock<HashMap<String, (String, String, String)>>>,
+        channels: ChannelMap,
+        session_routes: SessionRouteMap,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut pending_text = String::new();
@@ -198,8 +203,8 @@ impl ChannelBridge {
     async fn flush_response(
         session_id: &str,
         pending_text: &mut String,
-        channels: &Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
-        session_routes: &Arc<RwLock<HashMap<String, (String, String, String)>>>,
+        channels: &ChannelMap,
+        session_routes: &SessionRouteMap,
     ) {
         if pending_text.is_empty() {
             return;
@@ -213,8 +218,8 @@ impl ChannelBridge {
     async fn deliver_to_channel(
         session_id: &str,
         content: String,
-        channels: &Arc<RwLock<HashMap<(String, String), Arc<dyn Channel>>>>,
-        session_routes: &Arc<RwLock<HashMap<String, (String, String, String)>>>,
+        channels: &ChannelMap,
+        session_routes: &SessionRouteMap,
     ) {
         if content.is_empty() {
             return;

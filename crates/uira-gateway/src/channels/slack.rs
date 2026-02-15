@@ -278,7 +278,7 @@ fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
     let parts: Vec<&str> = ts.split('.').collect();
     
     let secs_i64 = parts
-        .get(0)
+        .first()
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0);
     

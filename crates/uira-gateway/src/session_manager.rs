@@ -236,13 +236,13 @@ impl SessionManager {
 
                 for session_id in idle_session_ids {
                     // Re-check under read lock before destroying to avoid race condition
-                    let still_idle = {
-                        let sessions = manager.sessions.read().await;
-                        sessions.get(&session_id).map_or(false, |s| {
-                            let idle = now.signed_duration_since(s.info.last_message_at);
-                            idle > idle_timeout
-                        })
-                    };
+                        let still_idle = {
+                            let sessions = manager.sessions.read().await;
+                            sessions.get(&session_id).is_some_and(|s| {
+                                let idle = now.signed_duration_since(s.info.last_message_at);
+                                idle > idle_timeout
+                            })
+                        };
                     
                     if still_idle {
                         if let Err(error) = manager.destroy_session(&session_id).await {
