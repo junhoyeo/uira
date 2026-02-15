@@ -351,6 +351,7 @@ impl SessionManager {
                     session_id
                 )));
             }
+            session.info.status = SessionStatus::Active;
             session.info.last_message_at = Utc::now();
             session.agent_input_tx.clone()
         };
