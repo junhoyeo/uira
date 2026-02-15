@@ -1,4 +1,13 @@
 //! Provider error types
+//!
+//! All variants are actively produced by error classifiers:
+//! - `PaymentRequired`: HTTP 402 status or billing patterns (Anthropic, OpenAI)
+//! - `Timeout`: Timeout patterns (Anthropic, OpenAI)
+//! - `MessageOrderingConflict`: Message role alternation violations (Anthropic)
+//! - `ToolCallInputMissing`: Missing tool input fields (Anthropic)
+//! - `ImageError`: Image dimension/size issues (Anthropic)
+//!
+//! See `anthropic/error_classify.rs` and `openai/error_classify.rs` for classifier implementations.
 
 use thiserror::Error;
 
