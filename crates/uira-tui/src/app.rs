@@ -31,8 +31,8 @@ use uira_types::{
 };
 
 use crate::views::{
-    ApprovalOverlay, ApprovalRequest, ChatView, ModelSelector, ToastManager, ToastVariant,
-    MODEL_GROUPS,
+    ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
+    ToastManager, ToastVariant, MODEL_GROUPS,
 };
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, Theme, ThemeOverrides};
@@ -780,6 +780,7 @@ pub struct App {
     input_focused: bool,
     approval_overlay: ApprovalOverlay,
     model_selector: ModelSelector,
+    command_palette: CommandPalette,
     agent_input_tx: Option<mpsc::Sender<Message>>,
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
@@ -804,6 +805,8 @@ impl App {
         approval_overlay.set_theme(theme.clone());
         let mut model_selector = ModelSelector::new();
         model_selector.set_theme(theme.clone());
+        let mut command_palette = CommandPalette::new();
+        command_palette.set_theme(theme.clone());
         Self {
             should_quit: false,
             event_tx,
@@ -818,6 +821,7 @@ impl App {
             input_focused: true,
             approval_overlay,
             model_selector,
+            command_palette,
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
@@ -848,6 +852,7 @@ impl App {
         self.theme = theme;
         self.approval_overlay.set_theme(self.theme.clone());
         self.model_selector.set_theme(self.theme.clone());
+        self.command_palette.set_theme(self.theme.clone());
         self.chat_view.set_theme(self.theme.clone());
         self.toast_manager
             .show(format!("Theme: {}", theme_name), ToastVariant::Info, 2000);
@@ -995,6 +1000,10 @@ impl App {
         // Render model selector overlay on top
         if self.model_selector.is_active() {
             self.model_selector.render(frame, area);
+        }
+
+        if self.command_palette.is_active() {
+            self.command_palette.render(frame, area);
         }
     }
 
@@ -1339,6 +1348,16 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
+        if self.command_palette.is_active() {
+            match self.command_palette.handle_key(key.code) {
+                PaletteAction::Execute(id) => {
+                    self.execute_palette_command(&id);
+                }
+                PaletteAction::Close | PaletteAction::None => {}
+            }
+            return KeyAction::None;
+        }
+
         if self.model_selector.is_active() {
             if let Some(selected_model) = self.model_selector.handle_key(key.code) {
                 self.switch_model(&selected_model);
@@ -1370,12 +1389,22 @@ impl App {
                         self.status = self.chat_view.collapse_all_tool_outputs();
                     }
                 }
+                KeyCode::Char('p') | KeyCode::Char('k') => {
+                    self.command_palette.open();
+                    return KeyAction::None;
+                }
                 KeyCode::Char('g') => {
                     if self.approval_overlay.is_active() {
                         self.status = "Finish approval first before opening editor".to_string();
                         return KeyAction::None;
                     }
                     return KeyAction::OpenExternalEditor;
+                }
+                KeyCode::Up => {
+                    self.chat_view.scroll_to_prev_user_message();
+                }
+                KeyCode::Down => {
+                    self.chat_view.scroll_to_next_user_message();
                 }
                 _ => {}
             }
@@ -2265,6 +2294,36 @@ impl App {
         }
 
         self.chat_view.auto_scroll_to_bottom();
+    }
+
+    fn execute_palette_command(&mut self, id: &str) {
+        match id {
+            "help" => self.handle_slash_command("/help"),
+            "status" => self.handle_slash_command("/status"),
+            "clear" => self.handle_slash_command("/clear"),
+            "exit" => self.handle_slash_command("/exit"),
+            "models" => self.handle_slash_command("/models"),
+            "model" => self.handle_slash_command("/model"),
+            "theme_list" => self.handle_slash_command("/theme"),
+            "fork" => self.handle_slash_command("/fork"),
+            "switch" => self.handle_slash_command("/switch"),
+            "branches" => self.handle_slash_command("/branches"),
+            "tree" => self.handle_slash_command("/tree"),
+            "share" => self.handle_slash_command("/share"),
+            "review" => self.handle_slash_command("/review"),
+            "image" => self.handle_slash_command("/image"),
+            "screenshot" => self.handle_slash_command("/screenshot"),
+            "collapse_tools" => {
+                self.status = self.chat_view.collapse_all_tool_outputs();
+            }
+            "expand_tools" => {
+                self.status = self.chat_view.expand_all_tool_outputs();
+            }
+            "toggle_sidebar" => {
+                self.toggle_todo_sidebar();
+            }
+            _ => {}
+        }
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {

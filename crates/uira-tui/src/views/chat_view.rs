@@ -6,7 +6,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use crate::widgets::ChatMessage;
+use crate::widgets::{markdown::render_markdown, ChatMessage};
 use crate::Theme;
 
 pub struct ChatView {
@@ -413,6 +413,16 @@ impl ChatView {
             return wrap_message(&role_prefix, &body, inner_width, style);
         }
 
+        if msg.role == "assistant" || msg.role == "system" {
+            return render_message_markdown(
+                &role_prefix,
+                &msg.content,
+                inner_width,
+                style,
+                &self.theme,
+            );
+        }
+
         wrap_message(&role_prefix, &msg.content, inner_width, style)
     }
 
@@ -438,6 +448,81 @@ impl ChatView {
 
     fn is_at_bottom(&self) -> bool {
         self.scroll_offset >= self.max_scroll_offset()
+    }
+
+    /// Compute the line offset where each message starts.
+    /// Returns a vector where index i contains the line offset of message i.
+    fn message_line_offsets(&self) -> Vec<usize> {
+        let mut offsets = Vec::new();
+        let mut current_offset = 0;
+
+        for lines in &self.rendered_lines {
+            offsets.push(current_offset);
+            current_offset += lines.len();
+        }
+
+        offsets
+    }
+
+    /// Scroll to the previous user message before the current scroll position.
+    /// Sets user_scrolled=true and auto_follow=false.
+    pub fn scroll_to_prev_user_message(&mut self) {
+        let offsets = self.message_line_offsets();
+        let current_line = self.scroll_offset;
+
+        // Find the message index that contains the current scroll position
+        let mut current_msg_idx = None;
+        for (idx, &offset) in offsets.iter().enumerate() {
+            if offset <= current_line {
+                current_msg_idx = Some(idx);
+            } else {
+                break;
+            }
+        }
+
+        // Search backwards from the current message (or before it) for a user message
+        if let Some(start_idx) = current_msg_idx {
+            for idx in (0..start_idx).rev() {
+                if self.messages.get(idx).map(|m| m.role.as_str()) == Some("user") {
+                    if let Some(&offset) = offsets.get(idx) {
+                        self.scroll_offset = offset;
+                        self.user_scrolled = true;
+                        self.auto_follow = false;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Scroll to the next user message after the current scroll position.
+    /// Sets user_scrolled=true and auto_follow=false.
+    pub fn scroll_to_next_user_message(&mut self) {
+        let offsets = self.message_line_offsets();
+        let current_line = self.scroll_offset;
+
+        // Find the message index that contains the current scroll position
+        let mut current_msg_idx = None;
+        for (idx, &offset) in offsets.iter().enumerate() {
+            if offset <= current_line {
+                current_msg_idx = Some(idx);
+            } else {
+                break;
+            }
+        }
+
+        // Search forwards from the next message for a user message
+        let start_idx = current_msg_idx.map(|idx| idx + 1).unwrap_or(0);
+        for idx in start_idx..self.messages.len() {
+            if self.messages.get(idx).map(|m| m.role.as_str()) == Some("user") {
+                if let Some(&offset) = offsets.get(idx) {
+                    self.scroll_offset = offset;
+                    self.user_scrolled = true;
+                    self.auto_follow = false;
+                }
+                return;
+            }
+        }
     }
 }
 
@@ -487,6 +572,31 @@ fn wrap_message(prefix: &str, content: &str, max_width: usize, style: Style) -> 
     }
 
     lines
+}
+
+fn render_message_markdown(
+    prefix: &str,
+    content: &str,
+    max_width: usize,
+    style: Style,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let prefix_style = style.add_modifier(Modifier::BOLD);
+    let prefix_len = prefix.chars().count();
+    let markdown_width = max_width.saturating_sub(prefix_len).max(1);
+    let mut markdown_lines = render_markdown(content, markdown_width, theme);
+
+    if markdown_lines.is_empty() {
+        return vec![Line::from(Span::styled(prefix.to_string(), prefix_style))];
+    }
+
+    if let Some(first_line) = markdown_lines.first_mut() {
+        first_line
+            .spans
+            .insert(0, Span::styled(prefix.to_string(), prefix_style));
+    }
+
+    markdown_lines
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {
