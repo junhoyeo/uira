@@ -1733,7 +1733,7 @@ fn create_agent_config(
                 SandboxPolicy::read_only()
             }
         },
-        _ => SandboxPolicy::workspace_write(cwd.clone()),
+        _ => SandboxPolicy::full_access(),
     };
 
     let mut config = AgentConfig::new().with_working_directory(cwd);

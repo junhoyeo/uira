@@ -40,6 +40,13 @@ pub fn generate_policy(policy: &SandboxPolicy) -> String {
                 workspace_path
             ));
 
+            // Allow write to user's home directory for cross-project operations
+            if let Ok(home) = std::env::var("HOME") {
+                if home != workspace_path.as_ref() {
+                    rules.push(format!("(allow file-write* (subpath \"{}\"))", home));
+                }
+            }
+
             // Deny write to protected paths
             for path in protected_paths {
                 let protected = format!("{}/{}", workspace_path, path.to_string_lossy());
@@ -49,7 +56,6 @@ pub fn generate_policy(policy: &SandboxPolicy) -> String {
             // Allow write to temp directories
             rules.push("(allow file-write* (subpath \"/tmp\"))".to_string());
             rules.push("(allow file-write* (subpath \"/var/tmp\"))".to_string());
-            // Note: Would add ~/Library/Caches with dirs crate if available
         }
         SandboxPolicy::FullAccess => {
             rules.push("(allow file-read*)".to_string());
@@ -146,5 +152,35 @@ mod tests {
         assert!(policy.contains("(allow file-write* (subpath \"/workspace\"))"));
         // .git is no longer protected by default
         assert!(!policy.contains("(deny file-write* (subpath \"/workspace/.git\"))"));
+    }
+
+    #[test]
+    fn test_workspace_write_allows_home_directory() {
+        let home = std::env::var("HOME").expect("HOME env var not set");
+        let policy = generate_policy(&SandboxPolicy::WorkspaceWrite {
+            workspace: PathBuf::from("/workspace"),
+            protected_paths: vec![],
+        });
+        // Should allow writes to home directory for cross-project operations
+        assert!(policy.contains(&format!("(allow file-write* (subpath \"{}\"))", home)));
+    }
+
+    #[test]
+    fn test_workspace_write_home_equals_workspace() {
+        // When workspace is the home directory, don't duplicate the rule
+        if let Ok(home) = std::env::var("HOME") {
+            let policy = generate_policy(&SandboxPolicy::WorkspaceWrite {
+                workspace: PathBuf::from(&home),
+                protected_paths: vec![],
+            });
+            // Count occurrences of the home path rule - should be exactly 1
+            let count = policy
+                .matches(&format!("(allow file-write* (subpath \"{}\"))", home))
+                .count();
+            assert_eq!(
+                count, 1,
+                "Home directory rule should appear exactly once when workspace equals home"
+            );
+        }
     }
 }

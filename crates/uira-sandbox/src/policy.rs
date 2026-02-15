@@ -41,10 +41,7 @@ pub enum SandboxPolicy {
 
 impl Default for SandboxPolicy {
     fn default() -> Self {
-        Self::WorkspaceWrite {
-            workspace: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            protected_paths: vec![],
-        }
+        Self::FullAccess
     }
 }
 
@@ -84,7 +81,7 @@ mod tests {
     #[test]
     fn test_default_policy() {
         let policy = SandboxPolicy::default();
-        assert!(policy.is_restrictive());
+        assert!(!policy.is_restrictive());
     }
 
     #[test]
