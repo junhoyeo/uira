@@ -77,6 +77,7 @@ impl ChatView {
 
         self.rebuild_render_cache_if_needed(inner_width);
         self.clamp_scroll_offset();
+        self.sync_follow_with_position();
 
         let start = self.scroll_offset.min(self.total_lines);
         let end = (start + self.viewport_height as usize).min(self.total_lines);
