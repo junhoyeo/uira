@@ -7,6 +7,7 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -175,86 +176,58 @@ async fn handle_socket(
     session_manager: Arc<SessionManager>,
     channels: Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>,
 ) {
-    let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (tx, mut rx) = mpsc::channel::<String>(64);
+    let (ws_sender, mut ws_receiver) = socket.split();
+    let (tx, rx) = mpsc::channel::<String>(64);
     let mut event_tasks = Vec::new();
+    let writer_task = tokio::spawn(write_outbound(ws_sender, rx));
 
-    loop {
-        tokio::select! {
-            outbound = rx.recv() => {
-                match outbound {
-                    Some(message) => {
-                        if ws_sender.send(Message::text(message)).await.is_err() {
+    while let Some(inbound) = ws_receiver.next().await {
+        let text = match inbound {
+            Ok(Message::Text(text)) => text.to_string(),
+            Ok(Message::Close(_)) => break,
+            Err(_) => break,
+            _ => continue,
+        };
+
+        match serde_json::from_str::<GatewayMessage>(&text) {
+            Ok(GatewayMessage::SubscribeEvents { session_id }) => {
+                match session_manager.take_event_stream(&session_id).await {
+                    Some(mut event_stream) => {
+                        let ack = GatewayResponse::EventsSubscribed {
+                            session_id: session_id.clone(),
+                        };
+                        if tx.send(serialize_response(&ack)).await.is_err() {
                             break;
                         }
-                    }
-                    None => break,
-                }
-            }
-            inbound = ws_receiver.next() => {
-                let text = match inbound {
-                    Some(Ok(Message::Text(text))) => text.to_string(),
-                    Some(Ok(Message::Close(_))) => break,
-                    Some(Err(_)) => break,
-                    None => break,
-                    _ => continue,
-                };
 
-                match serde_json::from_str::<GatewayMessage>(&text) {
-                    Ok(GatewayMessage::SubscribeEvents { session_id }) => {
-                        match session_manager.take_event_stream(&session_id).await {
-                            Some(mut event_stream) => {
-                                let ack = GatewayResponse::EventsSubscribed {
-                                    session_id: session_id.clone(),
+                        let tx_clone = tx.clone();
+                        let stream_session_id = session_id.clone();
+                        event_tasks.push(tokio::spawn(async move {
+                            while let Some(event) = event_stream.next().await {
+                                let event_json =
+                                    serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+                                let response = GatewayResponse::AgentEvent {
+                                    session_id: stream_session_id.clone(),
+                                    event: event_json,
                                 };
-                                if tx.send(serialize_response(&ack)).await.is_err() {
-                                    break;
-                                }
 
-                                let tx_clone = tx.clone();
-                                let stream_session_id = session_id.clone();
-                                event_tasks.push(tokio::spawn(async move {
-                                    while let Some(event) = event_stream.next().await {
-                                        let event_json = serde_json::to_value(&event)
-                                            .unwrap_or(serde_json::Value::Null);
-                                        let response = GatewayResponse::AgentEvent {
-                                            session_id: stream_session_id.clone(),
-                                            event: event_json,
-                                        };
-
-                                        if tx_clone.send(serialize_response(&response)).await.is_err() {
-                                            return;
-                                        }
-                                    }
-
-                                    let ended = GatewayResponse::EventStreamEnded {
-                                        session_id: stream_session_id,
-                                    };
-                                    let _ = tx_clone.send(serialize_response(&ended)).await;
-                                }));
-                            }
-                            None => {
-                                let err = GatewayResponse::Error {
-                                    message: format!(
-                                        "Event stream not available for session '{}' (already subscribed or session not found)",
-                                        session_id
-                                    ),
-                                };
-                                if tx.send(serialize_response(&err)).await.is_err() {
-                                    break;
+                                if tx_clone.send(serialize_response(&response)).await.is_err() {
+                                    return;
                                 }
                             }
-                        }
+
+                            let ended = GatewayResponse::EventStreamEnded {
+                                session_id: stream_session_id,
+                            };
+                            let _ = tx_clone.send(serialize_response(&ended)).await;
+                        }));
                     }
-                    Ok(gateway_msg) => {
-                        let response = handle_message(gateway_msg, &session_manager, &channels).await;
-                        if tx.send(serialize_response(&response)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
+                    None => {
                         let err = GatewayResponse::Error {
-                            message: format!("Invalid JSON: {}", e),
+                            message: format!(
+                                "Event stream not available for session '{}' (already subscribed or session not found)",
+                                session_id
+                            ),
                         };
                         if tx.send(serialize_response(&err)).await.is_err() {
                             break;
@@ -262,11 +235,38 @@ async fn handle_socket(
                     }
                 }
             }
+            Ok(gateway_msg) => {
+                let response = handle_message(gateway_msg, &session_manager, &channels).await;
+                if tx.send(serialize_response(&response)).await.is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                let err = GatewayResponse::Error {
+                    message: format!("Invalid JSON: {}", e),
+                };
+                if tx.send(serialize_response(&err)).await.is_err() {
+                    break;
+                }
+            }
         }
     }
 
+    drop(tx);
     for task in event_tasks {
         task.abort();
+    }
+    let _ = writer_task.await;
+}
+
+async fn write_outbound(
+    mut ws_sender: SplitSink<WebSocket, Message>,
+    mut rx: mpsc::Receiver<String>,
+) {
+    while let Some(message) = rx.recv().await {
+        if ws_sender.send(Message::text(message)).await.is_err() {
+            break;
+        }
     }
 }
 
