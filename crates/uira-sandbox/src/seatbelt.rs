@@ -17,6 +17,12 @@ pub fn generate_policy(policy: &SandboxPolicy) -> String {
         "(allow sysctl-read)".to_string(),
     ];
 
+    // Allow access to /dev/null, /dev/tty, /dev/random, /dev/urandom
+    rules.push("(allow file-read* file-write* (literal \"/dev/null\"))".to_string());
+    rules.push("(allow file-read* file-write* (literal \"/dev/tty\"))".to_string());
+    rules.push("(allow file-read* (literal \"/dev/random\"))".to_string());
+    rules.push("(allow file-read* (literal \"/dev/urandom\"))".to_string());
+
     match policy {
         SandboxPolicy::ReadOnly => {
             rules.push("(allow file-read*)".to_string());
@@ -104,7 +110,31 @@ mod tests {
         let policy = generate_policy(&SandboxPolicy::ReadOnly);
         assert!(policy.contains("(deny default)"));
         assert!(policy.contains("(allow file-read*)"));
+        assert!(policy.contains("(allow file-read* file-write* (literal \"/dev/null\"))"));
         assert!(!policy.contains("(allow file-write*)"));
+    }
+
+    #[test]
+    fn test_dev_null_allowed_in_all_policy_modes() {
+        let policies = vec![
+            SandboxPolicy::ReadOnly,
+            SandboxPolicy::WorkspaceWrite {
+                workspace: PathBuf::from("/workspace"),
+                protected_paths: vec![],
+            },
+            SandboxPolicy::FullAccess,
+            SandboxPolicy::Custom {
+                readable: vec![],
+                writable: vec![],
+                executable: vec![],
+                network: false,
+            },
+        ];
+
+        for policy in policies {
+            let generated = generate_policy(&policy);
+            assert!(generated.contains("(allow file-read* file-write* (literal \"/dev/null\"))"));
+        }
     }
 
     #[test]
