@@ -109,7 +109,7 @@ impl SessionManager {
     /// Update the default configuration used for new sessions.
     /// Existing sessions are not affected.
     pub fn update_default_config(&self, settings: GatewaySettings) {
-        *self.settings.write().unwrap() = settings;
+        *self.settings.write().unwrap_or_else(|e| e.into_inner()) = settings;
     }
 
     /// Create a new session. Returns the session ID.
@@ -142,7 +142,7 @@ impl SessionManager {
         };
 
         // Phase 2: Build agent OUTSIDE the lock
-        let agent_config = self.build_agent_config(&config);
+        let agent_config = self.build_agent_config(&config)?;
         let agent = Agent::new(agent_config, client);
         let agent = agent
             .with_rollout()
@@ -200,7 +200,12 @@ impl SessionManager {
     }
 
     pub fn start_reaper(&self) {
-        let Some(idle_timeout_secs) = self.settings.read().unwrap().idle_timeout_secs else {
+        let Some(idle_timeout_secs) = self
+            .settings
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .idle_timeout_secs
+        else {
             return;
         };
 
@@ -260,7 +265,10 @@ impl SessionManager {
         });
 
         // Store the reaper handle for shutdown
-        *self.reaper_handle.lock().unwrap() = Some(handle);
+        *self
+            .reaper_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(handle);
     }
 
     /// Destroy a session by ID.
@@ -342,7 +350,12 @@ impl SessionManager {
 
     pub async fn shutdown(&self) -> Result<(), GatewayError> {
         // Abort the reaper task
-        if let Some(handle) = self.reaper_handle.lock().unwrap().take() {
+        if let Some(handle) = self
+            .reaper_handle
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             handle.abort();
         }
 
@@ -460,7 +473,9 @@ impl SessionManager {
         &self,
         config: &SessionConfig,
     ) -> Result<ProviderConfig, GatewayError> {
-        let settings = self.settings.read().unwrap();
+        let settings = self.settings.read().map_err(|error| {
+            GatewayError::SessionCreationFailed(format!("Settings lock poisoned: {error}"))
+        })?;
         let provider_name = config
             .provider
             .as_deref()
@@ -487,8 +502,10 @@ impl SessionManager {
         Ok(provider_config)
     }
 
-    fn build_agent_config(&self, config: &SessionConfig) -> AgentConfig {
-        let settings = self.settings.read().unwrap();
+    fn build_agent_config(&self, config: &SessionConfig) -> Result<AgentConfig, GatewayError> {
+        let settings = self.settings.read().map_err(|error| {
+            GatewayError::SessionCreationFailed(format!("Settings lock poisoned: {error}"))
+        })?;
         let mut agent_config = AgentConfig::new().full_auto();
 
         let model = config
@@ -509,7 +526,7 @@ impl SessionManager {
             agent_config = agent_config.with_additional_context(vec![skill_context.clone()]);
         }
 
-        agent_config
+        Ok(agent_config)
     }
 }
 
