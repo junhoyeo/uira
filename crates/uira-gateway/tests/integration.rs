@@ -18,6 +18,7 @@ use uira_gateway::channels::{
     Channel, ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
 };
 use uira_gateway::channel_bridge::ChannelSkillConfig;
+use uira_gateway::testing::MockModelClient;
 use uira_gateway::{ChannelBridge, GatewayServer, SessionManager};
 use uira_core::schema::GatewaySettings;
 
@@ -50,6 +51,62 @@ fn test_session_manager(max_sessions: usize) -> Arc<SessionManager> {
             ..GatewaySettings::default()
         },
     ))
+}
+
+fn test_session_manager_with_mock_client(mock_client: MockModelClient) -> Arc<SessionManager> {
+    Arc::new(SessionManager::new_with_test_client(
+        100,
+        GatewaySettings {
+            provider: "ollama".to_string(),
+            model: "llama3.1".to_string(),
+            ..GatewaySettings::default()
+        },
+        Arc::new(mock_client),
+    ))
+}
+
+async fn wait_for_sent_message_count(
+    sent_messages: &Arc<Mutex<Vec<ChannelResponse>>>,
+    expected_count: usize,
+) -> Vec<ChannelResponse> {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+    loop {
+        let messages = sent_messages.lock().unwrap().clone();
+        if messages.len() >= expected_count {
+            return messages;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for {expected_count} sent message(s), got {}",
+                messages.len()
+            );
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_edited_message_count(
+    edited_messages: &Arc<Mutex<Vec<(String, String, String)>>>,
+    expected_count: usize,
+) -> Vec<(String, String, String)> {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+    loop {
+        let messages = edited_messages.lock().unwrap().clone();
+        if messages.len() >= expected_count {
+            return messages;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "timed out waiting for {expected_count} edited message(s), got {}",
+                messages.len()
+            );
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
 }
 
 async fn connect(
@@ -131,6 +188,103 @@ impl Channel for MockChannel {
 
     async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
         self.sent_messages.lock().unwrap().push(response);
+        Ok(())
+    }
+
+    fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
+        self.message_rx.take()
+    }
+}
+
+struct StreamingMockChannel {
+    channel_type: ChannelType,
+    started: bool,
+    message_tx: Option<mpsc::Sender<ChannelMessage>>,
+    message_rx: Option<mpsc::Receiver<ChannelMessage>>,
+    sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
+    edited_messages: Arc<Mutex<Vec<(String, String, String)>>>,
+    next_message_id: Arc<Mutex<u64>>,
+}
+
+impl StreamingMockChannel {
+    fn new(channel_type: ChannelType) -> Self {
+        let (tx, rx) = mpsc::channel(32);
+        Self {
+            channel_type,
+            started: false,
+            message_tx: Some(tx),
+            message_rx: Some(rx),
+            sent_messages: Arc::new(Mutex::new(Vec::new())),
+            edited_messages: Arc::new(Mutex::new(Vec::new())),
+            next_message_id: Arc::new(Mutex::new(1)),
+        }
+    }
+
+    fn sender(&self) -> mpsc::Sender<ChannelMessage> {
+        self.message_tx.clone().expect("sender already taken")
+    }
+
+    fn sent_messages_shared(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
+        self.sent_messages.clone()
+    }
+
+    fn edited_messages_shared(&self) -> Arc<Mutex<Vec<(String, String, String)>>> {
+        self.edited_messages.clone()
+    }
+}
+
+#[async_trait]
+impl Channel for StreamingMockChannel {
+    fn channel_type(&self) -> ChannelType {
+        self.channel_type.clone()
+    }
+
+    fn capabilities(&self) -> ChannelCapabilities {
+        ChannelCapabilities {
+            max_message_length: 4096,
+            supports_markdown: true,
+            supports_streaming: true,
+        }
+    }
+
+    async fn start(&mut self) -> Result<(), ChannelError> {
+        self.started = true;
+        Ok(())
+    }
+
+    async fn stop(&mut self) -> Result<(), ChannelError> {
+        self.started = false;
+        self.message_tx.take();
+        Ok(())
+    }
+
+    async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
+        self.sent_messages.lock().unwrap().push(response);
+        Ok(())
+    }
+
+    async fn send_message_returning_id(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<Option<String>, ChannelError> {
+        self.sent_messages.lock().unwrap().push(response);
+        let mut next_id = self.next_message_id.lock().unwrap();
+        let id = *next_id;
+        *next_id += 1;
+        Ok(Some(id.to_string()))
+    }
+
+    async fn edit_message(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), ChannelError> {
+        self.edited_messages.lock().unwrap().push((
+            recipient.to_string(),
+            message_id.to_string(),
+            new_content.to_string(),
+        ));
         Ok(())
     }
 
@@ -388,6 +542,42 @@ async fn test_channel_bridge_skill_injection() {
         config.skill_context,
         Some("<skill name=\"telegram-helper\">content</skill>".to_string())
     );
+
+    bridge.stop().await;
+}
+
+#[tokio::test]
+async fn test_streaming_channel_bridge_edits_messages() {
+    let sm = test_session_manager_with_mock_client(
+        MockModelClient::new("unused")
+            .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+    );
+    let mut bridge = ChannelBridge::new(sm);
+
+    let channel = StreamingMockChannel::new(ChannelType::Telegram);
+    let tx = channel.sender();
+    let sent_messages = channel.sent_messages_shared();
+    let edited_messages = channel.edited_messages_shared();
+
+    bridge
+        .register_channel(Box::new(channel), "default".to_string())
+        .await
+        .unwrap();
+
+    tx.send(make_channel_message(
+        "stream-user",
+        "hello",
+        ChannelType::Telegram,
+    ))
+    .await
+    .unwrap();
+
+    let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+    let edits = wait_for_edited_message_count(&edited_messages, 1).await;
+
+    assert!(!sent.is_empty());
+    assert!(!edits.is_empty());
+    assert!(edits.last().unwrap().2.contains("Hello world!"));
 
     bridge.stop().await;
 }

@@ -24,6 +24,84 @@ type SharedChannelInner = Arc<Mutex<Box<dyn Channel>>>;
 type ChannelMap = Arc<RwLock<HashMap<(String, String), SharedChannelInner>>>;
 type OutboundChannelMap = Arc<RwLock<HashMap<String, Arc<dyn Channel>>>>;
 
+struct StreamingState {
+    message_id: Option<String>,
+    channel: Option<SharedChannelInner>,
+    recipient: Option<String>,
+    capabilities: Option<ChannelCapabilities>,
+    overflow_mode: bool,
+    supported: Option<bool>,
+    last_edit_time: Option<Instant>,
+    last_edited_text: String,
+    accumulated_text: String,
+}
+
+impl StreamingState {
+    fn new() -> Self {
+        Self {
+            message_id: None,
+            channel: None,
+            recipient: None,
+            capabilities: None,
+            overflow_mode: false,
+            supported: None,
+            last_edit_time: None,
+            last_edited_text: String::new(),
+            accumulated_text: String::new(),
+        }
+    }
+
+    async fn try_final_edit(&mut self, session_id: &str) -> bool {
+        if self.supported != Some(true) || self.overflow_mode || self.message_id.is_none() {
+            return false;
+        }
+
+        let Some(channel) = self.channel.as_ref().cloned() else {
+            return false;
+        };
+        let Some(recipient) = self.recipient.clone() else {
+            return false;
+        };
+        let Some(message_id) = self.message_id.clone() else {
+            return false;
+        };
+        let Some(capabilities) = self.capabilities.clone() else {
+            return false;
+        };
+
+        let adapted_text =
+            adapt_content_for_capabilities(self.accumulated_text.clone(), &capabilities);
+        if adapted_text.is_empty() {
+            return false;
+        }
+
+        let truncated_len = floor_char_boundary(&adapted_text, capabilities.max_message_length);
+        let final_stream_text = &adapted_text[..truncated_len];
+        if final_stream_text == self.last_edited_text {
+            return false;
+        }
+
+        let edit_result = {
+            let guard = channel.lock().await;
+            guard
+                .edit_message(&recipient, &message_id, final_stream_text)
+                .await
+        };
+
+        if let Err(e) = edit_result {
+            error!(
+                session_id = %session_id,
+                error = %e,
+                "Failed to send final stream edit"
+            );
+            return false;
+        }
+
+        self.last_edited_text = final_stream_text.to_string();
+        true
+    }
+}
+
 struct SharedChannelProxy {
     inner: SharedChannelInner,
     channel_type: ChannelType,
@@ -264,20 +342,12 @@ impl ChannelBridge {
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut pending_text = String::new();
-            let mut accumulated_text = String::new();
-            let mut streaming_message_id: Option<String> = None;
-            let mut streaming_channel: Option<SharedChannelInner> = None;
-            let mut streaming_recipient: Option<String> = None;
-            let mut streaming_capabilities: Option<ChannelCapabilities> = None;
-            let mut stream_overflow_mode = false;
-            let mut stream_supported: Option<bool> = None;
-            let mut last_edit_time: Option<Instant> = None;
-            let mut last_edited_text = String::new();
+            let mut streaming_state = StreamingState::new();
 
             while let Some(event) = event_stream.next().await {
                 match event {
                     ThreadEvent::ContentDelta { delta } => {
-                        if stream_supported.is_none() {
+                        if streaming_state.supported.is_none() {
                             if let Some((recipient, channel, capabilities)) =
                                 ChannelBridge::resolve_channel_context(
                                     &session_id,
@@ -287,37 +357,40 @@ impl ChannelBridge {
                                 .await
                             {
                                 let supports_streaming = capabilities.supports_streaming;
-                                stream_supported = Some(supports_streaming);
+                                streaming_state.supported = Some(supports_streaming);
                                 if supports_streaming {
-                                    streaming_channel = Some(channel);
-                                    streaming_recipient = Some(recipient);
-                                    streaming_capabilities = Some(capabilities);
+                                    streaming_state.channel = Some(channel);
+                                    streaming_state.recipient = Some(recipient);
+                                    streaming_state.capabilities = Some(capabilities);
                                 }
                             } else {
-                                stream_supported = Some(false);
+                                streaming_state.supported = Some(false);
                             }
                         }
 
-                        if stream_supported == Some(true) {
-                            let Some(channel) = streaming_channel.as_ref().cloned() else {
-                                stream_supported = Some(false);
+                        if streaming_state.supported == Some(true) {
+                            let Some(channel) = streaming_state.channel.as_ref().cloned() else {
+                                streaming_state.supported = Some(false);
                                 pending_text.push_str(&delta);
                                 continue;
                             };
-                            let Some(recipient) = streaming_recipient.clone() else {
-                                stream_supported = Some(false);
+                            let Some(recipient) = streaming_state.recipient.clone() else {
+                                streaming_state.supported = Some(false);
                                 pending_text.push_str(&delta);
                                 continue;
                             };
-                            let Some(capabilities) = streaming_capabilities.clone() else {
-                                stream_supported = Some(false);
+                            let Some(capabilities) = streaming_state.capabilities.clone() else {
+                                streaming_state.supported = Some(false);
                                 pending_text.push_str(&delta);
                                 continue;
                             };
 
-                            accumulated_text.push_str(&delta);
+                            streaming_state.accumulated_text.push_str(&delta);
                             let adapted_text =
-                                adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
+                                adapt_content_for_capabilities(
+                                    streaming_state.accumulated_text.clone(),
+                                    &capabilities,
+                                );
                             if adapted_text.is_empty() {
                                 continue;
                             }
@@ -326,7 +399,7 @@ impl ChannelBridge {
                                 floor_char_boundary(&adapted_text, capabilities.max_message_length);
                             let stream_text = adapted_text[..truncated_len].to_string();
 
-                            if streaming_message_id.is_none() {
+                            if streaming_state.message_id.is_none() {
                                 let response = ChannelResponse {
                                     content: stream_text.clone(),
                                     recipient: recipient.clone(),
@@ -339,14 +412,14 @@ impl ChannelBridge {
 
                                 match message_id {
                                     Ok(Some(message_id)) => {
-                                        streaming_message_id = Some(message_id);
-                                        last_edit_time = Some(Instant::now());
-                                        last_edited_text = stream_text.clone();
+                                        streaming_state.message_id = Some(message_id);
+                                        streaming_state.last_edit_time = Some(Instant::now());
+                                        streaming_state.last_edited_text.clear();
                                     }
                                     Ok(None) => {
-                                        stream_supported = Some(false);
+                                        streaming_state.supported = Some(false);
                                         pending_text.push_str(&adapted_text);
-                                        accumulated_text.clear();
+                                        streaming_state.accumulated_text.clear();
                                         continue;
                                     }
                                     Err(e) => {
@@ -355,18 +428,20 @@ impl ChannelBridge {
                                             error = %e,
                                             "Failed to send initial streaming message"
                                         );
-                                        stream_supported = Some(false);
+                                        streaming_state.supported = Some(false);
                                         pending_text.push_str(&adapted_text);
-                                        accumulated_text.clear();
+                                        streaming_state.accumulated_text.clear();
                                         continue;
                                     }
                                 }
                             }
 
-                            if !stream_overflow_mode && adapted_text.len() > capabilities.max_message_length {
-                                stream_overflow_mode = true;
+                            if !streaming_state.overflow_mode
+                                && adapted_text.len() > capabilities.max_message_length
+                            {
+                                streaming_state.overflow_mode = true;
 
-                                if let Some(message_id) = streaming_message_id.clone() {
+                                if let Some(message_id) = streaming_state.message_id.clone() {
                                     let edit_result = {
                                         let guard = channel.lock().await;
                                         guard.edit_message(&recipient, &message_id, &stream_text).await
@@ -379,8 +454,8 @@ impl ChannelBridge {
                                             "Failed to finalize streaming message at max length"
                                         );
                                     } else {
-                                        last_edited_text = stream_text.clone();
-                                        last_edit_time = Some(Instant::now());
+                                        streaming_state.last_edited_text = stream_text.clone();
+                                        streaming_state.last_edit_time = Some(Instant::now());
                                     }
                                 }
 
@@ -388,9 +463,12 @@ impl ChannelBridge {
                                 if !overflow.is_empty() {
                                     pending_text.push_str(&overflow);
                                 }
-                            } else if !stream_overflow_mode && stream_text != last_edited_text {
+                            } else if !streaming_state.overflow_mode
+                                && stream_text != streaming_state.last_edited_text
+                            {
                                 let now = Instant::now();
-                                let should_edit = last_edit_time
+                                let should_edit = streaming_state
+                                    .last_edit_time
                                     .map(|last| {
                                         now.duration_since(last)
                                             >= Duration::from_millis(Self::DEFAULT_STREAM_THROTTLE_MS)
@@ -398,7 +476,7 @@ impl ChannelBridge {
                                     .unwrap_or(true);
 
                                 if should_edit {
-                                    if let Some(message_id) = streaming_message_id.clone() {
+                                    if let Some(message_id) = streaming_state.message_id.clone() {
                                         let edit_result = {
                                             let guard = channel.lock().await;
                                             guard.edit_message(&recipient, &message_id, &stream_text).await
@@ -411,12 +489,12 @@ impl ChannelBridge {
                                                 "Failed to stream-edit channel response"
                                             );
                                         } else {
-                                            last_edited_text = stream_text;
-                                            last_edit_time = Some(now);
+                                            streaming_state.last_edited_text = stream_text;
+                                            streaming_state.last_edit_time = Some(now);
                                         }
                                     }
                                 }
-                            } else if stream_overflow_mode {
+                            } else if streaming_state.overflow_mode {
                                 pending_text.push_str(&delta);
                             }
                         } else {
@@ -434,79 +512,7 @@ impl ChannelBridge {
                         }
                     }
                     ThreadEvent::TurnCompleted { .. } | ThreadEvent::ThreadCompleted { .. } => {
-                        if stream_supported == Some(true)
-                            && !stream_overflow_mode
-                            && streaming_message_id.is_some()
-                        {
-                            let Some(channel) = streaming_channel.as_ref().cloned() else {
-                                ChannelBridge::flush_pending_response(
-                                    &session_id,
-                                    &mut pending_text,
-                                    &channels,
-                                    &session_routes,
-                                )
-                                .await;
-                                continue;
-                            };
-                            let Some(recipient) = streaming_recipient.clone() else {
-                                ChannelBridge::flush_pending_response(
-                                    &session_id,
-                                    &mut pending_text,
-                                    &channels,
-                                    &session_routes,
-                                )
-                                .await;
-                                continue;
-                            };
-                            let Some(message_id) = streaming_message_id.clone() else {
-                                ChannelBridge::flush_pending_response(
-                                    &session_id,
-                                    &mut pending_text,
-                                    &channels,
-                                    &session_routes,
-                                )
-                                .await;
-                                continue;
-                            };
-                            let Some(capabilities) = streaming_capabilities.clone() else {
-                                ChannelBridge::flush_pending_response(
-                                    &session_id,
-                                    &mut pending_text,
-                                    &channels,
-                                    &session_routes,
-                                )
-                                .await;
-                                continue;
-                            };
-
-                            let adapted_text =
-                                adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
-                            if !adapted_text.is_empty() {
-                                let truncated_len = floor_char_boundary(
-                                    &adapted_text,
-                                    capabilities.max_message_length,
-                                );
-                                let final_stream_text = &adapted_text[..truncated_len];
-                                if final_stream_text != last_edited_text {
-                                    let edit_result = {
-                                        let guard = channel.lock().await;
-                                        guard
-                                            .edit_message(&recipient, &message_id, final_stream_text)
-                                            .await
-                                    };
-
-                                    if let Err(e) = edit_result {
-                                        error!(
-                                            session_id = %session_id,
-                                            error = %e,
-                                            "Failed to send final stream edit"
-                                        );
-                                    } else {
-                                        last_edited_text = final_stream_text.to_string();
-                                    }
-                                }
-                            }
-                        }
+                        let _ = streaming_state.try_final_edit(&session_id).await;
 
                         ChannelBridge::flush_pending_response(
                             &session_id,
@@ -537,40 +543,7 @@ impl ChannelBridge {
                 }
             }
 
-            if stream_supported == Some(true)
-                && !stream_overflow_mode
-                && streaming_message_id.is_some()
-            {
-                if let (Some(channel), Some(recipient), Some(message_id), Some(capabilities)) = (
-                    streaming_channel,
-                    streaming_recipient,
-                    streaming_message_id,
-                    streaming_capabilities,
-                ) {
-                    let adapted_text =
-                        adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
-                    if !adapted_text.is_empty() {
-                        let truncated_len =
-                            floor_char_boundary(&adapted_text, capabilities.max_message_length);
-                        let final_stream_text = &adapted_text[..truncated_len];
-                        if final_stream_text != last_edited_text {
-                            let edit_result = {
-                                let guard = channel.lock().await;
-                                guard
-                                    .edit_message(&recipient, &message_id, final_stream_text)
-                                    .await
-                            };
-                            if let Err(e) = edit_result {
-                                error!(
-                                    session_id = %session_id,
-                                    error = %e,
-                                    "Failed to send terminal stream edit"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            let _ = streaming_state.try_final_edit(&session_id).await;
 
             ChannelBridge::flush_pending_response(
                 &session_id,
@@ -1111,6 +1084,28 @@ mod tests {
             if Instant::now() >= deadline {
                 panic!(
                     "timed out waiting for {expected_count} sent message(s), got {}",
+                    messages.len()
+                );
+            }
+
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    async fn wait_for_edited_message_count(
+        edited_messages: &Arc<Mutex<Vec<(String, String, String)>>>,
+        expected_count: usize,
+    ) -> Vec<(String, String, String)> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let messages = edited_messages.lock().unwrap().clone();
+            if messages.len() >= expected_count {
+                return messages;
+            }
+
+            if Instant::now() >= deadline {
+                panic!(
+                    "timed out waiting for {expected_count} edited message(s), got {}",
                     messages.len()
                 );
             }
@@ -1701,6 +1696,10 @@ mod tests {
             self.sent_messages.clone()
         }
 
+        fn edited_messages_shared(&self) -> Arc<Mutex<Vec<(String, String, String)>>> {
+            self.edited_messages.clone()
+        }
+
     }
 
     #[async_trait]
@@ -1767,6 +1766,137 @@ mod tests {
         fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
             self.message_rx.take()
         }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_edits_message_progressively() {
+        let sm = test_session_manager_with_mock_client(
+            MockModelClient::new("unused")
+                .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+        );
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Telegram,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: true,
+                supports_streaming: true,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+        let edited_messages = channel.edited_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+        let edits = wait_for_edited_message_count(&edited_messages, 1).await;
+
+        assert!(!sent.is_empty());
+        assert!(!edits.is_empty());
+        assert!(edits.last().unwrap().2.contains("Hello world!"));
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_streaming_overflow_sends_new_message() {
+        let long_delta = "A".repeat(5000);
+        let sm = test_session_manager_with_mock_client(
+            MockModelClient::new("unused").with_stream_deltas(vec![long_delta.clone()]),
+        );
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Telegram,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: true,
+                supports_streaming: true,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 2).await;
+        assert!(sent.len() >= 2);
+        assert!(sent[0].content.len() <= 4096);
+
+        let overflow_content: String = sent
+            .iter()
+            .skip(1)
+            .map(|msg| msg.content.as_str())
+            .collect();
+        let expected_overflow = long_delta[4096..].to_string();
+        assert!(overflow_content.contains(&expected_overflow));
+
+        bridge.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_non_streaming_channel_falls_back_to_legacy() {
+        let sm = test_session_manager_with_mock_client(
+            MockModelClient::new("unused")
+                .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+        );
+        let mut bridge = ChannelBridge::new(sm);
+
+        let channel = CapabilityMockChannel::new(
+            ChannelType::Slack,
+            ChannelCapabilities {
+                max_message_length: 4096,
+                supports_markdown: true,
+                supports_streaming: false,
+            },
+        );
+        let tx = channel.sender();
+        let sent_messages = channel.sent_messages_shared();
+        let edited_messages = channel.edited_messages_shared();
+
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
+
+        tx.send(make_channel_message(
+            "user1",
+            "hello",
+            ChannelType::Slack,
+        ))
+        .await
+        .unwrap();
+
+        let sent = wait_for_sent_message_count(&sent_messages, 1).await;
+        assert!(!sent.is_empty());
+        sleep(Duration::from_millis(100)).await;
+        assert!(edited_messages.lock().unwrap().is_empty());
+
+        bridge.stop().await;
     }
 
     #[tokio::test]

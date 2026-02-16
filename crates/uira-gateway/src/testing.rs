@@ -235,6 +235,9 @@ impl Channel for MockChannel {
         response: ChannelResponse,
     ) -> Result<Option<String>, ChannelError> {
         self.sent_messages.lock().unwrap().push(response);
+        if !self.capabilities().supports_streaming {
+            return Ok(None);
+        }
         let id = self.next_message_id.fetch_add(1, Ordering::SeqCst);
         Ok(Some(id.to_string()))
     }
