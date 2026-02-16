@@ -2,23 +2,18 @@
 resolver = "2"
 members = [
   "crates/uira-commit-hook-cli",
-  "crates/uira-napi",
   "crates/uira-orchestration",
   "crates/uira-comment-checker",
-  "crates/uira-hooks",
   "crates/uira-core",
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
-# New agent harness crates
-"crates/uira-types",
-"crates/uira-providers",
-"crates/uira-sandbox",
-"crates/uira-agent",
-"crates/uira-permissions",
-    "crates/uira-cli",
-    "crates/uira-tui",
-    "crates/uira-gateway",
+  "crates/uira-providers",
+  "crates/uira-security",
+  "crates/uira-agent",
+  "crates/uira-cli",
+  "crates/uira-tui",
+  "crates/uira-gateway",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -29,12 +24,10 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
-uira-types = { path = "crates/uira-types" }
 uira-core = { path = "crates/uira-core" }
 
 # Internal crates - Features
 uira-orchestration = { path = "crates/uira-orchestration" }
-uira-hooks = { path = "crates/uira-hooks" }
 
 # Internal crates - Tools
 uira-mcp-client = { path = "crates/uira-mcp-client" }
@@ -43,15 +36,13 @@ uira-comment-checker = { path = "crates/uira-comment-checker" }
 
 # Internal crates - Agent harness
 uira-providers = { path = "crates/uira-providers" }
-uira-sandbox = { path = "crates/uira-sandbox" }
+uira-security = { path = "crates/uira-security" }
 uira-agent = { path = "crates/uira-agent" }
-uira-permissions = { path = "crates/uira-permissions" }
 
 # Internal crates - Applications
 uira-cli = { path = "crates/uira-cli" }
 uira-tui = { path = "crates/uira-tui" }
 uira-mcp-server = { path = "crates/uira-mcp-server" }
-uira-napi = { path = "crates/uira-napi" }
 
 # Internal crates - Expansion (gateway, channels, skills)
 uira-gateway = { path = "crates/uira-gateway" }

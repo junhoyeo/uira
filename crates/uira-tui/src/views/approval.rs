@@ -14,7 +14,7 @@ use ratatui::{
     Frame,
 };
 use tokio::sync::oneshot;
-use uira_types::ReviewDecision;
+use uira_core::ReviewDecision;
 
 use crate::Theme;
 

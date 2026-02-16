@@ -1007,22 +1007,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctor"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "424e0138278faeb2b401f174ad17e715c829512d74f3d1e81eb43365c2e0590e"
-dependencies = [
- "ctor-proc-macro",
- "dtor",
-]
-
-[[package]]
-name = "ctor-proc-macro"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
-
-[[package]]
 name = "darling"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1260,21 +1244,6 @@ name = "dragonbox_ecma"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd8e701084c37e7ef62d3f9e453b618130cbc0ef3573847785952a3ac3f746bf"
-
-[[package]]
-name = "dtor"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "404d02eeb088a82cfd873006cb713fe411306c7d182c344905e101fb1167d301"
-dependencies = [
- "dtor-proc-macro",
-]
-
-[[package]]
-name = "dtor-proc-macro"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f678cf4a922c215c63e0de95eb1ff08a958a81d47e485cf9da1e27bf6305cfa5"
 
 [[package]]
 name = "either"
@@ -2308,16 +2277,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "459427e2af2b9c839b132acb702a1c654d95e10f8c326bfc2ad11310e458b1c5"
 
 [[package]]
-name = "libloading"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
-
-[[package]]
 name = "libredox"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2496,66 +2455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "napi"
-version = "3.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "909805cbad4d569e69b80e101290fe72e92b9742ba9e333b0c1e83b22fb7447b"
-dependencies = [
- "bitflags 2.10.0",
- "ctor",
- "futures",
- "napi-build",
- "napi-sys",
- "nohash-hasher",
- "rustc-hash",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "napi-build"
-version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d376940fd5b723c6893cd1ee3f33abbfd86acb1cd1ec079f3ab04a2a3bc4d3b1"
-
-[[package]]
-name = "napi-derive"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04ba21bbdf40b33496b4ee6eadfc64d17a6a6cde57cd31549117b0882d1fef86"
-dependencies = [
- "convert_case 0.10.0",
- "ctor",
- "napi-derive-backend",
- "proc-macro2",
- "quote",
- "syn 2.0.115",
-]
-
-[[package]]
-name = "napi-derive-backend"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9a63791e230572c3218a7acd86ca0a0529fc64294bcbea567cf906d7b04e077"
-dependencies = [
- "convert_case 0.10.0",
- "proc-macro2",
- "quote",
- "semver",
- "syn 2.0.115",
-]
-
-[[package]]
-name = "napi-sys"
-version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eb602b84d7c1edae45e50bbf1374696548f36ae179dfa667f577e384bb90c2b"
-dependencies = [
- "libloading",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2589,12 +2488,6 @@ dependencies = [
  "cfg_aliases",
  "libc",
 ]
-
-[[package]]
-name = "nohash-hasher"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "nom"
@@ -5696,12 +5589,9 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uira-core",
- "uira-hooks",
  "uira-orchestration",
- "uira-permissions",
  "uira-providers",
- "uira-sandbox",
- "uira-types",
+ "uira-security",
  "uuid",
 ]
 
@@ -5731,13 +5621,11 @@ dependencies = [
  "uira-agent",
  "uira-core",
  "uira-gateway",
- "uira-hooks",
  "uira-mcp-client",
  "uira-orchestration",
  "uira-providers",
- "uira-sandbox",
+ "uira-security",
  "uira-tui",
- "uira-types",
  "webbrowser",
 ]
 
@@ -5803,12 +5691,10 @@ dependencies = [
  "uira-agent",
  "uira-comment-checker",
  "uira-core",
- "uira-hooks",
  "uira-orchestration",
  "uira-oxc",
  "uira-providers",
- "uira-sandbox",
- "uira-types",
+ "uira-security",
  "unicase",
 ]
 
@@ -5827,7 +5713,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-types",
+ "uuid",
 ]
 
 [[package]]
@@ -5853,29 +5739,6 @@ dependencies = [
  "uira-core",
  "uira-orchestration",
  "uira-providers",
- "uira-types",
-]
-
-[[package]]
-name = "uira-hooks"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "lazy_static",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "uira-comment-checker",
- "uira-core",
- "uira-types",
 ]
 
 [[package]]
@@ -5918,25 +5781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-napi"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "napi",
- "napi-build",
- "napi-derive",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "tokio",
- "uira-core",
- "uira-hooks",
- "uira-orchestration",
- "uira-oxc",
- "uira-types",
-]
-
-[[package]]
 name = "uira-orchestration"
 version = "0.1.0"
 dependencies = [
@@ -5945,6 +5789,7 @@ dependencies = [
  "ast-grep-language",
  "async-trait",
  "chrono",
+ "dirs",
  "futures",
  "glob",
  "hex",
@@ -5967,11 +5812,8 @@ dependencies = [
  "tracing",
  "uira-comment-checker",
  "uira-core",
- "uira-hooks",
  "uira-mcp-client",
- "uira-permissions",
- "uira-sandbox",
- "uira-types",
+ "uira-security",
  "uuid",
  "walkdir",
 ]
@@ -5982,18 +5824,6 @@ version = "0.1.0"
 dependencies = [
  "oxc",
  "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "uira-permissions"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "globset",
  "serde",
  "serde_json",
  "tempfile",
@@ -6033,17 +5863,19 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
- "uira-types",
+ "uira-core",
  "url",
  "uuid",
  "wiremock",
 ]
 
 [[package]]
-name = "uira-sandbox"
+name = "uira-security"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "enumflags2",
+ "globset",
  "landlock",
  "nix",
  "serde",
@@ -6052,7 +5884,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-types",
+ "uira-core",
 ]
 
 [[package]]
@@ -6075,20 +5907,6 @@ dependencies = [
  "uira-agent",
  "uira-core",
  "uira-providers",
- "uira-types",
-]
-
-[[package]]
-name = "uira-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
 ]
 
 [[package]]

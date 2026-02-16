@@ -5,7 +5,7 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use uira_types::{
+use uira_core::{
     ContentBlock, ContentDelta, ImageSource, Message, MessageContent, MessageDelta, ModelResponse,
     Role, StopReason, StreamChunk, TokenUsage, ToolSpec,
 };

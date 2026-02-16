@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Paragraph, Wrap},
 };
 use std::collections::HashMap;
-use uira_types::AgentState;
+use uira_core::AgentState;
 
 use crate::widgets::{markdown::render_markdown, tool_renderers, ChatMessage};
 use crate::Theme;

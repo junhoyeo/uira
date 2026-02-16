@@ -1,0 +1,134 @@
+name: Release CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g., 0.2.0)'
+        required: true
+        type: string
+
+jobs:
+  build-cli:
+    name: Build CLI - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: uira-darwin-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary: uira-darwin-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: uira-linux-x64-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: uira-linux-arm64-gnu
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: uira-win32-x64-msvc.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cli-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: "!matrix.cross"
+        run: cargo build --release -p uira-commit-hook-cli --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release -p uira-commit-hook-cli --target ${{ matrix.target }}
+
+      - name: Rename binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli ${{ matrix.binary }}
+          strip ${{ matrix.binary }} || true
+
+      - name: Rename binary (Windows)
+        if: runner.os == 'Windows'
+        run: cp target/${{ matrix.target }}/release/uira-commit-hook-cli.exe ${{ matrix.binary }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-cli
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: cli-artifacts
+          pattern: cli-*
+
+      - name: Prepare release files
+        run: |
+          mkdir release-files
+          for dir in cli-artifacts/cli-*/; do
+            cp "$dir"* release-files/ 2>/dev/null || true
+          done
+          ls -la release-files/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ inputs.version }}
+          name: Uira v${{ inputs.version }}
+          body: |
+            ## Uira v${{ inputs.version }}
+
+            ### Installation
+
+            ```bash
+            npm install @uiradev/uira
+            ```
+
+            ### CLI Binaries
+
+            Download the appropriate binary for your platform from the assets below.
+
+            | Platform | Binary |
+            |----------|--------|
+            | macOS (ARM64) | `uira-darwin-arm64` |
+            | macOS (x64) | `uira-darwin-x64` |
+            | Linux (x64) | `uira-linux-x64-gnu` |
+            | Linux (ARM64) | `uira-linux-arm64-gnu` |
+            | Windows (x64) | `uira-win32-x64-msvc.exe` |
+          files: release-files/*
+          draft: false
+          prerelease: false

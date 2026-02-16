@@ -1,7 +1,7 @@
 //! Tests for streaming controller
 
 use uira_agent::StreamController;
-use uira_types::{ContentBlock, ContentDelta, StreamChunk, StreamMessageStart, TokenUsage};
+use uira_core::{ContentBlock, ContentDelta, StreamChunk, StreamMessageStart, TokenUsage};
 
 fn make_message_start() -> StreamChunk {
     StreamChunk::MessageStart {
@@ -306,7 +306,7 @@ fn test_usage_tracking() {
 
     // Final usage in message delta
     controller.push(StreamChunk::MessageDelta {
-        delta: uira_types::MessageDelta { stop_reason: None },
+        delta: uira_core::MessageDelta { stop_reason: None },
         usage: Some(TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
@@ -352,7 +352,7 @@ fn test_error_handling() {
 
     // Error chunk - should be logged but not break stream
     controller.push(StreamChunk::Error {
-        error: uira_types::StreamError {
+        error: uira_core::StreamError {
             r#type: "test_error".to_string(),
             message: "Test error message".to_string(),
         },

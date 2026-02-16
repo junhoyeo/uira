@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use uira_core::{ReviewDecision, SandboxPreference};
 use uira_providers::ModelClient;
-use uira_sandbox::SandboxPolicy;
-use uira_types::{ReviewDecision, SandboxPreference};
+use uira_security::SandboxPolicy;
 
 /// Per-turn immutable context
 pub struct TurnContext {

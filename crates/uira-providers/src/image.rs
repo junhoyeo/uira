@@ -1,6 +1,6 @@
 use base64::Engine;
 use std::path::Path;
-use uira_types::ImageSource;
+use uira_core::ImageSource;
 
 use crate::ProviderError;
 

@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs;
-use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use walkdir::WalkDir;
 
 use crate::tools::{Tool, ToolContext, ToolError};

@@ -6,7 +6,7 @@ use uira_agent::session::{
     extract_messages, get_last_turn, get_total_usage, EventWrapper, SessionItem, SessionMessage,
     SessionMetaLine, SessionRecorder,
 };
-use uira_types::{Message, ThreadEvent, TokenUsage};
+use uira_core::{Message, ThreadEvent, TokenUsage};
 
 fn make_test_meta() -> SessionMetaLine {
     SessionMetaLine::new(

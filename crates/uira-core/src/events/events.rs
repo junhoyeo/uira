@@ -1,6 +1,6 @@
+use crate::TokenUsage;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use uira_types::TokenUsage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -222,7 +222,7 @@ pub enum Event {
     // ============================================================================
     TodoUpdated {
         session_id: String,
-        todos: Vec<uira_types::TodoItem>,
+        todos: Vec<crate::TodoItem>,
     },
 
     // ============================================================================

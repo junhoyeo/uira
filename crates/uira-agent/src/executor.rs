@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use uira_orchestration::AgentExecutor;
 use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
-use uira_types::{Provider, ThreadEvent};
+use uira_core::{Provider, ThreadEvent};
 
 use crate::{Agent, AgentConfig, EventSender};
 

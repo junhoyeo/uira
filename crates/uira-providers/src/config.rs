@@ -1,7 +1,7 @@
 //! Provider configuration
 
 use secrecy::SecretString;
-use uira_types::Provider;
+use uira_core::Provider;
 
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-20250514";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";

@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod features;
+pub mod hooks;
 pub mod sdk;
 pub mod tools;
 
@@ -15,12 +16,16 @@ pub use agents::{
 };
 pub use features::{background_agent, model_routing, uira_state};
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
+pub use hooks::{
+    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
+    HookRegistry, VerificationResult,
+};
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,
     AgentTierOverride, AgentsConfig, BackgroundTask, Context7Config, ExaConfig, FeaturesConfig,
-    HookContext, HookEvent, HookResult, MagicKeywordsConfig, McpServerConfig, McpServersConfig,
-    PermissionsConfig, PluginConfig, QueryOptions, RoutingConfig, SdkError, SdkResult,
-    SessionOptions, SessionState, TaskStatus, TierModelsConfig, UiraSession,
+    MagicKeywordsConfig, McpServerConfig, McpServersConfig, PermissionsConfig, PluginConfig,
+    QueryOptions, RoutingConfig, SdkError, SdkResult, SessionOptions, SessionState, TaskStatus,
+    TierModelsConfig, UiraSession,
 };
 pub use tools::{
     builtin_tools, create_builtin_router, register_builtins, register_builtins_with_todos,

@@ -3,7 +3,7 @@
 //! Provides bi-directional approval communication between Agent and TUI.
 
 use tokio::sync::{mpsc, oneshot};
-use uira_types::ReviewDecision;
+use uira_core::ReviewDecision;
 
 /// A pending approval request that the agent is waiting on
 #[derive(Debug)]

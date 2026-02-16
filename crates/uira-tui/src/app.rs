@@ -33,8 +33,8 @@ use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
 };
-use uira_types::Provider;
-use uira_types::{
+use uira_core::Provider;
+use uira_core::{
     AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
     TodoItem, TodoPriority, TodoStatus,
 };

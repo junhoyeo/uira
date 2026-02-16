@@ -21,14 +21,11 @@ When updating AGENTS.md files, follow these principles:
 
 | Crate | Purpose |
 |-------|---------|
-| `uira-types` | Shared types, events, protocol definitions |
-| `uira-core` | Configuration loading, event system |
-| `uira-permissions` | Permission management and access control |
+| `uira-core` | Shared types, events, protocol definitions, configuration loading, event system |
 | `uira-agent` | Core agent loop, state machine, streaming, context management, telemetry |
 | `uira-providers` | Model provider clients (Anthropic, OpenAI, Gemini, Ollama) with OAuth auth |
-| `uira-sandbox` | Platform-native sandboxing (macOS/Linux) |
-| `uira-orchestration` | Agent definitions, SDK, features, tool registry |
-| `uira-hooks` | Hook implementations and goal verification |
+| `uira-security` | Platform-native sandboxing (macOS/Linux) + permission management and access control |
+| `uira-orchestration` | Agent definitions, SDK, features, tool registry, hook implementations, goal verification |
 | `uira-mcp-client` | MCP client for external MCP servers |
 | `uira-mcp-server` | MCP server with LSP and AST-grep tools |
 | `uira-oxc` | OXC-powered JavaScript/TypeScript tooling |
@@ -37,7 +34,6 @@ When updating AGENTS.md files, follow these principles:
 | `uira-cli` | CLI entry point with session management |
 | `uira-tui` | Ratatui-based terminal interface |
 | `uira-commit-hook-cli` | Standalone CLI for git hooks and dev tools |
-| `uira-napi` | Node.js native addon bindings |
 
 ## Issue Labels
 

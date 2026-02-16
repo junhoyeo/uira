@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use uira_core::load_config;
-use uira_types::{JsonSchema, ToolOutput, ToolSpec};
+use uira_core::{JsonSchema, ToolOutput, ToolSpec};
 
 static BACKGROUND_MANAGER: Lazy<Arc<BackgroundManager>> =
     Lazy::new(|| get_background_manager(BackgroundTaskConfig::default()));

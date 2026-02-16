@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::Path;
 use tokio::fs;
-use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 

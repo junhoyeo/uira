@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use uira_agent::session::{extract_messages, SessionItem};
 use uira_agent::SessionRecorder;
-use uira_types::Message;
+use uira_core::Message;
 
 pub struct SessionEntry {
     pub thread_id: String,
@@ -54,7 +54,7 @@ pub fn summarize_session(items: &[SessionItem]) -> String {
     extract_messages(items)
         .into_iter()
         .find_map(|msg| {
-            if msg.role == uira_types::Role::User {
+            if msg.role == uira_core::Role::User {
                 msg.content.as_text().map(str::to_string)
             } else {
                 None

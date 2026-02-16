@@ -1286,7 +1286,7 @@ goals:
             Ok(())
         }
         GoalsCommands::Check { name } => {
-            let runner = uira_hooks::GoalRunner::new(&cwd);
+            let runner = uira_orchestration::GoalRunner::new(&cwd);
 
             let goals_to_check: Vec<_> = if let Some(ref n) = name {
                 goals.iter().filter(|g| g.name == *n).cloned().collect()
@@ -1339,7 +1339,7 @@ goals:
             interval,
             max_iterations,
         } => {
-            let runner = uira_hooks::GoalRunner::new(&cwd);
+            let runner = uira_orchestration::GoalRunner::new(&cwd);
 
             println!("{}", "⚡ Watching Goals".bold());
             println!(
@@ -1348,7 +1348,7 @@ goals:
             );
             println!();
 
-            let options = uira_hooks::VerifyOptions {
+            let options = uira_orchestration::hooks::VerifyOptions {
                 check_interval_secs: interval,
                 max_iterations,
                 max_duration: None,

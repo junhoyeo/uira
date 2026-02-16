@@ -7,9 +7,8 @@ use uira_core::schema::{
     CompactionSettings, GoalConfig, NamedMcpServerConfig, PermissionActionConfig,
     PermissionRuleConfig,
 };
-use uira_permissions::{ConfigAction, ConfigRule};
-use uira_sandbox::SandboxPolicy;
-use uira_types::{SandboxPreference, ToolSpec};
+use uira_core::{SandboxPreference, ToolSpec};
+use uira_security::{ConfigAction, ConfigRule, SandboxPolicy};
 
 /// Configuration for the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
