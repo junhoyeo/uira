@@ -224,15 +224,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_scroll_bindings_use_arrow_keys_only() {
+    fn test_default_scroll_bindings_empty() {
         let keybinds = KeybindConfig::default();
-
-        assert_eq!(keybinds.scroll_up.len(), 1);
-        assert_eq!(keybinds.scroll_up[0].code, KeyCode::Up);
-        assert_eq!(keybinds.scroll_up[0].modifiers, KeyModifiers::empty());
-
-        assert_eq!(keybinds.scroll_down.len(), 1);
-        assert_eq!(keybinds.scroll_down[0].code, KeyCode::Down);
-        assert_eq!(keybinds.scroll_down[0].modifiers, KeyModifiers::empty());
+        assert!(keybinds.scroll_up.is_empty());
+        assert!(keybinds.scroll_down.is_empty());
     }
 }
