@@ -24,7 +24,7 @@ use crate::{
     rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
     streaming::StreamController,
     AgentCommand, AgentConfig, AgentControl, AgentLoopError, BranchInfo, CommandReceiver,
-    CommandSender, ForkResult, Session,
+    CommandSender, ForkResult, Session, SwitchBranchResult,
 };
 
 /// Timeout for approval requests (5 minutes)
@@ -529,14 +529,18 @@ impl Agent {
         })
     }
 
-    fn handle_switch_branch(&mut self, branch_name: String) -> Result<String, String> {
+    fn handle_switch_branch(&mut self, branch_name: String) -> Result<SwitchBranchResult, String> {
         let branch_name = branch_name.trim().to_string();
         if branch_name.is_empty() {
             return Err("Branch name cannot be empty".to_string());
         }
 
         if branch_name == self.current_branch {
-            return Ok(format!("Already on branch '{}'", branch_name));
+            return Ok(SwitchBranchResult {
+                branch_name,
+                session_id: self.session.id.to_string(),
+                message: format!("Already on branch '{}'", self.current_branch),
+            });
         }
 
         let target = self
@@ -557,10 +561,11 @@ impl Agent {
             },
         );
 
-        Ok(format!(
-            "Switched to branch '{}' (session {})",
-            branch_name, self.session.id
-        ))
+        Ok(SwitchBranchResult {
+            branch_name: branch_name.clone(),
+            session_id: self.session.id.to_string(),
+            message: format!("Switched to branch '{}' (session {})", branch_name, self.session.id),
+        })
     }
 
     fn list_branches(&self) -> Vec<BranchInfo> {

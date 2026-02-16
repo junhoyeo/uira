@@ -11,6 +11,7 @@ pub enum AppEvent {
     TodoUpdated(Vec<TodoItem>),
     Info(String),
     BranchChanged(String),
+    SessionChanged(String),
     Redraw,
     Quit,
     Error(String),

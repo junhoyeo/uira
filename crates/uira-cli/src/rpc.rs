@@ -709,7 +709,7 @@ async fn handle_session_create(
     }
 
     match tokio::time::timeout(Duration::from_secs(5), switch_response_rx).await {
-        Ok(Ok(Ok(_))) => {}
+        Ok(Ok(Ok(_result))) => {}
         Ok(Ok(Err(message))) => {
             return writer
                 .send_error(Some(id), SERVER_ERROR, message, None)

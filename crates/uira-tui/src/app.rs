@@ -2974,6 +2974,9 @@ impl App {
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
             }
+            AppEvent::SessionChanged(session_id) => {
+                self.session_id = Some(session_id);
+            }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
                 self.status = format!("Error: {}", msg);
@@ -3493,11 +3496,14 @@ impl App {
                 }
 
                 match response_rx.await {
-                    Ok(Ok(message)) => {
+                    Ok(Ok(result)) => {
                         let _ = event_tx
-                            .send(AppEvent::BranchChanged(branch_name.clone()))
+                            .send(AppEvent::BranchChanged(result.branch_name.clone()))
                             .await;
-                        let _ = event_tx.send(AppEvent::Info(message)).await;
+                        let _ = event_tx
+                            .send(AppEvent::SessionChanged(result.session_id))
+                            .await;
+                        let _ = event_tx.send(AppEvent::Info(result.message)).await;
                     }
                     Ok(Err(e)) => {
                         let _ = event_tx
@@ -3544,6 +3550,9 @@ impl App {
                         if let Some(current) = branches.iter().find(|b| b.is_current) {
                             let _ = event_tx
                                 .send(AppEvent::BranchChanged(current.name.clone()))
+                                .await;
+                            let _ = event_tx
+                                .send(AppEvent::SessionChanged(current.session_id.clone()))
                                 .await;
                         }
 
