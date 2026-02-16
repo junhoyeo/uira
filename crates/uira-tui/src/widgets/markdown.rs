@@ -142,6 +142,48 @@ pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'sta
                     );
                     style_stack.push(next);
                 }
+                Tag::List(_) => {
+                    // Start a list - we'll track list depth if needed
+                    builder.finish_line();
+                }
+                Tag::Item => {
+                    // Start a list item
+                    builder.push_text("• ", current_style(&style_stack));
+                }
+                Tag::Heading { level, .. } => {
+                    builder.finish_line();
+                    let heading_style = match level {
+                        pulldown_cmark::HeadingLevel::H1 => current_style(&style_stack).patch(
+                            Style::default()
+                                .fg(theme.md_strong)
+                                .add_modifier(Modifier::BOLD)
+                        ),
+                        pulldown_cmark::HeadingLevel::H2 => current_style(&style_stack).patch(
+                            Style::default()
+                                .fg(theme.md_strong)
+                                .add_modifier(Modifier::BOLD)
+                        ),
+                        _ => current_style(&style_stack).patch(
+                            Style::default()
+                                .add_modifier(Modifier::BOLD)
+                        ),
+                    };
+                    style_stack.push(heading_style);
+                    
+                    // Add heading prefix
+                    let prefix = "#".repeat(level as usize);
+                    builder.push_text(&format!("{} ", prefix), heading_style);
+                }
+                Tag::Paragraph => {
+                    // No special handling needed for paragraph start
+                }
+                Tag::BlockQuote(_) => {
+                    builder.finish_line();
+                    let quote_style = current_style(&style_stack).patch(
+                        Style::default().fg(theme.borders)
+                    );
+                    style_stack.push(quote_style);
+                }
                 Tag::CodeBlock(kind) => {
                     let language = match kind {
                         CodeBlockKind::Fenced(info) => {
@@ -163,13 +205,26 @@ pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'sta
                 _ => {}
             },
             Event::End(tag_end) => match tag_end {
-                TagEnd::Strong | TagEnd::Emphasis => {
+                TagEnd::Strong | TagEnd::Emphasis | TagEnd::Heading { .. } => {
                     if style_stack.len() > 1 {
                         style_stack.pop();
                     }
                 }
-                TagEnd::Paragraph | TagEnd::Heading { .. } => builder.finish_line(),
-                TagEnd::Item => builder.finish_line(),
+                TagEnd::Paragraph => builder.finish_line(),
+                TagEnd::Item => {
+                    // Finish the current line for list item
+                    builder.finish_line();
+                }
+                TagEnd::List(_) => {
+                    // End of list - add spacing
+                    builder.finish_line();
+                }
+                TagEnd::BlockQuote(_) => {
+                    if style_stack.len() > 1 {
+                        style_stack.pop();
+                    }
+                    builder.finish_line();
+                }
                 _ => {}
             },
             Event::Text(content) => builder.push_text(&content, current_style(&style_stack)),
@@ -328,6 +383,63 @@ mod tests {
             span.content.contains("let x = 1;") && span.style.bg == Some(theme.md_code_bg)
         });
         assert!(has_code_bg);
+    }
+
+    #[test]
+    fn renders_unordered_list_items() {
+        let theme = Theme::default();
+        let lines = render_markdown("- Item 1\n- Item 2\n- Item 3", 80, &theme);
+        
+        // Check that we have bullets
+        let has_bullets = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("•")
+        });
+        assert!(has_bullets);
+        
+        // Check that we have the content
+        let has_items = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("Item 1") || span.content.contains("Item 2") || span.content.contains("Item 3")
+        });
+        assert!(has_items);
+    }
+    
+    #[test]
+    fn renders_ordered_list_items() {
+        let theme = Theme::default();
+        let lines = render_markdown("1. First\n2. Second\n3. Third", 80, &theme);
+        
+        // Check that we have bullets (we use • for all lists for simplicity in TUI)
+        let has_bullets = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("•")
+        });
+        assert!(has_bullets);
+    }
+    
+    #[test]
+    fn renders_headings_with_hash_prefix() {
+        let theme = Theme::default();
+        let lines = render_markdown("# Heading 1\n## Heading 2", 80, &theme);
+        
+        let has_h1 = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("# Heading 1") && span.style.add_modifier.contains(Modifier::BOLD)
+        });
+        assert!(has_h1);
+        
+        let has_h2 = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("## Heading 2") && span.style.add_modifier.contains(Modifier::BOLD)
+        });
+        assert!(has_h2);
+    }
+    
+    #[test]
+    fn renders_blockquotes() {
+        let theme = Theme::default();
+        let lines = render_markdown("> This is a quote", 80, &theme);
+        
+        let has_quote_styling = lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content.contains("This is a quote") && span.style.fg == Some(theme.borders)
+        });
+        assert!(has_quote_styling);
     }
 
     #[test]
