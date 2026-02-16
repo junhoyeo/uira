@@ -63,6 +63,13 @@ pub struct ForkResult {
     pub parent_branch: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SwitchBranchResult {
+    pub branch_name: String,
+    pub session_id: String,
+    pub message: String,
+}
+
 pub enum AgentCommand {
     Interrupt,
     SwitchClient(Arc<dyn ModelClient>),
@@ -73,7 +80,7 @@ pub enum AgentCommand {
     },
     SwitchBranch {
         branch_name: String,
-        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+        response_tx: tokio::sync::oneshot::Sender<Result<SwitchBranchResult, String>>,
     },
     ListBranches {
         response_tx: tokio::sync::oneshot::Sender<Result<Vec<BranchInfo>, String>>,

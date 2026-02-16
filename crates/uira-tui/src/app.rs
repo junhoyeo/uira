@@ -200,13 +200,21 @@ fn is_valid_commit_reference(target: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_git_command(args: &[&str]) -> Result<String, String> {
+fn run_git_command(args: &[&str], working_directory: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-c")
         .arg("core.quotePath=false")
         .args(args)
+        .current_dir(working_directory)
         .output()
-        .map_err(|err| format!("Failed to run `git {}`: {}", args.join(" "), err))?;
+        .map_err(|err| {
+            format!(
+                "Failed to run `git {}` in `{}`: {}",
+                args.join(" "),
+                working_directory,
+                err
+            )
+        })?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout)
@@ -346,11 +354,14 @@ fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String 
     out.trim_end().to_string()
 }
 
-fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>), String> {
+fn collect_review_content(
+    target: &ReviewTarget,
+    working_directory: &str,
+) -> Result<(String, Vec<String>), String> {
     match target {
         ReviewTarget::Staged => {
-            let diff = run_git_command(&["diff", "--staged", "--no-color"])?;
-            let numstat = run_git_command(&["diff", "--staged", "--numstat"])?;
+            let diff = run_git_command(&["diff", "--staged", "--no-color"], working_directory)?;
+            let numstat = run_git_command(&["diff", "--staged", "--numstat"], working_directory)?;
             let binary_paths = parse_binary_paths(&numstat);
             let filtered = filter_binary_sections(&diff, &binary_paths);
             let mut skipped: Vec<String> = binary_paths.into_iter().collect();
@@ -358,10 +369,17 @@ fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>)
             Ok((filtered, skipped))
         }
         ReviewTarget::File(path) => {
-            let staged = run_git_command(&["diff", "--staged", "--no-color", "--", path])?;
-            let unstaged = run_git_command(&["diff", "--no-color", "--", path])?;
-            let staged_numstat = run_git_command(&["diff", "--staged", "--numstat", "--", path])?;
-            let unstaged_numstat = run_git_command(&["diff", "--numstat", "--", path])?;
+            let staged = run_git_command(
+                &["diff", "--staged", "--no-color", "--", path],
+                working_directory,
+            )?;
+            let unstaged = run_git_command(&["diff", "--no-color", "--", path], working_directory)?;
+            let staged_numstat = run_git_command(
+                &["diff", "--staged", "--numstat", "--", path],
+                working_directory,
+            )?;
+            let unstaged_numstat =
+                run_git_command(&["diff", "--numstat", "--", path], working_directory)?;
 
             let mut chunks = Vec::new();
             if !staged.is_empty() {
@@ -380,8 +398,14 @@ fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>)
             Ok((filtered, skipped))
         }
         ReviewTarget::Revision(revision) => {
-            let diff = run_git_command(&["show", "--no-color", "--patch", revision])?;
-            let numstat = run_git_command(&["show", "--numstat", "--format=", revision])?;
+            let diff = run_git_command(
+                &["show", "--no-color", "--patch", revision],
+                working_directory,
+            )?;
+            let numstat = run_git_command(
+                &["show", "--numstat", "--format=", revision],
+                working_directory,
+            )?;
             let binary_paths = parse_binary_paths(&numstat);
             let filtered = filter_binary_sections(&diff, &binary_paths);
             let mut skipped: Vec<String> = binary_paths.into_iter().collect();
@@ -653,11 +677,9 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
             .as_deref()
             .map(|p| format!(" (from {})", p))
             .unwrap_or_default();
-        let short_id = branch.session_id.get(..8).unwrap_or(&branch.session_id);
-
         lines.push(format!(
             "{} {} -> {}{}",
-            marker, branch.name, short_id, parent
+            marker, branch.name, branch.session_id, parent
         ));
     }
 
@@ -813,6 +835,7 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     session_id: Option<String>,
+    working_directory: String,
     current_branch: String,
     pub session_stack: SessionStack,
     pub task_registry: BackgroundTaskRegistry,
@@ -1008,6 +1031,10 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             session_id: None,
+            working_directory: std::env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             current_branch: "main".to_string(),
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
@@ -1124,6 +1151,7 @@ impl App {
                     .to_string_lossy()
                     .to_string()
             });
+        self.working_directory = working_directory.clone();
 
         let mut event_system = uira_agent::create_event_system(working_directory);
         event_system.start();
@@ -1480,6 +1508,16 @@ impl App {
                 format!("  Branch: {}", self.current_branch),
                 Style::default().fg(self.theme.fg),
             )));
+            lines.push(Line::from(Span::styled(
+                format!("  CWD: {}", self.working_directory),
+                Style::default().fg(self.theme.fg),
+            )));
+            if let Some(ref session_id) = self.session_id {
+                lines.push(Line::from(Span::styled(
+                    format!("  Session: {}", session_id),
+                    Style::default().fg(self.theme.fg),
+                )));
+            }
             let token_info = self.status.clone();
             if token_info.contains("tokens") {
                 lines.push(Line::from(Span::styled(
@@ -1949,10 +1987,10 @@ impl App {
         
         // Skip Context content if expanded
         if self.sidebar_sections[0] {
-            let context_lines = 3; // Model, Branch, and possibly token info
-            let token_info = self.status.clone();
-            let extra_lines = if token_info.contains("tokens") { 1 } else { 0 };
-            current_line += context_lines + extra_lines + 1; // +1 for blank line
+            let context_lines = 3;
+            let session_lines = usize::from(self.session_id.is_some());
+            let token_lines = usize::from(self.status.contains("tokens"));
+            current_line += context_lines + session_lines + token_lines + 1; // +1 for blank line
         }
         
         // Section 2: MCP header
@@ -2722,7 +2760,7 @@ impl App {
         }
     }
 
-    fn resolve_image_path(raw_path: &str) -> Result<PathBuf, String> {
+    fn resolve_image_path(raw_path: &str, working_directory: &str) -> Result<PathBuf, String> {
         let path = raw_path.trim();
         if path.is_empty() {
             return Err("empty path".to_string());
@@ -2745,9 +2783,7 @@ impl App {
         let absolute = if expanded.is_absolute() {
             expanded
         } else {
-            std::env::current_dir()
-                .map_err(|e| format!("failed to read current directory: {}", e))?
-                .join(expanded)
+            PathBuf::from(working_directory).join(expanded)
         };
 
         if !absolute.exists() {
@@ -2812,7 +2848,7 @@ impl App {
     }
 
     fn attach_image_from_path(&self, raw_path: &str) -> Result<PendingImage, String> {
-        let path = Self::resolve_image_path(raw_path)?;
+        let path = Self::resolve_image_path(raw_path, &self.working_directory)?;
         Self::load_pending_image(&path)
     }
 
@@ -2890,7 +2926,7 @@ impl App {
         };
         let target_description = target.description();
 
-        let (content, skipped_binary) = match collect_review_content(&target) {
+        let (content, skipped_binary) = match collect_review_content(&target, &self.working_directory) {
             Ok(content) => content,
             Err(err) => {
                 self.chat_view
@@ -3247,6 +3283,9 @@ impl App {
             }
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
+            }
+            AppEvent::SessionChanged(session_id) => {
+                self.session_id = Some(session_id);
             }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {
@@ -3767,11 +3806,14 @@ impl App {
                 }
 
                 match response_rx.await {
-                    Ok(Ok(message)) => {
+                    Ok(Ok(result)) => {
                         let _ = event_tx
-                            .send(AppEvent::BranchChanged(branch_name.clone()))
+                            .send(AppEvent::BranchChanged(result.branch_name.clone()))
                             .await;
-                        let _ = event_tx.send(AppEvent::Info(message)).await;
+                        let _ = event_tx
+                            .send(AppEvent::SessionChanged(result.session_id))
+                            .await;
+                        let _ = event_tx.send(AppEvent::Info(result.message)).await;
                     }
                     Ok(Err(e)) => {
                         let _ = event_tx
@@ -3818,6 +3860,9 @@ impl App {
                         if let Some(current) = branches.iter().find(|b| b.is_current) {
                             let _ = event_tx
                                 .send(AppEvent::BranchChanged(current.name.clone()))
+                                .await;
+                            let _ = event_tx
+                                .send(AppEvent::SessionChanged(current.session_id.clone()))
                                 .await;
                         }
 
