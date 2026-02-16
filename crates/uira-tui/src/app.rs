@@ -2069,6 +2069,15 @@ impl App {
                     self.command_palette.open();
                     return KeyAction::None;
                 }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.toggle_sidebar,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
+                    self.toggle_todo_sidebar();
+                    return KeyAction::None;
+                }
                 KeyCode::Char('g') => {
                     if self.approval_overlay.is_active() {
                         self.status = "Finish approval first before opening editor".to_string();
@@ -2087,7 +2096,8 @@ impl App {
             return KeyAction::None;
         }
 
-        if key.modifiers.contains(KeyModifiers::ALT) && !self.input_focused {
+        // Alt+[/] for session sibling navigation (works even when input focused since it uses modifier)
+        if key.modifiers.contains(KeyModifiers::ALT) {
             match key.code {
                 KeyCode::Char('[') => {
                     if self.session_stack.is_in_child() {
