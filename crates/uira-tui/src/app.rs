@@ -808,6 +808,7 @@ pub struct App {
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
     session_id: Option<String>,
+    working_directory: String,
     current_branch: String,
     pub session_stack: SessionStack,
     pub task_registry: BackgroundTaskRegistry,
@@ -865,6 +866,10 @@ impl App {
             agent_command_tx: None,
             current_model: None,
             session_id: None,
+            working_directory: std::env::current_dir()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             current_branch: "main".to_string(),
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
@@ -980,6 +985,7 @@ impl App {
                     .to_string_lossy()
                     .to_string()
             });
+        self.working_directory = working_directory.clone();
 
         let mut event_system = uira_agent::create_event_system(working_directory);
         event_system.start();
@@ -1302,6 +1308,28 @@ impl App {
                 format!("  Branch: {}", self.current_branch),
                 Style::default().fg(self.theme.fg),
             )));
+            let cwd_display = if self.working_directory.len() > max_width.saturating_sub(8) {
+                format!(
+                    "…{}",
+                    &self.working_directory[self
+                        .working_directory
+                        .len()
+                        .saturating_sub(max_width.saturating_sub(9))..]
+                )
+            } else {
+                self.working_directory.clone()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  CWD: {}", cwd_display),
+                Style::default().fg(self.theme.fg),
+            )));
+            if let Some(ref session_id) = self.session_id {
+                let short_id = session_id.get(..8).unwrap_or(session_id);
+                lines.push(Line::from(Span::styled(
+                    format!("  Session: {}", short_id),
+                    Style::default().fg(self.theme.fg),
+                )));
+            }
             let token_info = self.status.clone();
             if token_info.contains("tokens") {
                 lines.push(Line::from(Span::styled(
