@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
   "crates/uira-commit-hook-cli",
-  "crates/uira-napi",
   "crates/uira-orchestration",
   "crates/uira-comment-checker",
   "crates/uira-hooks",
@@ -51,7 +50,6 @@ uira-permissions = { path = "crates/uira-permissions" }
 uira-cli = { path = "crates/uira-cli" }
 uira-tui = { path = "crates/uira-tui" }
 uira-mcp-server = { path = "crates/uira-mcp-server" }
-uira-napi = { path = "crates/uira-napi" }
 
 # Internal crates - Expansion (gateway, channels, skills)
 uira-gateway = { path = "crates/uira-gateway" }
