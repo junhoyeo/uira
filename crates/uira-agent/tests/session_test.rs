@@ -1,10 +1,10 @@
-//! Tests for session persistence (rollout system)
+//! Tests for session persistence.
 
 use std::path::PathBuf;
 use tempfile::TempDir;
-use uira_agent::rollout::{
-    extract_messages, get_last_turn, get_total_usage, EventWrapper, RolloutItem, RolloutRecorder,
-    SessionMetaLine,
+use uira_agent::session::{
+    extract_messages, get_last_turn, get_total_usage, EventWrapper, SessionItem, SessionMessage,
+    SessionMetaLine, SessionRecorder,
 };
 use uira_types::{Message, ThreadEvent, TokenUsage};
 
@@ -19,16 +19,16 @@ fn make_test_meta() -> SessionMetaLine {
 }
 
 #[test]
-fn test_rollout_item_serialization() {
+fn test_session_item_serialization() {
     // Test SessionMeta
     let meta = make_test_meta();
-    let item = RolloutItem::SessionMeta(meta.clone());
+    let item = SessionItem::SessionMeta(meta.clone());
     let json = serde_json::to_string(&item).unwrap();
     assert!(json.contains("\"type\":\"session_meta\""));
     assert!(json.contains("test-session-123"));
 
     // Test ToolCall
-    let tool_item = RolloutItem::ToolCall {
+    let tool_item = SessionItem::ToolCall {
         id: "tc_123".to_string(),
         name: "read_file".to_string(),
         input: serde_json::json!({"path": "/tmp/test.txt"}),
@@ -38,7 +38,7 @@ fn test_rollout_item_serialization() {
     assert!(json.contains("read_file"));
 
     // Test TurnContext
-    let turn_item = RolloutItem::TurnContext {
+    let turn_item = SessionItem::TurnContext {
         turn: 5,
         usage: TokenUsage {
             input_tokens: 100,
@@ -53,7 +53,7 @@ fn test_rollout_item_serialization() {
 }
 
 #[test]
-fn test_rollout_save_load() {
+fn test_session_save_load() {
     // Create a temp directory for tests
     let temp_dir = TempDir::new().unwrap();
     let meta = SessionMetaLine {
@@ -72,31 +72,30 @@ fn test_rollout_save_load() {
         fork_count: 0,
     };
 
-    // Create rollout file in temp directory
-    let rollout_path = temp_dir.path().join("test-rollout.jsonl");
-    let mut file = std::fs::File::create(&rollout_path).unwrap();
+    let session_path = temp_dir.path().join("test-session.jsonl");
+    let mut file = std::fs::File::create(&session_path).unwrap();
 
     // Write items manually
     use std::io::Write;
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::SessionMeta(meta)).unwrap()
+        serde_json::to_string(&SessionItem::SessionMeta(meta)).unwrap()
     )
     .unwrap();
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::Message(
-            uira_agent::rollout::RolloutMessage::new(Message::user("Hello"))
-        ))
+        serde_json::to_string(&SessionItem::Message(SessionMessage::new(Message::user(
+            "Hello"
+        ))))
         .unwrap()
     )
     .unwrap();
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::ToolCall {
+        serde_json::to_string(&SessionItem::ToolCall {
             id: "tc_1".to_string(),
             name: "bash".to_string(),
             input: serde_json::json!({"command": "ls"}),
@@ -107,7 +106,7 @@ fn test_rollout_save_load() {
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::TurnContext {
+        serde_json::to_string(&SessionItem::TurnContext {
             turn: 1,
             usage: TokenUsage {
                 input_tokens: 100,
@@ -120,18 +119,18 @@ fn test_rollout_save_load() {
     .unwrap();
 
     // Load and verify
-    let items = RolloutRecorder::load(&rollout_path).unwrap();
+    let items = SessionRecorder::load(&session_path).unwrap();
     assert_eq!(items.len(), 4);
-    assert!(matches!(items[0], RolloutItem::SessionMeta(_)));
-    assert!(matches!(items[1], RolloutItem::Message(_)));
-    assert!(matches!(items[2], RolloutItem::ToolCall { .. }));
-    assert!(matches!(items[3], RolloutItem::TurnContext { .. }));
+    assert!(matches!(items[0], SessionItem::SessionMeta(_)));
+    assert!(matches!(items[1], SessionItem::Message(_)));
+    assert!(matches!(items[2], SessionItem::ToolCall { .. }));
+    assert!(matches!(items[3], SessionItem::TurnContext { .. }));
 }
 
 #[test]
 fn test_extract_metadata() {
     let temp_dir = TempDir::new().unwrap();
-    let rollout_path = temp_dir.path().join("test-meta.jsonl");
+    let session_path = temp_dir.path().join("test-meta.jsonl");
 
     let meta = SessionMetaLine {
         thread_id: "extract-meta-test".to_string(),
@@ -150,26 +149,26 @@ fn test_extract_metadata() {
     };
 
     // Write metadata
-    let mut file = std::fs::File::create(&rollout_path).unwrap();
+    let mut file = std::fs::File::create(&session_path).unwrap();
     use std::io::Write;
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::SessionMeta(meta)).unwrap()
+        serde_json::to_string(&SessionItem::SessionMeta(meta)).unwrap()
     )
     .unwrap();
     writeln!(
         file,
         "{}",
-        serde_json::to_string(&RolloutItem::Message(
-            uira_agent::rollout::RolloutMessage::new(Message::user("test"))
-        ))
+        serde_json::to_string(&SessionItem::Message(SessionMessage::new(Message::user(
+            "test"
+        ))))
         .unwrap()
     )
     .unwrap();
 
     // Extract metadata (should only read first line)
-    let extracted = RolloutRecorder::extract_metadata(&rollout_path)
+    let extracted = SessionRecorder::extract_metadata(&session_path)
         .unwrap()
         .unwrap();
 
@@ -182,19 +181,15 @@ fn test_extract_metadata() {
 #[test]
 fn test_extract_messages() {
     let items = vec![
-        RolloutItem::SessionMeta(make_test_meta()),
-        RolloutItem::Message(uira_agent::rollout::RolloutMessage::new(Message::user(
-            "Hello",
-        ))),
-        RolloutItem::ToolCall {
+        SessionItem::SessionMeta(make_test_meta()),
+        SessionItem::Message(SessionMessage::new(Message::user("Hello"))),
+        SessionItem::ToolCall {
             id: "tc_1".to_string(),
             name: "test".to_string(),
             input: serde_json::Value::Null,
         },
-        RolloutItem::Message(uira_agent::rollout::RolloutMessage::new(
-            Message::assistant("Hi there!"),
-        )),
-        RolloutItem::TurnContext {
+        SessionItem::Message(SessionMessage::new(Message::assistant("Hi there!"))),
+        SessionItem::TurnContext {
             turn: 1,
             usage: TokenUsage::default(),
         },
@@ -210,19 +205,19 @@ fn test_extract_messages() {
 #[test]
 fn test_get_last_turn() {
     let items = vec![
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 1,
             usage: TokenUsage::default(),
         },
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 2,
             usage: TokenUsage::default(),
         },
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 5,
             usage: TokenUsage::default(),
         },
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 3,
             usage: TokenUsage::default(),
         },
@@ -235,7 +230,7 @@ fn test_get_last_turn() {
 #[test]
 fn test_get_total_usage() {
     let items = vec![
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 1,
             usage: TokenUsage {
                 input_tokens: 100,
@@ -244,7 +239,7 @@ fn test_get_total_usage() {
                 cache_creation_tokens: 5,
             },
         },
-        RolloutItem::TurnContext {
+        SessionItem::TurnContext {
             turn: 2,
             usage: TokenUsage {
                 input_tokens: 200,
@@ -275,23 +270,23 @@ fn test_event_serialization() {
     };
 
     let wrapper = EventWrapper::from(event);
-    let item = RolloutItem::Event { event: wrapper };
+    let item = SessionItem::Event { event: wrapper };
     let json = serde_json::to_string(&item).unwrap();
 
     assert!(json.contains("\"type\":\"event\""));
     assert!(json.contains("turn_completed"));
 
     // Can deserialize back
-    let parsed: RolloutItem = serde_json::from_str(&json).unwrap();
+    let parsed: SessionItem = serde_json::from_str(&json).unwrap();
     match parsed {
-        RolloutItem::Event { event: _ } => {}
+        SessionItem::Event { event: _ } => {}
         _ => panic!("Expected Event variant"),
     }
 }
 
 #[test]
 fn test_tool_result_serialization() {
-    let item = RolloutItem::ToolResult {
+    let item = SessionItem::ToolResult {
         id: "tc_123".to_string(),
         output: "file.txt\ndata.csv".to_string(),
         is_error: false,
@@ -301,7 +296,7 @@ fn test_tool_result_serialization() {
     assert!(json.contains("\"type\":\"tool_result\""));
     assert!(json.contains("tc_123"));
 
-    let error_item = RolloutItem::ToolResult {
+    let error_item = SessionItem::ToolResult {
         id: "tc_456".to_string(),
         output: "File not found".to_string(),
         is_error: true,

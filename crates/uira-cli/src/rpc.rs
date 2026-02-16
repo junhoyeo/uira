@@ -1,4 +1,4 @@
-use crate::session::list_rollout_sessions;
+use crate::session::list_sessions;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -205,7 +205,7 @@ pub async fn run_rpc_mode(
 
     let agent = Agent::new(agent_config, client)
         .with_event_system(&event_system)
-        .with_rollout()?;
+        .with_session_recording()?;
     let (agent, event_stream) = agent.with_event_stream();
     let cancel_signal = agent.control().cancel_signal();
     let session_id = agent.session().id.to_string();
@@ -771,7 +771,7 @@ async fn handle_session_list(
     };
 
     let limit = params.limit.unwrap_or(20).clamp(1, 1000);
-    let sessions = match list_rollout_sessions(limit) {
+    let sessions = match list_sessions(limit) {
         Ok(entries) => entries
             .into_iter()
             .map(|entry| {

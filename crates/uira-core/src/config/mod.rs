@@ -9,6 +9,6 @@ pub use schema::{
     AgentConfig, AgentSettings, AiHookCommand, AiHooksConfig, AnthropicProviderSettings,
     CommentsAiSettings, CommentsSettings, DiagnosticsAiSettings, DiagnosticsSettings, HookCommand,
     HookConfig, HooksConfig, McpServerConfig, McpSettings, NamedMcpServerConfig,
-    PayloadLogSettings, ProvidersSettings, ThemeColorOverrides, TyposAiSettings, TyposSettings,
-    UiraConfig,
+    PayloadLogSettings, ProvidersSettings, SidebarConfig, ThemeColorOverrides, TyposAiSettings,
+    TyposSettings, UiraConfig,
 };

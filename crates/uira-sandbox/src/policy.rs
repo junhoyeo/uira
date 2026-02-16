@@ -17,7 +17,7 @@ pub enum SandboxType {
 }
 
 /// Policy for sandbox restrictions
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxPolicy {
     /// Read anywhere, write nowhere
@@ -29,6 +29,7 @@ pub enum SandboxPolicy {
         protected_paths: Vec<PathBuf>,
     },
     /// Full access (no restrictions)
+    #[default]
     FullAccess,
     /// Custom policy with explicit allow/deny lists
     Custom {
@@ -39,15 +40,6 @@ pub enum SandboxPolicy {
     },
 }
 
-impl Default for SandboxPolicy {
-    fn default() -> Self {
-        Self::WorkspaceWrite {
-            workspace: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            protected_paths: vec![PathBuf::from(".git")],
-        }
-    }
-}
-
 impl SandboxPolicy {
     pub fn read_only() -> Self {
         Self::ReadOnly
@@ -56,7 +48,7 @@ impl SandboxPolicy {
     pub fn workspace_write(workspace: impl Into<PathBuf>) -> Self {
         Self::WorkspaceWrite {
             workspace: workspace.into(),
-            protected_paths: vec![PathBuf::from(".git")],
+            protected_paths: vec![],
         }
     }
 
@@ -84,7 +76,7 @@ mod tests {
     #[test]
     fn test_default_policy() {
         let policy = SandboxPolicy::default();
-        assert!(policy.is_restrictive());
+        assert!(!policy.is_restrictive());
     }
 
     #[test]

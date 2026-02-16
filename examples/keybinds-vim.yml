@@ -3,8 +3,8 @@ theme: dracula
 
 keybinds:
   # Vim-style navigation
-  scroll_up: "k"
-  scroll_down: "j"
+  scroll_up: "ctrl+k"
+  scroll_down: "ctrl+j"
   page_up: "ctrl+u"
   page_down: "ctrl+d"
   
@@ -12,7 +12,7 @@ keybinds:
   command_palette: "ctrl+p"
   
   # Keep default sidebar toggle
-  toggle_sidebar: "t"
+  toggle_sidebar: "ctrl+t"
   
   # Keep default tool collapse/expand
   collapse_tools: "ctrl+o"

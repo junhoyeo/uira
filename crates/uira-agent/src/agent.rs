@@ -21,7 +21,7 @@ use uira_types::{
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
     events::{EventSender, EventStream},
-    rollout::{extract_messages, get_last_turn, get_total_usage, RolloutRecorder, SessionMetaLine},
+    session::{extract_messages, get_last_turn, get_total_usage, SessionMetaLine, SessionRecorder},
     streaming::StreamController,
     AgentCommand, AgentConfig, AgentControl, AgentLoopError, BranchInfo, CommandReceiver,
     CommandSender, ForkResult, Session,
@@ -45,7 +45,7 @@ pub struct Agent {
     event_sender: Option<EventSender>,
     event_bus: Option<Arc<dyn EventBus>>,
     pending_tool_calls: Option<Vec<ToolCall>>,
-    rollout: Option<RolloutRecorder>,
+    session_recorder: Option<SessionRecorder>,
     streaming_enabled: bool,
     input_rx: Option<mpsc::Receiver<Message>>,
     approval_tx: Option<ApprovalSender>,
@@ -74,7 +74,7 @@ impl Agent {
             event_sender: None,
             event_bus: None,
             pending_tool_calls: None,
-            rollout: None,
+            session_recorder: None,
             streaming_enabled: true,
             input_rx: None,
             approval_tx: None,
@@ -97,8 +97,8 @@ impl Agent {
         self
     }
 
-    /// Enable rollout recording for session persistence
-    pub fn with_rollout(mut self) -> Result<Self, AgentLoopError> {
+    /// Enable session recording for session persistence
+    pub fn with_session_recording(mut self) -> Result<Self, AgentLoopError> {
         let meta = SessionMetaLine::new(
             self.session.id.to_string(),
             self.session.client.model(),
@@ -107,9 +107,9 @@ impl Agent {
             format!("{:?}", self.session.config.sandbox_policy),
         );
 
-        let recorder = RolloutRecorder::new(meta).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+        let recorder = SessionRecorder::new(meta).map_err(|e| AgentLoopError::Io(e.to_string()))?;
 
-        self.rollout = Some(recorder);
+        self.session_recorder = Some(recorder);
         Ok(self)
     }
 
@@ -391,15 +391,15 @@ impl Agent {
         Ok(())
     }
 
-    /// Resume from a rollout file
-    pub fn resume_from_rollout(
+    /// Resume from a session file
+    pub fn resume_from_session(
         config: AgentConfig,
         client: Arc<dyn ModelClient>,
-        rollout_path: PathBuf,
+        session_path: PathBuf,
     ) -> Result<Self, AgentLoopError> {
-        // Load items from rollout
+        // Load items from session log
         let items =
-            RolloutRecorder::load(&rollout_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+            SessionRecorder::load(&session_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
 
         // Create agent
         let mut agent = Self::new(config, client);
@@ -418,10 +418,10 @@ impl Agent {
         agent.session.turn = get_last_turn(&items);
         agent.session.usage = get_total_usage(&items);
 
-        // Open rollout for appending
+        // Open session log for appending
         let recorder =
-            RolloutRecorder::open(rollout_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
-        agent.rollout = Some(recorder);
+            SessionRecorder::open(session_path).map_err(|e| AgentLoopError::Io(e.to_string()))?;
+        agent.session_recorder = Some(recorder);
 
         Ok(agent)
     }
@@ -441,9 +441,9 @@ impl Agent {
         &self.session
     }
 
-    /// Get the rollout path if recording is enabled
-    pub fn rollout_path(&self) -> Option<&PathBuf> {
-        self.rollout.as_ref().map(|r| r.path())
+    /// Get the session recording path if recording is enabled
+    pub fn session_path(&self) -> Option<&PathBuf> {
+        self.session_recorder.as_ref().map(|r| r.path())
     }
 
     async fn handle_fork(
@@ -496,8 +496,8 @@ impl Agent {
             },
         );
 
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_fork(
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_fork(
                 SessionId::from_string(forked_session_id.clone()),
                 fork_point_message_id.clone(),
                 msg_count,
@@ -1207,47 +1207,47 @@ impl Agent {
         }
     }
 
-    /// Record a message to the rollout
+    /// Record a message to the session log
     fn record_message(&mut self, message: Message) {
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_message(message) {
-                tracing::warn!("Failed to record message to rollout: {}", e);
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_message(message) {
+                tracing::warn!("Failed to record message to session log: {}", e);
             }
         }
     }
 
-    /// Record a tool call to the rollout
+    /// Record a tool call to the session log
     fn record_tool_call(&mut self, id: &str, name: &str, input: &serde_json::Value) {
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_tool_call(id, name, input.clone()) {
-                tracing::warn!("Failed to record tool call to rollout: {}", e);
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_tool_call(id, name, input.clone()) {
+                tracing::warn!("Failed to record tool call to session log: {}", e);
             }
         }
     }
 
-    /// Record a tool result to the rollout
+    /// Record a tool result to the session log
     fn record_tool_result(&mut self, id: &str, output: &str, is_error: bool) {
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_tool_result(id, output, is_error) {
-                tracing::warn!("Failed to record tool result to rollout: {}", e);
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_tool_result(id, output, is_error) {
+                tracing::warn!("Failed to record tool result to session log: {}", e);
             }
         }
     }
 
-    /// Record turn context to the rollout
+    /// Record turn context to the session log
     fn record_turn(&mut self, turn: usize, usage: uira_types::TokenUsage) {
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_turn(turn, usage) {
-                tracing::warn!("Failed to record turn to rollout: {}", e);
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_turn(turn, usage) {
+                tracing::warn!("Failed to record turn to session log: {}", e);
             }
         }
     }
 
-    /// Record a thread event to the rollout
+    /// Record a thread event to the session log
     fn record_event(&mut self, event: ThreadEvent) {
-        if let Some(ref mut rollout) = self.rollout {
-            if let Err(e) = rollout.record_event(event) {
-                tracing::warn!("Failed to record event to rollout: {}", e);
+        if let Some(ref mut recorder) = self.session_recorder {
+            if let Err(e) = recorder.record_event(event) {
+                tracing::warn!("Failed to record event to session log: {}", e);
             }
         }
     }

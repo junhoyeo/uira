@@ -121,8 +121,8 @@ impl AgentWorkflow {
             .full_auto();
 
         let agent = if let Some(ref state) = existing_state {
-            if let Some(ref rollout_path) = state.rollout_path {
-                Agent::resume_from_rollout(agent_config, client, PathBuf::from(rollout_path))?
+            if let Some(ref session_path) = state.session_path {
+                Agent::resume_from_session(agent_config, client, PathBuf::from(session_path))?
             } else {
                 Agent::new(agent_config, client)
             }
@@ -130,7 +130,7 @@ impl AgentWorkflow {
             Agent::new(agent_config, client)
         };
 
-        let agent = agent.with_rollout()?;
+        let agent = agent.with_session_recording()?;
 
         let state = existing_state.unwrap_or_else(|| {
             WorkflowState::new(task, agent.session().id.to_string(), config.max_iterations)
@@ -169,8 +169,8 @@ impl AgentWorkflow {
         self.state = state;
 
         if let Some(ref agent) = self.agent {
-            if let Some(path) = agent.rollout_path() {
-                self.state.rollout_path = Some(path.to_string_lossy().to_string());
+            if let Some(path) = agent.session_path() {
+                self.state.session_path = Some(path.to_string_lossy().to_string());
             }
         }
         self.state.write()?;
@@ -268,8 +268,8 @@ impl AgentWorkflow {
                 .agent
                 .as_mut()
                 .expect("legacy path requires eager agent creation");
-            if let Some(path) = agent.rollout_path() {
-                self.state.rollout_path = Some(path.to_string_lossy().to_string());
+            if let Some(path) = agent.session_path() {
+                self.state.session_path = Some(path.to_string_lossy().to_string());
             }
         }
         self.state.write()?;

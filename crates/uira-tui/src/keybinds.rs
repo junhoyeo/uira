@@ -82,21 +82,15 @@ pub struct KeybindConfig {
 impl Default for KeybindConfig {
     fn default() -> Self {
         Self {
-            scroll_up: vec![
-                KeyBinding::new(KeyCode::Up, KeyModifiers::empty()),
-                KeyBinding::new(KeyCode::Char('k'), KeyModifiers::empty()),
-            ],
-            scroll_down: vec![
-                KeyBinding::new(KeyCode::Down, KeyModifiers::empty()),
-                KeyBinding::new(KeyCode::Char('j'), KeyModifiers::empty()),
-            ],
+            scroll_up: vec![KeyBinding::new(KeyCode::Up, KeyModifiers::empty())],
+            scroll_down: vec![KeyBinding::new(KeyCode::Down, KeyModifiers::empty())],
             page_up: vec![KeyBinding::new(KeyCode::PageUp, KeyModifiers::empty())],
             page_down: vec![KeyBinding::new(KeyCode::PageDown, KeyModifiers::empty())],
             command_palette: vec![
                 KeyBinding::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
                 KeyBinding::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
             ],
-            toggle_sidebar: vec![KeyBinding::new(KeyCode::Char('t'), KeyModifiers::empty())],
+            toggle_sidebar: vec![KeyBinding::new(KeyCode::Char('t'), KeyModifiers::CONTROL)],
             collapse_tools: vec![KeyBinding::new(KeyCode::Char('o'), KeyModifiers::CONTROL)],
             expand_tools: vec![KeyBinding::new(
                 KeyCode::Char('O'),
@@ -218,5 +212,27 @@ mod tests {
         assert!(kb.matches(KeyCode::Char('k'), KeyModifiers::empty()));
         assert!(!kb.matches(KeyCode::Char('j'), KeyModifiers::empty()));
         assert!(!kb.matches(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn test_default_toggle_sidebar_uses_ctrl_t() {
+        let keybinds = KeybindConfig::default();
+
+        assert_eq!(keybinds.toggle_sidebar.len(), 1);
+        assert_eq!(keybinds.toggle_sidebar[0].code, KeyCode::Char('t'));
+        assert_eq!(keybinds.toggle_sidebar[0].modifiers, KeyModifiers::CONTROL);
+    }
+
+    #[test]
+    fn test_default_scroll_bindings_use_arrow_keys_only() {
+        let keybinds = KeybindConfig::default();
+
+        assert_eq!(keybinds.scroll_up.len(), 1);
+        assert_eq!(keybinds.scroll_up[0].code, KeyCode::Up);
+        assert_eq!(keybinds.scroll_up[0].modifiers, KeyModifiers::empty());
+
+        assert_eq!(keybinds.scroll_down.len(), 1);
+        assert_eq!(keybinds.scroll_down[0].code, KeyCode::Down);
+        assert_eq!(keybinds.scroll_down[0].modifiers, KeyModifiers::empty());
     }
 }

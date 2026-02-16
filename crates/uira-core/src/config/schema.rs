@@ -82,6 +82,9 @@ pub struct UiraConfig {
     /// TUI keybindings configuration
     #[serde(default)]
     pub keybinds: KeybindsConfig,
+
+    #[serde(default)]
+    pub sidebar: SidebarConfig,
 }
 
 impl Default for UiraConfig {
@@ -105,6 +108,33 @@ impl Default for UiraConfig {
             channels: ChannelSettings::default(),
             providers: ProvidersSettings::default(),
             keybinds: KeybindsConfig::default(),
+            sidebar: SidebarConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarConfig {
+    #[serde(default = "default_true")]
+    pub show_context: bool,
+
+    #[serde(default = "default_true")]
+    pub show_mcp: bool,
+
+    #[serde(default = "default_true")]
+    pub show_todos: bool,
+
+    #[serde(default = "default_true")]
+    pub show_files: bool,
+}
+
+impl Default for SidebarConfig {
+    fn default() -> Self {
+        Self {
+            show_context: true,
+            show_mcp: true,
+            show_todos: true,
+            show_files: true,
         }
     }
 }
@@ -135,6 +165,10 @@ pub struct ThemeColorOverrides {
 
 fn default_tui_theme() -> String {
     "default".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 // ============================================================================
@@ -1295,6 +1329,46 @@ theme_colors:
         assert_eq!(config.theme, "dracula");
         assert_eq!(config.theme_colors.accent, Some("#ff79c6".to_string()));
         assert_eq!(config.theme_colors.borders, Some("#6272a4".to_string()));
+    }
+
+    #[test]
+    fn test_sidebar_config_defaults() {
+        let config = UiraConfig::default();
+        assert!(config.sidebar.show_context);
+        assert!(config.sidebar.show_mcp);
+        assert!(config.sidebar.show_todos);
+        assert!(config.sidebar.show_files);
+    }
+
+    #[test]
+    fn test_sidebar_config_deserialization() {
+        let yaml = r#"
+sidebar:
+  show_context: true
+  show_mcp: false
+  show_todos: true
+  show_files: true
+"#;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.sidebar.show_context);
+        assert!(!config.sidebar.show_mcp);
+        assert!(config.sidebar.show_todos);
+        assert!(config.sidebar.show_files);
+    }
+
+    #[test]
+    fn test_sidebar_config_partial_deserialization_uses_defaults() {
+        let yaml = r#"
+sidebar:
+  show_mcp: false
+"#;
+
+        let config: UiraConfig = serde_yaml_ng::from_str(yaml).unwrap();
+        assert!(config.sidebar.show_context);
+        assert!(!config.sidebar.show_mcp);
+        assert!(config.sidebar.show_todos);
+        assert!(config.sidebar.show_files);
     }
 
     #[test]
