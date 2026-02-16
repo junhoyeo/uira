@@ -1,0 +1,202 @@
+name: Release
+run-name: "${{ format('release {0}', inputs.version || inputs.bump) }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        default: "patch"
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: "Override version (e.g., 0.2.0-beta.1). Takes precedence over bump."
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+# ┌─────────────────────────────────────────────────────────────────────┐
+# │ Safety: version bump is committed ONLY after all publishes succeed │
+# │                                                                     │
+# │   bump ──► build ──► publish-crates ──► publish-npm ──► finalize   │
+# │   (artifact)  (matrix)   (cargo)       (platforms+main+hook) (commit+tag+release)  │
+# └─────────────────────────────────────────────────────────────────────┘
+
+jobs:
+  # ─── 1. Bump versions in files, upload as artifact (NO commit) ──────
+  bump:
+    name: Bump Versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642195f2ed94f21bf2f2e36 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Bump versions
+        id: bump
+        run: node scripts/release.mjs bump ${{ inputs.version || inputs.bump }}
+
+      - name: Upload bumped files
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: bumped-versions
+          path: |
+            Cargo.toml
+            packages/uira/package.json
+            packages/hook/package.json
+          retention-days: 1
+
+  # ─── 2. Build all binaries (cross-platform matrix) ──────────────────
+  build:
+    name: Build Binaries
+    needs: bump
+    uses: ./.github/workflows/reusable-build.yml
+    with:
+      version: ${{ needs.bump.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  # ─── 3. Publish to crates.io ────────────────────────────────────────
+  publish-crates:
+    name: Publish crates.io
+    needs: [bump, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: bumped-versions
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642195f2ed94f21bf2f2e36 # v4.4.0
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: node scripts/release.mjs publish-crates
+
+  # ─── 4. Publish npm (platforms → @uiradev/uira → @uiradev/hook) ────
+  publish-npm:
+    name: Publish npm
+    needs: [bump, build, publish-crates]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: bumped-versions
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642195f2ed94f21bf2f2e36 # v4.4.0
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download npm artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: artifacts
+          pattern: npm-*
+
+      - name: Generate & publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node scripts/release.mjs generate-npm artifacts npm-packages
+          node scripts/release.mjs publish-npm-platforms npm-packages
+
+      - name: Publish @uiradev/uira
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release.mjs publish-npm-main
+
+      - name: Publish @uiradev/hook
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release.mjs publish-npm-hook
+
+  # ─── 5. Finalize: commit + tag + GitHub release (ONLY after all publishes) ──
+  finalize:
+    name: Commit & Release
+    needs: [bump, build, publish-crates, publish-npm]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: bumped-versions
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642195f2ed94f21bf2f2e36 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Finalize release
+        run: node scripts/release.mjs finalize ${{ needs.bump.outputs.version }}
+
+  # ─── 6. Smoke test (non-blocking) ──────────────────────────────────
+  smoke-test:
+    name: Smoke Test ${{ matrix.os }}
+    needs: [bump, publish-npm]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: ubuntu-latest
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Wait for npm propagation
+        shell: bash
+        run: sleep 30
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642195f2ed94f21bf2f2e36 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Test npx install and run
+        shell: bash
+        run: npx @uiradev/uira@${{ needs.bump.outputs.version }} --version

@@ -21,6 +21,8 @@
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "bin": {
+    "uira": "./bin/uira.js",
+    "uira-agent": "./bin/uira.js",
     "uira-commit-hook-cli": "./bin/uira.js"
   },
   "exports": {
@@ -56,7 +58,6 @@
     },
     "./package.json": "./package.json"
   },
-
   "files": [
     "bin",
     "dist",
@@ -70,12 +71,17 @@
   "dependencies": {
     "detect-libc": "^2.0.3"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "optionalDependencies": {
     "@uiradev/uira-darwin-arm64": "0.1.0",
     "@uiradev/uira-darwin-x64": "0.1.0",
     "@uiradev/uira-linux-x64-gnu": "0.1.0",
-    "@uiradev/uira-linux-x64-musl": "0.1.0",
     "@uiradev/uira-linux-arm64-gnu": "0.1.0",
+    "@uiradev/uira-linux-x64-musl": "0.1.0",
+    "@uiradev/uira-linux-arm64-musl": "0.1.0",
     "@uiradev/uira-win32-x64-msvc": "0.1.0"
   },
   "devDependencies": {
