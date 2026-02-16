@@ -872,7 +872,7 @@ impl App {
         
         // Add borders (top + bottom) and ensure minimum height
         let total_height = lines + 2;
-        total_height.max(3).min(8) as u16 // Cap at 8 lines to avoid taking too much space
+        total_height.clamp(3, 8) as u16
     }
 
     /// Move cursor up one line in multi-line input
@@ -886,7 +886,7 @@ impl App {
         let mut current_line = Vec::new();
         let mut char_positions = Vec::new(); // Maps char index to (line, column)
         
-        for (_i, &ch) in chars.iter().enumerate() {
+        for &ch in &chars {
             char_positions.push((lines.len(), current_line.len()));
             
             if ch == '\n' {
@@ -935,7 +935,7 @@ impl App {
         let mut current_line = Vec::new();
         let mut char_positions = Vec::new(); // Maps char index to (line, column)
         
-        for (_i, &ch) in chars.iter().enumerate() {
+        for &ch in &chars {
             char_positions.push((lines.len(), current_line.len()));
             
             if ch == '\n' {
@@ -1131,8 +1131,8 @@ impl App {
         let executor = executor.map(|exec| exec as Arc<_>);
         let (agent, event_stream) = Agent::new_with_executor(config, client, executor)
             .with_event_system(&event_system)
-            .with_rollout()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+            .with_session_recording()
+            .map_err(|e| std::io::Error::other(e.to_string()))?
             .with_event_stream();
         let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
@@ -1440,7 +1440,7 @@ impl App {
         // Convert to ratatui Lines
         let text_lines: Vec<Line> = lines
             .into_iter()
-            .map(|line| Line::from(line))
+            .map(Line::from)
             .collect();
 
         let input_paragraph = Paragraph::new(text_lines).wrap(Wrap { trim: false });

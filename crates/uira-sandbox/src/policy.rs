@@ -17,7 +17,7 @@ pub enum SandboxType {
 }
 
 /// Policy for sandbox restrictions
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxPolicy {
     /// Read anywhere, write nowhere
@@ -29,6 +29,7 @@ pub enum SandboxPolicy {
         protected_paths: Vec<PathBuf>,
     },
     /// Full access (no restrictions)
+    #[default]
     FullAccess,
     /// Custom policy with explicit allow/deny lists
     Custom {
@@ -37,12 +38,6 @@ pub enum SandboxPolicy {
         executable: Vec<PathBuf>,
         network: bool,
     },
-}
-
-impl Default for SandboxPolicy {
-    fn default() -> Self {
-        Self::FullAccess
-    }
 }
 
 impl SandboxPolicy {

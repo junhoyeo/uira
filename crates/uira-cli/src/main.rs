@@ -32,7 +32,8 @@ use commands::{
 };
 use config::CliConfig;
 use session::{
-    display_sessions_list, display_sessions_tree, list_rollout_sessions, SessionStorage,
+    display_sessions_list, display_sessions_tree, list_sessions, load_session_messages,
+    summarize_session,
 };
 
 #[tokio::main]
@@ -186,7 +187,7 @@ async fn run_exec(
         let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
         let mut agent = Agent::new_with_executor(agent_config, client, Some(executor))
             .with_event_sender(event_sender)
-            .with_rollout()?;
+            .with_session_recording()?;
 
         let event_printer = tokio::spawn(async move {
             while let Some(event) = event_stream.next().await {
@@ -262,7 +263,8 @@ async fn run_exec(
     } else {
         let executor_config = ExecutorConfig::new(provider_config, agent_config.clone());
         let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
-        let mut agent = Agent::new_with_executor(agent_config, client, Some(executor)).with_rollout()?;
+        let mut agent = Agent::new_with_executor(agent_config, client, Some(executor))
+            .with_session_recording()?;
         let result = agent.run(prompt).await?;
 
         if json_output {
@@ -280,8 +282,6 @@ async fn run_resume(
     fork: bool,
     fork_at: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let storage = SessionStorage::new()?;
-
     match session_id {
         Some(id) => {
             let action = if fork { "Forking from" } else { "Resuming" };
@@ -304,24 +304,29 @@ async fn run_resume(
                 );
             }
 
-            let session = storage.load(id)?;
+            let (entry, messages) = load_session_messages(id)?;
 
             println!("{}", "─".repeat(50).dimmed());
-            println!("{}: {}", "Provider".cyan(), session.meta.provider.yellow());
-            println!("{}: {}", "Model".cyan(), session.meta.model.yellow());
+            println!("{}: {}", "Provider".cyan(), entry.provider.yellow());
+            println!("{}: {}", "Model".cyan(), entry.model.yellow());
             println!(
                 "{}: {}",
                 "Turns".cyan(),
-                session.meta.turns.to_string().yellow()
+                entry.turns.to_string().yellow()
             );
-            println!("{}: {}", "Summary".cyan(), session.meta.summary.dimmed());
+            let items = uira_agent::SessionRecorder::load(&entry.path)?;
+            println!(
+                "{}: {}",
+                "Summary".cyan(),
+                summarize_session(&items).dimmed()
+            );
             println!("{}", "─".repeat(50).dimmed());
             println!();
 
             let messages_to_show = if let Some(count) = fork_at {
-                &session.messages[..count.min(session.messages.len())]
+                &messages[..count.min(messages.len())]
             } else {
-                &session.messages
+                &messages
             };
 
             for msg in messages_to_show {
@@ -352,14 +357,14 @@ async fn run_resume(
             println!("{}", "Recent sessions:".cyan().bold());
             println!("{}", "─".repeat(80).dimmed());
 
-            let sessions = storage.list_recent(10)?;
+            let sessions = list_sessions(10)?;
 
             if sessions.is_empty() {
                 println!("{}", "No sessions found.".dimmed());
             } else {
                 for session in sessions {
                     let age = chrono::Utc::now()
-                        .signed_duration_since(session.updated_at)
+                        .signed_duration_since(session.timestamp)
                         .num_minutes();
                     let age_str = if age < 60 {
                         format!("{}m ago", age)
@@ -371,9 +376,13 @@ async fn run_resume(
 
                     println!(
                         "{} {} {} ({}, {} turns)",
-                        session.id.get(..8).unwrap_or(&session.id).yellow(),
+                        session
+                            .thread_id
+                            .get(..8)
+                            .unwrap_or(&session.thread_id)
+                            .yellow(),
                         age_str.dimmed(),
-                        session.summary,
+                        session.thread_id,
                         session.model.cyan(),
                         session.turns
                     );
@@ -397,10 +406,10 @@ async fn run_resume(
 async fn run_sessions(command: &SessionsCommands) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         SessionsCommands::List { limit, tree } => {
-            println!("{}", "Sessions (from rollout files):".cyan().bold());
+            println!("{}", "Sessions:".cyan().bold());
             println!("{}", "─".repeat(82).dimmed());
 
-            let entries = list_rollout_sessions(*limit)?;
+            let entries = list_sessions(*limit)?;
 
             if *tree {
                 display_sessions_tree(&entries);
@@ -417,7 +426,7 @@ async fn run_sessions(command: &SessionsCommands) -> Result<(), Box<dyn std::err
         SessionsCommands::Info { session_id } => {
             println!("{} {}", "Session info:".cyan().bold(), session_id.yellow());
 
-            let entries = list_rollout_sessions(1000)?;
+            let entries = list_sessions(1000)?;
             let entry = entries
                 .iter()
                 .find(|e| e.thread_id == *session_id || e.thread_id.starts_with(session_id))
@@ -443,7 +452,7 @@ async fn run_sessions(command: &SessionsCommands) -> Result<(), Box<dyn std::err
                 session_id.yellow()
             );
 
-            let entries = list_rollout_sessions(1000)?;
+            let entries = list_sessions(1000)?;
             let entry = entries
                 .iter()
                 .find(|e| e.thread_id == *session_id || e.thread_id.starts_with(session_id))

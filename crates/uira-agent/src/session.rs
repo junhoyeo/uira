@@ -1,315 +1,667 @@
-//! Session state management
+//! Session persistence using append-only JSONL session logs.
+//!
+//! This module implements the SessionRecorder which persists all session
+//! events to a JSONL file for debugging, replay, and resume capabilities.
 
-use crate::context::ContextManager;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
-use uira_orchestration::{
-    register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
-    DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
-    ToolContext, ToolOrchestrator, ToolRouter,
-};
-use uira_permissions::build_evaluator_from_rules;
-use uira_providers::ModelClient;
-use uira_sandbox::SandboxManager;
-use uira_types::{MessageId, SessionId, TokenUsage};
+use uira_types::{Message, MessageId, SessionId, ThreadEvent, TokenUsage};
 
-use crate::AgentConfig;
+/// Items that can be recorded to the session log
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionItem {
+    /// Session metadata (always first line)
+    SessionMeta(SessionMetaLine),
 
-/// Session holds all session-wide state
-pub struct Session {
-    /// Unique session identifier
-    pub id: SessionId,
+    /// A conversation message (user, assistant, tool)
+    Message(SessionMessage),
 
-    /// Parent session ID (for forked sessions)
+    /// A thread event from execution (wrapped to avoid type field conflict)
+    Event {
+        #[serde(flatten)]
+        event: EventWrapper,
+    },
+
+    /// Tool call being executed
+    ToolCall {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+
+    /// Tool result after execution
+    ToolResult {
+        id: String,
+        output: String,
+        is_error: bool,
+    },
+
+    /// Turn context at end of turn
+    TurnContext { turn: usize, usage: TokenUsage },
+
+    /// Session fork event
+    SessionForked {
+        child_session_id: SessionId,
+        forked_from_message: Option<MessageId>,
+        message_count: usize,
+        timestamp: DateTime<Utc>,
+    },
+}
+
+/// Wrapper for ThreadEvent to handle serialization properly
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventWrapper {
+    /// The event kind identifier
+    pub event_type: String,
+    /// Event data as JSON
+    pub data: serde_json::Value,
+}
+
+impl From<ThreadEvent> for EventWrapper {
+    fn from(event: ThreadEvent) -> Self {
+        let data = serde_json::to_value(&event).unwrap_or(serde_json::Value::Null);
+        let event_type = data
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Self { event_type, data }
+    }
+}
+
+/// Wrapper for Message that includes timestamp
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMessage {
+    pub message: Message,
+    pub timestamp: DateTime<Utc>,
+}
+
+impl SessionMessage {
+    pub fn new(message: Message) -> Self {
+        Self {
+            message,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
+/// Session metadata stored as first line of session file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetaLine {
+    /// Unique session/thread identifier
+    pub thread_id: String,
+
+    /// When the session started
+    pub timestamp: DateTime<Utc>,
+
+    /// Model identifier being used
+    pub model: String,
+
+    /// Provider name (anthropic, openai, etc.)
+    pub provider: String,
+
+    /// Working directory
+    pub cwd: PathBuf,
+
+    /// Sandbox policy in effect
+    pub sandbox_policy: String,
+
+    /// Git commit hash if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+
+    /// Git branch if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+
+    /// Total turns when metadata was last updated
+    #[serde(default)]
+    pub turns: usize,
+
+    /// Total token usage when metadata was last updated
+    #[serde(default)]
+    pub total_usage: TokenUsage,
+
+    // --- Fork metadata (Phase 2) ---
+    /// Parent session ID if this is a forked session
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
 
     /// Message ID where the fork occurred
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub forked_from_message: Option<MessageId>,
 
     /// Number of child forks from this session
+    #[serde(default)]
     pub fork_count: u32,
-
-    /// Agent configuration
-    pub config: AgentConfig,
-
-    /// Context manager for conversation history
-    pub context: ContextManager,
-
-    /// Sandbox manager
-    pub sandbox: SandboxManager,
-
-    /// Tool router
-    pub tool_router: Arc<ToolRouter>,
-
-    /// Tool orchestrator
-    pub orchestrator: ToolOrchestrator,
-
-    /// Parallel tool execution runtime
-    pub parallel_runtime: ToolCallRuntime,
-
-    /// Model client
-    pub client: Arc<dyn ModelClient>,
-
-    pub todo_store: TodoStore,
-
-    pub cwd: PathBuf,
-
-    pub turn: usize,
-
-    /// Total token usage
-    pub usage: TokenUsage,
 }
 
-impl Session {
-    pub fn new(config: AgentConfig, client: Arc<dyn ModelClient>) -> Self {
-        Self::new_with_executor(config, client, None)
-    }
-
-    pub fn new_with_executor(
-        config: AgentConfig,
-        client: Arc<dyn ModelClient>,
-        executor: Option<Arc<dyn AgentExecutor>>,
+impl SessionMetaLine {
+    pub fn new(
+        thread_id: impl Into<String>,
+        model: impl Into<String>,
+        provider: impl Into<String>,
+        cwd: PathBuf,
+        sandbox_policy: impl Into<String>,
     ) -> Self {
-        let cwd = config
-            .working_directory
-            .clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-        let todo_persist_dir = dirs::home_dir().map(|h| h.join(".uira").join("todos"));
-        let todo_store = match todo_persist_dir {
-            Some(dir) => TodoStore::new().with_persistence(dir),
-            None => TodoStore::new(),
-        };
-
-        let mut tool_router = ToolRouter::new();
-        if config.task_system {
-            tracing::warn!(
-                "task_system enabled but no replacement task tool is registered yet; keeping TodoWrite/TodoRead enabled"
-            );
-        }
-        register_builtins_with_todos(&mut tool_router, todo_store.clone());
-        tool_router.register_provider(Arc::new(LspToolProvider::new()));
-        tool_router.register_provider(Arc::new(AstToolProvider::new()));
-
-        if !config.external_mcp_servers.is_empty() {
-            match McpToolProvider::new(
-                config.external_mcp_servers.clone(),
-                config.external_mcp_tool_specs.clone(),
-                cwd.clone(),
-            ) {
-                Ok(provider) => tool_router.register_provider(Arc::new(provider)),
-                Err(e) => tracing::warn!(error = %e, "failed to initialize MCP tool provider"),
-            }
-        }
-
-        let delegation_provider = match executor {
-            Some(exec) => DelegationToolProvider::with_executor(exec),
-            None => DelegationToolProvider::new(),
-        };
-        tool_router.register_provider(Arc::new(delegation_provider));
-
-        let tool_router = Arc::new(tool_router);
-        let full_auto = Self::is_full_auto(&config);
-        let mut orchestrator =
-            ToolOrchestrator::new(tool_router.clone(), config.sandbox_policy.clone())
-                .with_full_auto(full_auto);
-
-        if !config.permission_rules.is_empty() {
-            let config_rules = config.to_permission_config_rules();
-            match build_evaluator_from_rules(config_rules) {
-                Ok(evaluator) => {
-                    orchestrator = orchestrator.with_permission_evaluator(evaluator);
-                    tracing::debug!(
-                        rule_count = config.permission_rules.len(),
-                        "permission_evaluator_wired"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to build permission evaluator, using defaults");
-                }
-            }
-        }
-
-        let session_id = SessionId::new();
-        let mut approval_cache = ApprovalCache::new(session_id.to_string());
-        if let Some(ref cache_dir) = config.cache_directory {
-            approval_cache = approval_cache.with_persistence(cache_dir.clone());
-        }
-        orchestrator = orchestrator.with_approval_cache(approval_cache);
-        tracing::debug!("approval_cache_wired");
-
-        let mut context = ContextManager::new(client.max_tokens())
-            .with_compaction_config(config.compaction.clone());
-
-        if let Some(system_prompt) = config.get_full_system_prompt() {
-            if let Err(e) = context.add_message(uira_types::Message::system(&system_prompt)) {
-                tracing::warn!("Failed to add system prompt: {}", e);
-            }
-        }
-
-        let parallel_runtime = ToolCallRuntime::new(tool_router.clone());
-
         Self {
-            id: session_id,
+            thread_id: thread_id.into(),
+            timestamp: Utc::now(),
+            model: model.into(),
+            provider: provider.into(),
+            cwd,
+            sandbox_policy: sandbox_policy.into(),
+            git_commit: Self::get_git_commit(),
+            git_branch: Self::get_git_branch(),
+            turns: 0,
+            total_usage: TokenUsage::default(),
             parent_id: None,
             forked_from_message: None,
             fork_count: 0,
-            context,
-            sandbox: SandboxManager::new(config.sandbox_policy.clone()),
-            todo_store,
-            tool_router,
-            orchestrator,
-            parallel_runtime,
-            config,
-            client,
+        }
+    }
+
+    pub fn new_forked(
+        thread_id: impl Into<String>,
+        model: impl Into<String>,
+        provider: impl Into<String>,
+        cwd: PathBuf,
+        sandbox_policy: impl Into<String>,
+        parent_id: SessionId,
+        forked_from_message: Option<MessageId>,
+    ) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+            timestamp: Utc::now(),
+            model: model.into(),
+            provider: provider.into(),
             cwd,
-            turn: 0,
-            usage: TokenUsage::default(),
+            sandbox_policy: sandbox_policy.into(),
+            git_commit: Self::get_git_commit(),
+            git_branch: Self::get_git_branch(),
+            turns: 0,
+            total_usage: TokenUsage::default(),
+            parent_id: Some(parent_id),
+            forked_from_message,
+            fork_count: 0,
         }
     }
 
-    fn is_full_auto(config: &AgentConfig) -> bool {
-        !config.require_approval_for_writes && !config.require_approval_for_commands
+    fn get_git_commit() -> Option<String> {
+        std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
     }
 
-    pub fn tool_context(&self) -> ToolContext {
-        let sandbox_type = if self.config.sandbox_policy.is_restrictive() {
-            uira_sandbox::SandboxType::Native
-        } else {
-            uira_sandbox::SandboxType::None
-        };
+    fn get_git_branch() -> Option<String> {
+        std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+    }
+}
 
-        ToolContext {
-            cwd: self.cwd.clone(),
-            session_id: self.id.to_string(),
-            full_auto: Self::is_full_auto(&self.config),
-            env: std::collections::HashMap::new(),
-            sandbox_type,
-            sandbox_policy: self.config.sandbox_policy.clone(),
+/// Recorder for sessions with append-only JSONL persistence
+pub struct SessionRecorder {
+    /// Open file handle for appending
+    file: File,
+
+    /// Path to the session file
+    path: PathBuf,
+
+    /// Session metadata (cached)
+    meta: SessionMetaLine,
+}
+
+impl SessionRecorder {
+    /// Create a new session recorder for a session
+    pub fn new(meta: SessionMetaLine) -> std::io::Result<Self> {
+        let dir = Self::sessions_dir()?;
+        std::fs::create_dir_all(&dir)?;
+
+        let timestamp = meta.timestamp.format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!("session-{}-{}.jsonl", timestamp, meta.thread_id));
+
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+
+        let mut recorder = Self { file, path, meta };
+
+        // Write metadata as first line
+        recorder.record(&SessionItem::SessionMeta(recorder.meta.clone()))?;
+
+        Ok(recorder)
+    }
+
+    /// Open an existing session file for resuming
+    pub fn open(path: PathBuf) -> std::io::Result<Self> {
+        // Read metadata from first line
+        let meta = Self::extract_metadata(&path)?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Missing session metadata in session file",
+            )
+        })?;
+
+        // Open for appending
+        let file = OpenOptions::new().append(true).open(&path)?;
+
+        Ok(Self { file, path, meta })
+    }
+
+    /// Get the sessions directory
+    fn sessions_dir() -> std::io::Result<PathBuf> {
+        // Prefer ~/.uira for consistency with other CLI tools, fall back to XDG data dir
+        // for environments where HOME is unset (systemd services, containers)
+        let base_dir = dirs::home_dir()
+            .map(|h| h.join(".uira"))
+            .or_else(|| dirs::data_dir().map(|d| d.join("uira")))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "No home or data directory found",
+                )
+            })?;
+
+        Ok(base_dir.join("sessions"))
+    }
+
+    /// Append an item to the session log (immediate flush)
+    pub fn record(&mut self, item: &SessionItem) -> std::io::Result<()> {
+        let line = serde_json::to_string(item)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        writeln!(self.file, "{}", line)?;
+        self.file.flush()?;
+        Ok(())
+    }
+
+    /// Record a message
+    pub fn record_message(&mut self, message: Message) -> std::io::Result<()> {
+        self.record(&SessionItem::Message(SessionMessage::new(message)))
+    }
+
+    /// Record a tool call
+    pub fn record_tool_call(
+        &mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        input: serde_json::Value,
+    ) -> std::io::Result<()> {
+        self.record(&SessionItem::ToolCall {
+            id: id.into(),
+            name: name.into(),
+            input,
+        })
+    }
+
+    /// Record a tool result
+    pub fn record_tool_result(
+        &mut self,
+        id: impl Into<String>,
+        output: impl Into<String>,
+        is_error: bool,
+    ) -> std::io::Result<()> {
+        self.record(&SessionItem::ToolResult {
+            id: id.into(),
+            output: output.into(),
+            is_error,
+        })
+    }
+
+    /// Record turn context
+    pub fn record_turn(&mut self, turn: usize, usage: TokenUsage) -> std::io::Result<()> {
+        // Update cached metadata
+        self.meta.turns = turn;
+        self.meta.total_usage = self.meta.total_usage.clone() + usage.clone();
+
+        self.record(&SessionItem::TurnContext { turn, usage })
+    }
+
+    /// Record a thread event
+    pub fn record_event(&mut self, event: ThreadEvent) -> std::io::Result<()> {
+        self.record(&SessionItem::Event {
+            event: EventWrapper::from(event),
+        })
+    }
+
+    pub fn record_fork(
+        &mut self,
+        child_session_id: SessionId,
+        forked_from_message: Option<MessageId>,
+        message_count: usize,
+    ) -> std::io::Result<()> {
+        self.meta.fork_count += 1;
+        self.record(&SessionItem::SessionForked {
+            child_session_id,
+            forked_from_message,
+            message_count,
+            timestamp: Utc::now(),
+        })
+    }
+
+    /// Load all items from a session file
+    pub fn load(path: &PathBuf) -> std::io::Result<Vec<SessionItem>> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut items = Vec::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let item: SessionItem = serde_json::from_str(&line)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            items.push(item);
+        }
+
+        Ok(items)
+    }
+
+    /// Extract only the metadata (first line) from a session file
+    pub fn extract_metadata(path: &PathBuf) -> std::io::Result<Option<SessionMetaLine>> {
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let mut first_line = String::new();
+        reader.read_line(&mut first_line)?;
+
+        if first_line.trim().is_empty() {
+            return Ok(None);
+        }
+
+        match serde_json::from_str::<SessionItem>(&first_line) {
+            Ok(SessionItem::SessionMeta(meta)) => Ok(Some(meta)),
+            Ok(_) => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 
-    /// Start a new turn
-    pub fn start_turn(&mut self) -> usize {
-        self.turn += 1;
-        self.turn
-    }
+    /// List all session files (most recent first)
+    pub fn list_sessions() -> std::io::Result<Vec<(PathBuf, SessionMetaLine)>> {
+        let dir = Self::sessions_dir()?;
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
 
-    /// Record usage for a turn
-    pub fn record_usage(&mut self, usage: TokenUsage) {
-        self.usage += usage.clone();
-        self.context.record_usage(usage);
+        let mut sessions = Vec::new();
 
-        if self.context.needs_compaction() {
-            if let Some(result) = self.context.compact() {
-                tracing::info!(
-                    tokens_before = result.tokens_before,
-                    tokens_after = result.tokens_after,
-                    messages_removed = result.messages_removed,
-                    "context_compacted"
-                );
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.extension().is_some_and(|e| e == "jsonl") {
+                if let Ok(Some(meta)) = Self::extract_metadata(&path) {
+                    sessions.push((path, meta));
+                }
             }
         }
+
+        // Sort by timestamp (most recent first)
+        sessions.sort_by(|a, b| b.1.timestamp.cmp(&a.1.timestamp));
+
+        Ok(sessions)
     }
 
-    /// Check if max turns exceeded
-    pub fn is_max_turns_exceeded(&self) -> bool {
-        self.turn >= self.config.max_turns
+    /// List recent sessions (up to limit)
+    pub fn list_recent(limit: usize) -> std::io::Result<Vec<(PathBuf, SessionMetaLine)>> {
+        let mut sessions = Self::list_sessions()?;
+        sessions.truncate(limit);
+        Ok(sessions)
     }
 
-    /// Switch to a new model client
-    pub fn set_client(&mut self, client: Arc<dyn ModelClient>) {
-        self.context = ContextManager::new(client.max_tokens())
-            .with_compaction_config(self.config.compaction.clone());
-        self.client = client;
+    /// Get the path of this session file
+    pub fn path(&self) -> &PathBuf {
+        &self.path
     }
 
-    /// Get tool specifications for the model API
-    pub fn tool_specs(&self) -> Vec<uira_types::ToolSpec> {
-        self.tool_router.specs()
+    /// Get the session metadata
+    pub fn meta(&self) -> &SessionMetaLine {
+        &self.meta
     }
+}
 
-    /// Fork this session at the current point
-    ///
-    /// Creates a new session with copied context. The new session inherits
-    /// all messages and configuration from this session.
-    pub fn fork(&mut self) -> Self {
-        self.fork_count += 1;
-
-        let mut forked = Self::new_with_executor(self.config.clone(), self.client.clone(), None);
-
-        forked.parent_id = Some(self.id.clone());
-        forked.forked_from_message = None;
-
-        for msg in self.context.messages().to_vec() {
-            let _ = forked.context.add_message(msg);
-        }
-
-        forked
-    }
-
-    /// Fork this session, keeping only messages up to a certain count
-    pub fn fork_at_message(&mut self, message_count: usize) -> Self {
-        self.fork_count += 1;
-
-        let mut forked = Self::new_with_executor(self.config.clone(), self.client.clone(), None);
-
-        forked.parent_id = Some(self.id.clone());
-        forked.forked_from_message = Some(MessageId::new());
-
-        let messages: Vec<_> = self
-            .context
-            .messages()
-            .iter()
-            .take(message_count)
-            .cloned()
-            .collect();
-        for msg in messages {
-            let _ = forked.context.add_message(msg);
-        }
-
-        forked
-    }
-
-    pub fn is_fork(&self) -> bool {
-        self.parent_id.is_some()
-    }
-
-    pub fn generate_fork_title(&self, base_title: &str) -> String {
-        format!("{} (fork #{})", base_title, self.fork_count.max(1))
-    }
-
-    pub async fn save_approval_cache(&self) {
-        if let Some(cache) = self.orchestrator.approval_cache() {
-            let cache = cache.read().await;
-            if let Err(e) = cache.save() {
-                tracing::warn!(error = %e, "failed to save approval cache");
+/// Extract messages from session items for context reconstruction
+pub fn extract_messages(items: &[SessionItem]) -> Vec<Message> {
+    items
+        .iter()
+        .filter_map(|item| {
+            if let SessionItem::Message(rm) = item {
+                Some(rm.message.clone())
+            } else {
+                None
             }
-        }
-    }
+        })
+        .collect()
+}
+
+/// Get the last turn number from session items
+pub fn get_last_turn(items: &[SessionItem]) -> usize {
+    items
+        .iter()
+        .filter_map(|item| {
+            if let SessionItem::TurnContext { turn, .. } = item {
+                Some(*turn)
+            } else {
+                None
+            }
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Get total usage from session items
+pub fn get_total_usage(items: &[SessionItem]) -> TokenUsage {
+    items
+        .iter()
+        .filter_map(|item| {
+            if let SessionItem::TurnContext { usage, .. } = item {
+                Some(usage.clone())
+            } else {
+                None
+            }
+        })
+        .fold(TokenUsage::default(), |acc, u| acc + u)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uira_types::Role;
 
     #[test]
-    fn test_session_id_different() {
-        let id1 = SessionId::new();
-        let id2 = SessionId::new();
-        assert_ne!(id1, id2);
+    fn test_session_item_serialization() {
+        let item = SessionItem::ToolCall {
+            id: "tc_123".to_string(),
+            name: "read_file".to_string(),
+            input: serde_json::json!({"path": "/tmp/test.txt"}),
+        };
+
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"type\":\"tool_call\""));
+
+        let parsed: SessionItem = serde_json::from_str(&json).unwrap();
+        if let SessionItem::ToolCall { id, name, .. } = parsed {
+            assert_eq!(id, "tc_123");
+            assert_eq!(name, "read_file");
+        } else {
+            panic!("Wrong variant");
+        }
     }
 
     #[test]
-    fn test_message_id_different() {
-        let id1 = MessageId::new();
-        let id2 = MessageId::new();
-        assert_ne!(id1, id2);
+    fn test_session_meta_line() {
+        let meta = SessionMetaLine::new(
+            "thread_123",
+            "claude-3",
+            "anthropic",
+            PathBuf::from("/home/user/project"),
+            "workspace-write",
+        );
+
+        assert_eq!(meta.thread_id, "thread_123");
+        assert_eq!(meta.model, "claude-3");
+        assert_eq!(meta.provider, "anthropic");
+
+        let json = serde_json::to_string(&meta).unwrap();
+        let parsed: SessionMetaLine = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.thread_id, meta.thread_id);
     }
 
     #[test]
-    fn test_message_id_prefix() {
-        let id = MessageId::new();
-        assert!(id.0.starts_with("msg_"));
+    fn test_session_message() {
+        let msg = Message::user("Hello, world!");
+        let session_msg = SessionMessage::new(msg.clone());
+
+        assert_eq!(session_msg.message.role, Role::User);
+
+        let item = SessionItem::Message(session_msg);
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"type\":\"message\""));
+    }
+
+    #[test]
+    fn test_extract_messages() {
+        let items = vec![
+            SessionItem::SessionMeta(SessionMetaLine::new(
+                "thread_1",
+                "model",
+                "provider",
+                PathBuf::from("."),
+                "policy",
+            )),
+            SessionItem::Message(SessionMessage::new(Message::user("Hello"))),
+            SessionItem::ToolCall {
+                id: "tc_1".to_string(),
+                name: "test".to_string(),
+                input: serde_json::Value::Null,
+            },
+            SessionItem::Message(SessionMessage::new(Message::assistant("Hi there!"))),
+        ];
+
+        let messages = extract_messages(&items);
+        assert_eq!(messages.len(), 2);
+    }
+
+    #[test]
+    fn test_get_last_turn() {
+        let items = vec![
+            SessionItem::TurnContext {
+                turn: 1,
+                usage: TokenUsage::default(),
+            },
+            SessionItem::TurnContext {
+                turn: 2,
+                usage: TokenUsage::default(),
+            },
+            SessionItem::TurnContext {
+                turn: 3,
+                usage: TokenUsage::default(),
+            },
+        ];
+
+        assert_eq!(get_last_turn(&items), 3);
+    }
+
+    #[test]
+    fn test_get_total_usage() {
+        let items = vec![
+            SessionItem::TurnContext {
+                turn: 1,
+                usage: TokenUsage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    ..Default::default()
+                },
+            },
+            SessionItem::TurnContext {
+                turn: 2,
+                usage: TokenUsage {
+                    input_tokens: 200,
+                    output_tokens: 100,
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let usage = get_total_usage(&items);
+        assert_eq!(usage.input_tokens, 300);
+        assert_eq!(usage.output_tokens, 150);
+    }
+
+    #[test]
+    fn test_session_meta_fork_fields() {
+        let meta = SessionMetaLine::new(
+            "thread_123",
+            "claude-3",
+            "anthropic",
+            PathBuf::from("/home/user/project"),
+            "workspace-write",
+        );
+
+        assert!(meta.parent_id.is_none());
+        assert!(meta.forked_from_message.is_none());
+        assert_eq!(meta.fork_count, 0);
+    }
+
+    #[test]
+    fn test_session_meta_forked() {
+        let parent_id = SessionId::new();
+        let message_id = MessageId::new();
+
+        let meta = SessionMetaLine::new_forked(
+            "thread_456",
+            "claude-3",
+            "anthropic",
+            PathBuf::from("/home/user/project"),
+            "workspace-write",
+            parent_id.clone(),
+            Some(message_id.clone()),
+        );
+
+        assert_eq!(meta.parent_id, Some(parent_id));
+        assert_eq!(meta.forked_from_message, Some(message_id));
+        assert_eq!(meta.fork_count, 0);
+    }
+
+    #[test]
+    fn test_session_forked_item_serialization() {
+        let item = SessionItem::SessionForked {
+            child_session_id: SessionId::new(),
+            forked_from_message: Some(MessageId::new()),
+            message_count: 5,
+            timestamp: Utc::now(),
+        };
+
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"type\":\"session_forked\""));
+
+        let parsed: SessionItem = serde_json::from_str(&json).unwrap();
+        if let SessionItem::SessionForked { message_count, .. } = parsed {
+            assert_eq!(message_count, 5);
+        } else {
+            panic!("Wrong variant");
+        }
     }
 }

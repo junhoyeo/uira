@@ -144,7 +144,7 @@ impl SessionManager {
         let agent_config = self.build_agent_config(&config)?;
         let agent = Agent::new(agent_config, client);
         let agent = agent
-            .with_rollout()
+            .with_session_recording()
             .map_err(|e| GatewayError::SessionCreationFailed(e.to_string()))?;
         let (agent, event_stream) = agent.with_event_stream();
         let (event_broadcast_tx, _) = broadcast::channel::<serde_json::Value>(256);
@@ -862,13 +862,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_session_creates_rollout_file() {
+    async fn test_session_creates_session_file() {
         use std::io::{BufRead, BufReader};
-        use uira_agent::RolloutRecorder;
+        use uira_agent::SessionRecorder;
 
-        // Record existing rollout files before session creation
+        // Record existing session files before session creation
         let existing_files: std::collections::HashSet<std::path::PathBuf> =
-            RolloutRecorder::list_rollouts()
+            SessionRecorder::list_sessions()
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(path, _)| path)
@@ -881,8 +881,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Find the new rollout file
-        let all_files = RolloutRecorder::list_rollouts().unwrap();
+        // Find the new session file
+        let all_files = SessionRecorder::list_sessions().unwrap();
         let new_files: Vec<_> = all_files
             .into_iter()
             .filter(|(path, _)| !existing_files.contains(path))
@@ -890,14 +890,14 @@ mod tests {
 
         assert!(
             !new_files.is_empty(),
-            "Expected a new rollout file to be created"
+            "Expected a new session file to be created"
         );
 
-        let (rollout_path, _meta) = &new_files[0];
-        assert!(rollout_path.exists());
+        let (session_path, _meta) = &new_files[0];
+        assert!(session_path.exists());
 
         // Read the first line and verify it's valid JSON with type "session_meta"
-        let file = std::fs::File::open(rollout_path).unwrap();
+        let file = std::fs::File::open(session_path).unwrap();
         let mut reader = BufReader::new(file);
         let mut first_line = String::new();
         reader.read_line(&mut first_line).unwrap();
@@ -908,8 +908,8 @@ mod tests {
         assert!(parsed["model"].is_string());
         assert!(parsed["provider"].is_string());
 
-        // Cleanup: remove the test rollout file
-        let _ = std::fs::remove_file(rollout_path);
+        // Cleanup: remove the test session file
+        let _ = std::fs::remove_file(session_path);
     }
 
     #[tokio::test]

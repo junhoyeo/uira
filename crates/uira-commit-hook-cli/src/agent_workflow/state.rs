@@ -14,7 +14,7 @@ pub struct WorkflowState {
     pub started_at: DateTime<Utc>,
     pub last_activity_at: DateTime<Utc>,
     pub files_changed: Vec<String>,
-    pub rollout_path: Option<String>,
+    pub session_path: Option<String>,
     pub git_state_before: Option<Vec<String>>,
 }
 
@@ -30,7 +30,7 @@ impl WorkflowState {
             started_at: now,
             last_activity_at: now,
             files_changed: vec![],
-            rollout_path: None,
+            session_path: None,
             git_state_before: None,
         }
     }

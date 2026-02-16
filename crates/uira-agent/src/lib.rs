@@ -6,7 +6,7 @@
 //! - Approval flow
 //! - Context management
 //! - Event streaming
-//! - Session persistence (JSONL rollout)
+//! - Session persistence (JSONL session log)
 
 mod agent;
 pub mod approval;
@@ -19,8 +19,8 @@ pub mod events;
 mod executor;
 pub mod goals;
 pub mod ralph;
-pub mod rollout;
-mod session;
+pub mod session;
+mod session_state;
 pub mod streaming;
 pub mod telemetry;
 mod turn;
@@ -42,8 +42,8 @@ pub use events::{EventSender, EventStream};
 pub use executor::{ExecutorConfig, RecursiveAgentExecutor};
 pub use goals::GoalVerifier;
 pub use ralph::{RalphConfig, RalphController, RalphDecision};
-pub use rollout::{EventWrapper, RolloutItem, RolloutRecorder, SessionMetaLine};
-pub use session::Session;
+pub use session::{EventWrapper, SessionItem, SessionMessage, SessionMetaLine, SessionRecorder};
+pub use session_state::Session;
 pub use streaming::{StreamController, StreamOutput};
 pub use telemetry::*;
 pub use turn::{TurnContext, TurnState};
