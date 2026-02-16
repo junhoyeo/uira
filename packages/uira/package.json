@@ -9,8 +9,7 @@
     "git-hooks",
     "linter",
     "claude",
-    "openai",
-    "napi"
+    "openai"
   ],
   "author": "Junho Yeo <i@junho.io>",
   "license": "MIT",
@@ -57,31 +56,15 @@
     },
     "./package.json": "./package.json"
   },
-  "napi": {
-    "binaryName": "uira",
-    "package": {
-      "name": "@uiradev/uira"
-    },
-    "targets": [
-      "aarch64-apple-darwin",
-      "x86_64-apple-darwin",
-      "x86_64-unknown-linux-gnu",
-      "x86_64-unknown-linux-musl",
-      "aarch64-unknown-linux-gnu",
-      "x86_64-pc-windows-msvc"
-    ],
-    "cargoWorkspace": true,
-    "cargoName": "uira-napi"
-  },
+
   "files": [
     "bin",
     "dist",
     "npm"
   ],
   "scripts": {
-    "build": "bun run build:ts && bunx @napi-rs/cli build --platform --release --manifest-path ../../crates/uira-napi/Cargo.toml --package-json-path package.json --output-dir .",
+    "build": "bun run build:ts",
     "build:ts": "tsup",
-    "prepublishOnly": "napi prepublish -t npm",
     "test": "node bin/uira.js --version"
   },
   "dependencies": {
@@ -96,7 +79,6 @@
     "@uiradev/uira-win32-x64-msvc": "0.1.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.5.1",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
