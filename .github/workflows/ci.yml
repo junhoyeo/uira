@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+
+      - name: Run tests
+        run: cargo test --workspace
+
+  build-check:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+
+      - name: Build workspace
+        run: cargo build --workspace
+
+  version-sync:
+    name: Version Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check version consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cargo_version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')
+          npm_version=$(node -e "console.log(require('./packages/uira/package.json').version)")
+          hook_version=$(node -e "console.log(require('./packages/hook/package.json').version)")
+
+          echo "Cargo.toml version: ${cargo_version}"
+          echo "packages/uira version: ${npm_version}"
+          echo "packages/hook version: ${hook_version}"
+
+          errors=0
+
+          if [[ "${cargo_version}" != "${npm_version}" ]]; then
+            echo "::error::Version mismatch: Cargo.toml (${cargo_version}) != packages/uira (${npm_version})"
+            errors=$((errors + 1))
+          fi
+
+          if [[ "${cargo_version}" != "${hook_version}" ]]; then
+            echo "::error::Version mismatch: Cargo.toml (${cargo_version}) != packages/hook (${hook_version})"
+            errors=$((errors + 1))
+          fi
+
+          # Check optionalDependencies versions match
+          opt_deps=$(node -e "
+            const pkg = require('./packages/uira/package.json');
+            const deps = pkg.optionalDependencies || {};
+            const mismatched = Object.entries(deps)
+              .filter(([_, v]) => v !== '${cargo_version}')
+              .map(([k, v]) => k + '@' + v);
+            if (mismatched.length > 0) {
+              console.log(mismatched.join(', '));
+            }
+          ")
+
+          if [[ -n "${opt_deps}" ]]; then
+            echo "::error::optionalDependencies version mismatch: ${opt_deps} (expected ${cargo_version})"
+            errors=$((errors + 1))
+          fi
+
+          if [[ ${errors} -gt 0 ]]; then
+            echo ""
+            echo "Run: scripts/bump-version.sh ${cargo_version}"
+            exit 1
+          fi
+
+          echo "✅ All versions in sync: ${cargo_version}"
