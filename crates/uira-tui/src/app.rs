@@ -234,6 +234,23 @@ fn run_git_command(args: &[&str], working_directory: &str) -> Result<String, Str
     }
 }
 
+fn get_git_branch() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 fn parse_binary_paths(numstat: &str) -> HashSet<String> {
     numstat
         .lines()
@@ -1035,7 +1052,7 @@ impl App {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string(),
-            current_branch: "main".to_string(),
+            current_branch: get_git_branch(),
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
             todos: Vec::new(),
