@@ -1131,6 +1131,8 @@ impl App {
         let executor = executor.map(|exec| exec as Arc<_>);
         let (agent, event_stream) = Agent::new_with_executor(config, client, executor)
             .with_event_system(&event_system)
+            .with_rollout()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
             .with_event_stream();
         let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
