@@ -33,14 +33,14 @@ impl ProviderModels {
     pub fn anthropic() -> Self {
         Self {
             opus: "claude-opus-4-20250514".to_string(),
-            sonnet: "claude-sonnet-4-20250514".to_string(),
+            sonnet: uira_core::DEFAULT_ANTHROPIC_MODEL.to_string(),
             haiku: "claude-3-5-haiku-20241022".to_string(),
         }
     }
 
     pub fn openai() -> Self {
         Self {
-            opus: "gpt-4o".to_string(),
+            opus: uira_core::DEFAULT_OPENAI_MODEL.to_string(),
             sonnet: "gpt-4o-mini".to_string(),
             haiku: "gpt-4o-mini".to_string(),
         }

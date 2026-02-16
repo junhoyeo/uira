@@ -1504,7 +1504,7 @@ fn create_client(
             let provider_config = ProviderConfig {
                 provider: Provider::Anthropic,
                 api_key,
-                model: model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+                model: model.unwrap_or_else(|| uira_core::DEFAULT_ANTHROPIC_MODEL.to_string()),
                 ..Default::default()
             };
 
@@ -1517,7 +1517,7 @@ fn create_client(
             let provider_config = ProviderConfig {
                 provider: Provider::OpenAI,
                 api_key,
-                model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+                model: model.unwrap_or_else(|| uira_core::DEFAULT_OPENAI_MODEL.to_string()),
                 ..Default::default()
             };
 

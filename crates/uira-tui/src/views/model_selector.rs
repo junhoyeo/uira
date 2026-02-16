@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
+use uira_core::{DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL};
 
 use crate::Theme;
 
@@ -30,11 +31,11 @@ pub const MODEL_GROUPS: &[ModelGroup] = &[
     },
     ModelGroup {
         provider: "anthropic",
-        models: &["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+        models: &[DEFAULT_ANTHROPIC_MODEL, "claude-opus-4-20250514"],
     },
     ModelGroup {
         provider: "openai",
-        models: &["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"],
+        models: &[DEFAULT_OPENAI_MODEL, "gpt-4o-mini", "o1", "o1-mini"],
     },
     ModelGroup {
         provider: "google",

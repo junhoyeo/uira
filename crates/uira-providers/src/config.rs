@@ -3,6 +3,9 @@
 use secrecy::SecretString;
 use uira_types::Provider;
 
+const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-20250514";
+const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
+
 /// Configuration for a model provider
 #[derive(Clone)]
 pub struct ProviderConfig {
@@ -27,7 +30,7 @@ impl Default for ProviderConfig {
             provider: Provider::Anthropic,
             api_key: None,
             base_url: None,
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: DEFAULT_ANTHROPIC_MODEL.to_string(),
             max_tokens: None,
             temperature: None,
             timeout_seconds: Some(120),
@@ -44,7 +47,7 @@ impl ProviderConfig {
             provider: Provider::Anthropic,
             api_key: Some(SecretString::from(api_key.into())),
             base_url: Some("https://api.anthropic.com".to_string()),
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: DEFAULT_ANTHROPIC_MODEL.to_string(),
             ..Default::default()
         }
     }
@@ -54,7 +57,7 @@ impl ProviderConfig {
             provider: Provider::OpenAI,
             api_key: Some(SecretString::from(api_key.into())),
             base_url: Some("https://api.openai.com".to_string()),
-            model: "gpt-4o".to_string(),
+            model: DEFAULT_OPENAI_MODEL.to_string(),
             ..Default::default()
         }
     }
