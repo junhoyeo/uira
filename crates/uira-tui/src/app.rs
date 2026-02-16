@@ -649,7 +649,7 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
             .as_deref()
             .map(|p| format!(" (from {})", p))
             .unwrap_or_default();
-        let short_id = branch.session_id.get(..8).unwrap_or(&branch.session_id);
+        let short_id: String = branch.session_id.chars().take(8).collect();
 
         lines.push(format!(
             "{} {} -> {}{}",
@@ -1308,23 +1308,13 @@ impl App {
                 format!("  Branch: {}", self.current_branch),
                 Style::default().fg(self.theme.fg),
             )));
-            let cwd_display = if self.working_directory.len() > max_width.saturating_sub(8) {
-                format!(
-                    "…{}",
-                    &self.working_directory[self
-                        .working_directory
-                        .len()
-                        .saturating_sub(max_width.saturating_sub(9))..]
-                )
-            } else {
-                self.working_directory.clone()
-            };
+            // CWD display: wrap long paths instead of truncating to avoid UTF-8 boundary issues
             lines.push(Line::from(Span::styled(
-                format!("  CWD: {}", cwd_display),
+                format!("  CWD: {}", self.working_directory),
                 Style::default().fg(self.theme.fg),
             )));
             if let Some(ref session_id) = self.session_id {
-                let short_id = session_id.get(..8).unwrap_or(session_id);
+                let short_id: String = session_id.chars().take(8).collect();
                 lines.push(Line::from(Span::styled(
                     format!("  Session: {}", short_id),
                     Style::default().fg(self.theme.fg),
