@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
+use uira_core::UIRA_DIR;
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::types::{HookEvent, HookInput, HookOutput};
@@ -282,7 +283,7 @@ pub fn background_tasks_dir() -> Option<PathBuf> {
         }
     }
 
-    dirs::home_dir().map(|h| h.join(".claude").join(".uira").join("background-tasks"))
+    dirs::home_dir().map(|h| h.join(".claude").join(UIRA_DIR).join("background-tasks"))
 }
 
 fn handle_background_event(event: &serde_json::Value) {

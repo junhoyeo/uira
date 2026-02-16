@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use uira_core::UIRA_DIR;
 use uira_types::{Message, MessageId, SessionId, ThreadEvent, TokenUsage};
 
 /// Items that can be recorded to the session log
@@ -276,7 +277,7 @@ impl SessionRecorder {
         // Prefer ~/.uira for consistency with other CLI tools, fall back to XDG data dir
         // for environments where HOME is unset (systemd services, containers)
         let base_dir = dirs::home_dir()
-            .map(|h| h.join(".uira"))
+            .map(|h| h.join(UIRA_DIR))
             .or_else(|| dirs::data_dir().map(|d| d.join("uira")))
             .ok_or_else(|| {
                 std::io::Error::new(

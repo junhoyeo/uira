@@ -16,6 +16,7 @@ use crate::{
 };
 
 const DEFAULT_MAX_TOKENS: usize = 4096;
+pub const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 /// Ollama API client for local LLMs
 pub struct OllamaClient {
@@ -114,7 +115,7 @@ impl OllamaClient {
         self.config
             .base_url
             .as_deref()
-            .unwrap_or("http://localhost:11434")
+            .unwrap_or(DEFAULT_OLLAMA_URL)
     }
 
     fn convert_response(&self, response: OllamaResponse) -> ModelResponse {

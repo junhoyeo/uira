@@ -25,7 +25,10 @@ use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
 };
-use uira_core::schema::SidebarConfig;
+use uira_core::{
+    schema::SidebarConfig, ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY,
+    ENV_OPENAI_API_KEY, UIRA_DIR,
+};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -58,6 +61,8 @@ const WIDE_THRESHOLD: u16 = 120;
 const SIDEBAR_WIDTH_WIDE: u16 = 40;
 /// Sidebar width for standard terminals (when shown)
 const SIDEBAR_WIDTH_STANDARD: u16 = 30;
+// Keep in sync with uira-providers/src/ollama.rs
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[derive(Clone, Debug)]
 struct PendingImage {
@@ -232,6 +237,23 @@ fn run_git_command(args: &[&str], working_directory: &str) -> Result<String, Str
             Err(stderr)
         }
     }
+}
+
+fn get_git_branch() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn parse_binary_paths(numstat: &str) -> HashSet<String> {
@@ -694,7 +716,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
 
     match provider {
         "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
+            let api_key = std::env::var(ENV_ANTHROPIC_API_KEY)
                 .ok()
                 .map(SecretString::from);
 
@@ -710,7 +732,9 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 .map_err(|e| e.to_string())
         }
         "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+            let api_key = std::env::var(ENV_OPENAI_API_KEY)
+                .ok()
+                .map(SecretString::from);
 
             let config = ProviderConfig {
                 provider: Provider::OpenAI,
@@ -724,8 +748,8 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 .map_err(|e| e.to_string())
         }
         "google" | "gemini" => {
-            let api_key = std::env::var("GEMINI_API_KEY")
-                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            let api_key = std::env::var(ENV_GEMINI_API_KEY)
+                .or_else(|_| std::env::var(ENV_GOOGLE_API_KEY))
                 .ok()
                 .map(SecretString::from);
 
@@ -747,7 +771,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 model: model.to_string(),
                 base_url: Some(
                     std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };
@@ -1035,7 +1059,7 @@ impl App {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string(),
-            current_branch: "main".to_string(),
+            current_branch: get_git_branch(),
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
             todos: Vec::new(),
@@ -1728,7 +1752,7 @@ impl App {
     fn load_prompt_history() -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let history_path = dirs::home_dir()
             .ok_or("Could not determine home directory")?
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("prompt_history.jsonl");
 
         if !history_path.exists() {
@@ -1754,7 +1778,7 @@ impl App {
 
     fn save_prompt_history(&self) -> Result<(), Box<dyn std::error::Error>> {
         let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-        let uira_dir = home.join(".uira");
+        let uira_dir = home.join(UIRA_DIR);
         std::fs::create_dir_all(&uira_dir)?;
 
         let history_path = uira_dir.join("prompt_history.jsonl");

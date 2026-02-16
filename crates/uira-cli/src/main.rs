@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
+use uira_core::{
+    ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY, ENV_OPENAI_API_KEY,
+};
 use uira_agent::{
     init_subscriber, init_tui_subscriber, Agent, AgentConfig, EventStream, ExecutorConfig,
     RecursiveAgentExecutor, TelemetryConfig,
@@ -35,6 +38,9 @@ use session::{
     display_sessions_list, display_sessions_tree, list_sessions, load_session_messages,
     summarize_session,
 };
+
+// Keep in sync with uira-providers/src/ollama.rs
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[tokio::main]
 async fn main() {
@@ -1494,14 +1500,14 @@ fn create_client(
 
     match provider {
         "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
+            let api_key = std::env::var(ENV_ANTHROPIC_API_KEY)
                 .ok()
                 .map(SecretString::from);
 
             let provider_config = ProviderConfig {
                 provider: Provider::Anthropic,
                 api_key,
-                model: model.unwrap_or_else(|| "claude-sonnet-4-20250514".to_string()),
+                model: model.unwrap_or_else(|| uira_core::DEFAULT_ANTHROPIC_MODEL.to_string()),
                 ..Default::default()
             };
 
@@ -1509,12 +1515,14 @@ fn create_client(
             Ok((Arc::new(client), provider_config))
         }
         "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+            let api_key = std::env::var(ENV_OPENAI_API_KEY)
+                .ok()
+                .map(SecretString::from);
 
             let provider_config = ProviderConfig {
                 provider: Provider::OpenAI,
                 api_key,
-                model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+                model: model.unwrap_or_else(|| uira_core::DEFAULT_OPENAI_MODEL.to_string()),
                 ..Default::default()
             };
 
@@ -1522,8 +1530,8 @@ fn create_client(
             Ok((Arc::new(client), provider_config))
         }
         "gemini" | "google" => {
-            let api_key = std::env::var("GEMINI_API_KEY")
-                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            let api_key = std::env::var(ENV_GEMINI_API_KEY)
+                .or_else(|_| std::env::var(ENV_GOOGLE_API_KEY))
                 .map_err(|_| "GEMINI_API_KEY or GOOGLE_API_KEY not set")?;
 
             let provider_config = ProviderConfig {
@@ -1543,7 +1551,7 @@ fn create_client(
                 model: model.unwrap_or_else(|| "llama3.1".to_string()),
                 base_url: Some(
                     std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };

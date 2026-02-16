@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use uira_types::atomic_write_secure;
 
+const UIRA_DIR: &str = ".uira";
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CredentialStore {
     credentials: HashMap<String, StoredCredential>,
@@ -68,7 +70,7 @@ impl CredentialStore {
         // Prefer ~/.uira for consistency with other CLI tools, fall back to XDG data dir
         // for environments where HOME is unset (systemd services, containers)
         let base_dir = dirs::home_dir()
-            .map(|h| h.join(".uira"))
+            .map(|h| h.join(UIRA_DIR))
             .or_else(|| dirs::data_local_dir().map(|d| d.join("uira")))
             .ok_or_else(|| {
                 AuthError::StorageError("No home or data directory found".to_string())

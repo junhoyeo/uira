@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use uira_core::UIRA_DIR;
 use uira_types::atomic_write_secure;
 
 /// CLI-specific configuration
@@ -70,7 +71,7 @@ impl CliConfig {
         }
 
         if let Some(home) = dirs::home_dir() {
-            let config_path = home.join(".uira").join("config.toml");
+            let config_path = home.join(UIRA_DIR).join("config.toml");
             if config_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&config_path) {
                     if let Ok(config) = toml::from_str(&content) {

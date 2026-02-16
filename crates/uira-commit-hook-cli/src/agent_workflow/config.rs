@@ -24,7 +24,7 @@ impl Default for WorkflowConfig {
     fn default() -> Self {
         let cwd = std::env::current_dir().unwrap_or_default();
         Self {
-            model: "claude-sonnet-4-20250514".to_string(),
+            model: uira_core::DEFAULT_ANTHROPIC_MODEL.to_string(),
             provider: "anthropic".to_string(),
             max_iterations: 10,
             working_directory: cwd,
