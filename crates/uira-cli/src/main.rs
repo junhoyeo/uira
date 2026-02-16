@@ -36,6 +36,9 @@ use session::{
     summarize_session,
 };
 
+// Keep in sync with uira-providers/src/ollama.rs
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+
 #[tokio::main]
 async fn main() {
     let telemetry_config = TelemetryConfig::default();
@@ -1543,7 +1546,7 @@ fn create_client(
                 model: model.unwrap_or_else(|| "llama3.1".to_string()),
                 base_url: Some(
                     std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };

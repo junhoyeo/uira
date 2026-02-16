@@ -23,6 +23,7 @@ const FETCH_MAX_CHARS: usize = 50000;
 const FETCH_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER: &str = "exa";
 const EXA_MCP_URL: &str = "https://mcp.exa.ai/mcp";
+const USER_AGENT: &str = "uira/0.1 (+https://github.com/junhoyeo/uira)";
 const EXA_SEARCH_TIMEOUT_SECS: u64 = 25;
 const EXA_CODE_SEARCH_TIMEOUT_SECS: u64 = 30;
 const GREP_APP_MCP_URL: &str = "https://mcp.grep.app";
@@ -771,7 +772,7 @@ async fn grep_app_search(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(GREP_APP_TIMEOUT_SECS))
-        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .user_agent(USER_AGENT)
         .build()
         .map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to initialize grep.app HTTP client: {e}"),
@@ -924,7 +925,7 @@ async fn exa_search(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(EXA_SEARCH_TIMEOUT_SECS))
-        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .user_agent(USER_AGENT)
         .build()
         .map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to initialize Exa HTTP client: {e}"),
@@ -989,7 +990,7 @@ async fn exa_code_search(query: &str, tokens_num: usize) -> Result<String, ToolE
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(EXA_CODE_SEARCH_TIMEOUT_SECS))
-        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .user_agent(USER_AGENT)
         .build()
         .map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to initialize Exa HTTP client: {e}"),
@@ -1123,7 +1124,7 @@ impl Tool for FetchUrlTool {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+            .user_agent(USER_AGENT)
             .build()
             .map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Failed to initialize HTTP client: {e}"),
@@ -1227,7 +1228,7 @@ fn extract_title(html: &str) -> Option<String> {
 async fn duckduckgo_search(query: &str, limit: usize) -> Result<Vec<SearchResult>, ToolError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("uira/0.1 (+https://github.com/junhoyeo/uira)")
+        .user_agent(USER_AGENT)
         .build()
         .map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to initialize HTTP client: {e}"),

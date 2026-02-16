@@ -58,6 +58,8 @@ const WIDE_THRESHOLD: u16 = 120;
 const SIDEBAR_WIDTH_WIDE: u16 = 40;
 /// Sidebar width for standard terminals (when shown)
 const SIDEBAR_WIDTH_STANDARD: u16 = 30;
+// Keep in sync with uira-providers/src/ollama.rs
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 #[derive(Clone, Debug)]
 struct PendingImage {
@@ -764,7 +766,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 model: model.to_string(),
                 base_url: Some(
                     std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };
