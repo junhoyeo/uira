@@ -2312,63 +2312,47 @@ impl App {
                     }
                 }
                 KeyCode::Up => {
-                    // First check if we have multi-line content for cursor movement
                     if !self.input.is_empty() && self.history_index.is_none() {
-                        let inner_width = 80; // Assume reasonable default, could be passed from render
+                        let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
                             self.move_cursor_up(inner_width);
                             return KeyAction::None;
                         }
                     }
-                    
-                    // History navigation when input is empty
-                    if self.input.is_empty() && self.history_index.is_none() {
-                        // Enter history mode
+                    if self.history_index.is_none() {
                         if !self.prompt_history.is_empty() {
-                            self.history_stash = String::new();
+                            self.history_stash = self.input.clone();
                             let idx = self.prompt_history.len() - 1;
                             self.history_index = Some(idx);
                             self.input = self.prompt_history[idx].clone();
                             self.cursor_pos = self.input.chars().count();
                         }
                     } else if let Some(idx) = self.history_index {
-                        // Navigate backward in history
                         if idx > 0 {
                             self.history_index = Some(idx - 1);
                             self.input = self.prompt_history[idx - 1].clone();
                             self.cursor_pos = self.input.chars().count();
                         }
-                    } else {
-                        // Not in history mode, scroll chat
-                        self.chat_view.scroll_up();
                     }
                 }
                 KeyCode::Down => {
-                    // First check if we have multi-line content for cursor movement
                     if !self.input.is_empty() && self.history_index.is_none() {
-                        let inner_width = 80; // Assume reasonable default, could be passed from render
+                        let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
                             self.move_cursor_down(inner_width);
                             return KeyAction::None;
                         }
                     }
-                    
-                    // History navigation
                     if let Some(idx) = self.history_index {
                         if idx < self.prompt_history.len() - 1 {
-                            // Navigate forward in history
                             self.history_index = Some(idx + 1);
                             self.input = self.prompt_history[idx + 1].clone();
                             self.cursor_pos = self.input.chars().count();
                         } else {
-                            // Exit history mode, restore stashed input
                             self.history_index = None;
                             self.input = self.history_stash.clone();
                             self.cursor_pos = self.input.chars().count();
                         }
-                    } else {
-                        // Not in history mode, scroll chat
-                        self.chat_view.scroll_down();
                     }
                 }
                 _ if KeybindConfig::matches_any(
