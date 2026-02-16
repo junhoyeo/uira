@@ -1390,8 +1390,17 @@ async fn run_interactive(
         let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
     }
 
+    let executor_config = ExecutorConfig::new(provider_config.clone(), agent_config.clone());
+    let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
+
     let result = app
-        .run_with_agent(&mut terminal, agent_config, client, tracing_rx)
+        .run_with_agent(
+            &mut terminal,
+            agent_config,
+            client,
+            Some(executor),
+            tracing_rx,
+        )
         .await;
 
     // Restore terminal
