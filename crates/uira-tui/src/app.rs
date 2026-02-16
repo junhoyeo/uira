@@ -25,7 +25,7 @@ use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
 };
-use uira_core::schema::SidebarConfig;
+use uira_core::{schema::SidebarConfig, UIRA_DIR};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -1747,7 +1747,7 @@ impl App {
     fn load_prompt_history() -> Result<Vec<String>, Box<dyn std::error::Error>> {
         let history_path = dirs::home_dir()
             .ok_or("Could not determine home directory")?
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("prompt_history.jsonl");
 
         if !history_path.exists() {
@@ -1773,7 +1773,7 @@ impl App {
 
     fn save_prompt_history(&self) -> Result<(), Box<dyn std::error::Error>> {
         let home = dirs::home_dir().ok_or("Could not determine home directory")?;
-        let uira_dir = home.join(".uira");
+        let uira_dir = home.join(UIRA_DIR);
         std::fs::create_dir_all(&uira_dir)?;
 
         let history_path = uira_dir.join("prompt_history.jsonl");

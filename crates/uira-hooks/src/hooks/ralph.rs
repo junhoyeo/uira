@@ -63,6 +63,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState};
@@ -433,13 +434,13 @@ impl RalphHook {
 
     /// Get the state file path for Ralph
     fn get_state_file_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".uira").join("ralph-state.json")
+        Path::new(directory).join(UIRA_DIR).join("ralph-state.json")
     }
 
     /// Get the progress file path
     fn get_progress_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("ralph-progress.json")
     }
 
@@ -450,7 +451,7 @@ impl RalphHook {
 
     /// Ensure the .uira directory exists
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let uira_dir = Path::new(directory).join(".uira");
+        let uira_dir = Path::new(directory).join(UIRA_DIR);
         if !uira_dir.exists() {
             fs::create_dir_all(&uira_dir)?;
         }

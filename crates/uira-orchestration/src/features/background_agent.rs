@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uira_core::UIRA_DIR;
 
 /// Type alias for stale session callback to reduce type complexity.
 pub type StaleSessionCallback = Arc<dyn Fn(&BackgroundTask) + Send + Sync>;
@@ -270,7 +271,7 @@ fn default_storage_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home)
         .join(".claude")
-        .join(".uira")
+        .join(UIRA_DIR)
         .join("background-tasks")
 }
 

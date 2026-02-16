@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::hooks::ralph::RalphHook;
@@ -180,12 +181,12 @@ impl AutopilotHook {
 
     fn get_state_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".uira")
+            .join(UIRA_DIR)
             .join(AUTOPILOT_STATE_FILE)
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let uira_dir = Path::new(directory).join(".uira");
+        let uira_dir = Path::new(directory).join(UIRA_DIR);
         if !uira_dir.exists() {
             fs::create_dir_all(&uira_dir)?;
         }

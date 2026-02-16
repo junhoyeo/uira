@@ -3,6 +3,7 @@
 use crate::context::ContextManager;
 use std::path::PathBuf;
 use std::sync::Arc;
+use uira_core::UIRA_DIR;
 use uira_orchestration::{
     register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
     DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
@@ -75,7 +76,7 @@ impl Session {
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-        let todo_persist_dir = dirs::home_dir().map(|h| h.join(".uira").join("todos"));
+        let todo_persist_dir = dirs::home_dir().map(|h| h.join(UIRA_DIR).join("todos"));
         let todo_store = match todo_persist_dir {
             Some(dir) => TodoStore::new().with_persistence(dir),
             None => TodoStore::new(),
