@@ -1377,18 +1377,10 @@ impl App {
                     };
 
                     let prefix = format!("  [{}] {}", indicator, priority_marker);
-                    let prefix_len = prefix.chars().count();
-                    let avail = max_width.saturating_sub(prefix_len);
-                    let content = if todo.content.chars().count() > avail && avail > 3 {
-                        let trunc: String = todo.content.chars().take(avail - 3).collect();
-                        format!("{}...", trunc)
-                    } else {
-                        todo.content.clone()
-                    };
 
                     lines.push(Line::from(vec![
                         Span::styled(prefix, Style::default().fg(color)),
-                        Span::styled(content, Style::default().fg(color)),
+                        Span::styled(todo.content.clone(), Style::default().fg(color)),
                     ]));
                 }
             }
