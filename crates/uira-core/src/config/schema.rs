@@ -953,6 +953,14 @@ fn default_account_id() -> String {
     "default".to_string()
 }
 
+fn default_stream_mode() -> String {
+    "partial".to_string()
+}
+
+fn default_stream_throttle_ms() -> u64 {
+    300
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelegramChannelConfig {
     #[serde(default = "default_account_id")]
@@ -965,6 +973,16 @@ pub struct TelegramChannelConfig {
 
     #[serde(default)]
     pub active_skills: Vec<String>,
+
+    /// Streaming mode: "off" disables streaming, "partial" enables progressive message editing
+    /// Default: "partial"
+    #[serde(default = "default_stream_mode")]
+    pub stream_mode: String,
+
+    /// Minimum interval between message edits in milliseconds.
+    /// Default: 300
+    #[serde(default = "default_stream_throttle_ms")]
+    pub stream_throttle_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

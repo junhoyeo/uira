@@ -16,6 +16,27 @@ pub trait Channel: Send + Sync {
 
     async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError>;
 
+    /// Send a message and return its message ID for later editing.
+    /// Returns None if the channel doesn't support streaming.
+    async fn send_message_returning_id(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<Option<String>, ChannelError> {
+        self.send_message(response).await?;
+        Ok(None)
+    }
+
+    /// Edit an existing message by its ID.
+    async fn edit_message(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), ChannelError> {
+        let _ = (recipient, message_id, new_content);
+        Ok(())
+    }
+
     fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>>;
 }
 
@@ -49,6 +70,7 @@ mod tests {
 
         assert_eq!(caps.max_message_length, 4096);
         assert!(caps.supports_markdown);
+        assert!(!caps.supports_streaming);
     }
 
     #[tokio::test]

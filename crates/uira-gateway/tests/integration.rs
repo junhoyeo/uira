@@ -114,6 +114,7 @@ impl Channel for MockChannel {
         ChannelCapabilities {
             max_message_length: 4096,
             supports_markdown: true,
+            supports_streaming: false,
         }
     }
 

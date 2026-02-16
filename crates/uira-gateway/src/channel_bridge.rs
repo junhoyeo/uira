@@ -10,6 +10,7 @@ use uira_agent::EventStream;
 use uira_core::ThreadEvent;
 
 use crate::channels::{Channel, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use crate::channels::types::floor_char_boundary;
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;
@@ -66,6 +67,24 @@ impl Channel for SharedChannelProxy {
     async fn send_message(&self, response: ChannelResponse) -> Result<(), crate::channels::ChannelError> {
         let guard = self.inner.lock().await;
         guard.send_message(response).await
+    }
+
+    async fn send_message_returning_id(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<Option<String>, crate::channels::ChannelError> {
+        let guard = self.inner.lock().await;
+        guard.send_message_returning_id(response).await
+    }
+
+    async fn edit_message(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), crate::channels::ChannelError> {
+        let guard = self.inner.lock().await;
+        guard.edit_message(recipient, message_id, new_content).await
     }
 
     fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
@@ -207,6 +226,7 @@ pub struct ChannelBridge {
 
 impl ChannelBridge {
     const MAX_PENDING_TEXT_BYTES: usize = 64 * 1024;
+    const DEFAULT_STREAM_THROTTLE_MS: u64 = 300;
     const RATE_LIMIT_MESSAGES: usize = 10;
     const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
@@ -244,13 +264,167 @@ impl ChannelBridge {
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let mut pending_text = String::new();
+            let mut accumulated_text = String::new();
+            let mut streaming_message_id: Option<String> = None;
+            let mut streaming_channel: Option<SharedChannelInner> = None;
+            let mut streaming_recipient: Option<String> = None;
+            let mut streaming_capabilities: Option<ChannelCapabilities> = None;
+            let mut stream_overflow_mode = false;
+            let mut stream_supported: Option<bool> = None;
+            let mut last_edit_time: Option<Instant> = None;
+            let mut last_edited_text = String::new();
 
             while let Some(event) = event_stream.next().await {
                 match event {
                     ThreadEvent::ContentDelta { delta } => {
-                        pending_text.push_str(&delta);
+                        if stream_supported.is_none() {
+                            if let Some((recipient, channel, capabilities)) =
+                                ChannelBridge::resolve_channel_context(
+                                    &session_id,
+                                    &channels,
+                                    &session_routes,
+                                )
+                                .await
+                            {
+                                let supports_streaming = capabilities.supports_streaming;
+                                stream_supported = Some(supports_streaming);
+                                if supports_streaming {
+                                    streaming_channel = Some(channel);
+                                    streaming_recipient = Some(recipient);
+                                    streaming_capabilities = Some(capabilities);
+                                }
+                            } else {
+                                stream_supported = Some(false);
+                            }
+                        }
+
+                        if stream_supported == Some(true) {
+                            let Some(channel) = streaming_channel.as_ref().cloned() else {
+                                stream_supported = Some(false);
+                                pending_text.push_str(&delta);
+                                continue;
+                            };
+                            let Some(recipient) = streaming_recipient.clone() else {
+                                stream_supported = Some(false);
+                                pending_text.push_str(&delta);
+                                continue;
+                            };
+                            let Some(capabilities) = streaming_capabilities.clone() else {
+                                stream_supported = Some(false);
+                                pending_text.push_str(&delta);
+                                continue;
+                            };
+
+                            accumulated_text.push_str(&delta);
+                            let adapted_text =
+                                adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
+                            if adapted_text.is_empty() {
+                                continue;
+                            }
+
+                            let truncated_len =
+                                floor_char_boundary(&adapted_text, capabilities.max_message_length);
+                            let stream_text = adapted_text[..truncated_len].to_string();
+
+                            if streaming_message_id.is_none() {
+                                let response = ChannelResponse {
+                                    content: stream_text.clone(),
+                                    recipient: recipient.clone(),
+                                };
+
+                                let message_id = {
+                                    let guard = channel.lock().await;
+                                    guard.send_message_returning_id(response).await
+                                };
+
+                                match message_id {
+                                    Ok(Some(message_id)) => {
+                                        streaming_message_id = Some(message_id);
+                                        last_edit_time = Some(Instant::now());
+                                        last_edited_text = stream_text.clone();
+                                    }
+                                    Ok(None) => {
+                                        stream_supported = Some(false);
+                                        pending_text.push_str(&adapted_text);
+                                        accumulated_text.clear();
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            session_id = %session_id,
+                                            error = %e,
+                                            "Failed to send initial streaming message"
+                                        );
+                                        stream_supported = Some(false);
+                                        pending_text.push_str(&adapted_text);
+                                        accumulated_text.clear();
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            if !stream_overflow_mode && adapted_text.len() > capabilities.max_message_length {
+                                stream_overflow_mode = true;
+
+                                if let Some(message_id) = streaming_message_id.clone() {
+                                    let edit_result = {
+                                        let guard = channel.lock().await;
+                                        guard.edit_message(&recipient, &message_id, &stream_text).await
+                                    };
+
+                                    if let Err(e) = edit_result {
+                                        error!(
+                                            session_id = %session_id,
+                                            error = %e,
+                                            "Failed to finalize streaming message at max length"
+                                        );
+                                    } else {
+                                        last_edited_text = stream_text.clone();
+                                        last_edit_time = Some(Instant::now());
+                                    }
+                                }
+
+                                let overflow = adapted_text[truncated_len..].to_string();
+                                if !overflow.is_empty() {
+                                    pending_text.push_str(&overflow);
+                                }
+                            } else if !stream_overflow_mode && stream_text != last_edited_text {
+                                let now = Instant::now();
+                                let should_edit = last_edit_time
+                                    .map(|last| {
+                                        now.duration_since(last)
+                                            >= Duration::from_millis(Self::DEFAULT_STREAM_THROTTLE_MS)
+                                    })
+                                    .unwrap_or(true);
+
+                                if should_edit {
+                                    if let Some(message_id) = streaming_message_id.clone() {
+                                        let edit_result = {
+                                            let guard = channel.lock().await;
+                                            guard.edit_message(&recipient, &message_id, &stream_text).await
+                                        };
+
+                                        if let Err(e) = edit_result {
+                                            error!(
+                                                session_id = %session_id,
+                                                error = %e,
+                                                "Failed to stream-edit channel response"
+                                            );
+                                        } else {
+                                            last_edited_text = stream_text;
+                                            last_edit_time = Some(now);
+                                        }
+                                    }
+                                }
+                            } else if stream_overflow_mode {
+                                pending_text.push_str(&delta);
+                            }
+                        } else {
+                            pending_text.push_str(&delta);
+                        }
+
                         if pending_text.len() >= Self::MAX_PENDING_TEXT_BYTES {
-                            ChannelBridge::flush_response(
+                            ChannelBridge::flush_pending_response(
                                 &session_id,
                                 &mut pending_text,
                                 &channels,
@@ -260,7 +434,81 @@ impl ChannelBridge {
                         }
                     }
                     ThreadEvent::TurnCompleted { .. } | ThreadEvent::ThreadCompleted { .. } => {
-                        ChannelBridge::flush_response(
+                        if stream_supported == Some(true)
+                            && !stream_overflow_mode
+                            && streaming_message_id.is_some()
+                        {
+                            let Some(channel) = streaming_channel.as_ref().cloned() else {
+                                ChannelBridge::flush_pending_response(
+                                    &session_id,
+                                    &mut pending_text,
+                                    &channels,
+                                    &session_routes,
+                                )
+                                .await;
+                                continue;
+                            };
+                            let Some(recipient) = streaming_recipient.clone() else {
+                                ChannelBridge::flush_pending_response(
+                                    &session_id,
+                                    &mut pending_text,
+                                    &channels,
+                                    &session_routes,
+                                )
+                                .await;
+                                continue;
+                            };
+                            let Some(message_id) = streaming_message_id.clone() else {
+                                ChannelBridge::flush_pending_response(
+                                    &session_id,
+                                    &mut pending_text,
+                                    &channels,
+                                    &session_routes,
+                                )
+                                .await;
+                                continue;
+                            };
+                            let Some(capabilities) = streaming_capabilities.clone() else {
+                                ChannelBridge::flush_pending_response(
+                                    &session_id,
+                                    &mut pending_text,
+                                    &channels,
+                                    &session_routes,
+                                )
+                                .await;
+                                continue;
+                            };
+
+                            let adapted_text =
+                                adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
+                            if !adapted_text.is_empty() {
+                                let truncated_len = floor_char_boundary(
+                                    &adapted_text,
+                                    capabilities.max_message_length,
+                                );
+                                let final_stream_text = &adapted_text[..truncated_len];
+                                if final_stream_text != last_edited_text {
+                                    let edit_result = {
+                                        let guard = channel.lock().await;
+                                        guard
+                                            .edit_message(&recipient, &message_id, final_stream_text)
+                                            .await
+                                    };
+
+                                    if let Err(e) = edit_result {
+                                        error!(
+                                            session_id = %session_id,
+                                            error = %e,
+                                            "Failed to send final stream edit"
+                                        );
+                                    } else {
+                                        last_edited_text = final_stream_text.to_string();
+                                    }
+                                }
+                            }
+                        }
+
+                        ChannelBridge::flush_pending_response(
                             &session_id,
                             &mut pending_text,
                             &channels,
@@ -269,7 +517,7 @@ impl ChannelBridge {
                         .await;
                     }
                     ThreadEvent::Error { message, .. } => {
-                        ChannelBridge::flush_response(
+                        ChannelBridge::flush_pending_response(
                             &session_id,
                             &mut pending_text,
                             &channels,
@@ -289,7 +537,42 @@ impl ChannelBridge {
                 }
             }
 
-            ChannelBridge::flush_response(
+            if stream_supported == Some(true)
+                && !stream_overflow_mode
+                && streaming_message_id.is_some()
+            {
+                if let (Some(channel), Some(recipient), Some(message_id), Some(capabilities)) = (
+                    streaming_channel,
+                    streaming_recipient,
+                    streaming_message_id,
+                    streaming_capabilities,
+                ) {
+                    let adapted_text =
+                        adapt_content_for_capabilities(accumulated_text.clone(), &capabilities);
+                    if !adapted_text.is_empty() {
+                        let truncated_len =
+                            floor_char_boundary(&adapted_text, capabilities.max_message_length);
+                        let final_stream_text = &adapted_text[..truncated_len];
+                        if final_stream_text != last_edited_text {
+                            let edit_result = {
+                                let guard = channel.lock().await;
+                                guard
+                                    .edit_message(&recipient, &message_id, final_stream_text)
+                                    .await
+                            };
+                            if let Err(e) = edit_result {
+                                error!(
+                                    session_id = %session_id,
+                                    error = %e,
+                                    "Failed to send terminal stream edit"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            ChannelBridge::flush_pending_response(
                 &session_id,
                 &mut pending_text,
                 &channels,
@@ -300,7 +583,7 @@ impl ChannelBridge {
         })
     }
 
-    async fn flush_response(
+    async fn flush_pending_response(
         session_id: &str,
         pending_text: &mut String,
         channels: &ChannelMap,
@@ -313,6 +596,46 @@ impl ChannelBridge {
         let response_text = std::mem::take(pending_text);
         ChannelBridge::deliver_to_channel(session_id, response_text, channels, session_routes)
             .await;
+    }
+
+    async fn resolve_channel_context(
+        session_id: &str,
+        channels: &ChannelMap,
+        session_routes: &SessionRouteMap,
+    ) -> Option<(String, SharedChannelInner, ChannelCapabilities)> {
+        let route = {
+            let routes = session_routes.read().await;
+            routes.get(session_id).cloned()
+        };
+
+        let Some((channel_type, account_id, channel_id)) = route else {
+            error!(session_id = %session_id, "Missing channel route for session response");
+            return None;
+        };
+
+        let channel = {
+            let channels_guard = channels.read().await;
+            channels_guard
+                .get(&(channel_type.clone(), account_id.clone()))
+                .cloned()
+        };
+
+        let Some(channel) = channel else {
+            error!(
+                session_id = %session_id,
+                channel_type = %channel_type,
+                account_id = %account_id,
+                "Missing channel for session response"
+            );
+            return None;
+        };
+
+        let capabilities = {
+            let guard = channel.lock().await;
+            guard.capabilities()
+        };
+
+        Some((channel_id, channel, capabilities))
     }
 
     async fn deliver_to_channel(
@@ -417,6 +740,7 @@ impl ChannelBridge {
             account_id = %account_id,
             max_message_length = channel_capabilities.max_message_length,
             supports_markdown = channel_capabilities.supports_markdown,
+            supports_streaming = channel_capabilities.supports_streaming,
             "Registered channel"
         );
 
@@ -1349,6 +1673,8 @@ mod tests {
         message_tx: Option<mpsc::Sender<ChannelMessage>>,
         message_rx: Option<mpsc::Receiver<ChannelMessage>>,
         sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
+        edited_messages: Arc<Mutex<Vec<(String, String, String)>>>,
+        next_message_id: Arc<Mutex<u64>>,
         started: bool,
     }
 
@@ -1361,6 +1687,8 @@ mod tests {
                 message_tx: Some(tx),
                 message_rx: Some(rx),
                 sent_messages: Arc::new(Mutex::new(Vec::new())),
+                edited_messages: Arc::new(Mutex::new(Vec::new())),
+                next_message_id: Arc::new(Mutex::new(1)),
                 started: false,
             }
         }
@@ -1372,6 +1700,7 @@ mod tests {
         fn sent_messages_shared(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
             self.sent_messages.clone()
         }
+
     }
 
     #[async_trait]
@@ -1403,6 +1732,38 @@ mod tests {
             Ok(())
         }
 
+        async fn send_message_returning_id(
+            &self,
+            response: ChannelResponse,
+        ) -> Result<Option<String>, ChannelError> {
+            self.sent_messages.lock().unwrap().push(response);
+            if !self.capabilities.supports_streaming {
+                return Ok(None);
+            }
+
+            let mut next_id = self.next_message_id.lock().unwrap();
+            let id = *next_id;
+            *next_id += 1;
+            Ok(Some(id.to_string()))
+        }
+
+        async fn edit_message(
+            &self,
+            recipient: &str,
+            message_id: &str,
+            new_content: &str,
+        ) -> Result<(), ChannelError> {
+            if !self.capabilities.supports_streaming {
+                return Ok(());
+            }
+            self.edited_messages.lock().unwrap().push((
+                recipient.to_string(),
+                message_id.to_string(),
+                new_content.to_string(),
+            ));
+            Ok(())
+        }
+
         fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
             self.message_rx.take()
         }
@@ -1420,6 +1781,7 @@ mod tests {
             ChannelCapabilities {
                 max_message_length: 4096,
                 supports_markdown: false,
+                supports_streaming: false,
             },
         );
         let tx = channel.sender();
@@ -1456,6 +1818,7 @@ mod tests {
             ChannelCapabilities {
                 max_message_length: 4096,
                 supports_markdown: false,
+                supports_streaming: false,
             },
         );
         let tx = channel.sender();
@@ -1493,6 +1856,7 @@ mod tests {
             ChannelCapabilities {
                 max_message_length: 4096,
                 supports_markdown: false,
+                supports_streaming: false,
             },
         );
         let tx = channel.sender();
@@ -1516,4 +1880,5 @@ mod tests {
 
         bridge.stop().await;
     }
+
 }

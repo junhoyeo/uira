@@ -44,6 +44,7 @@ pub struct ChannelResponse {
 pub struct ChannelCapabilities {
     pub max_message_length: usize,
     pub supports_markdown: bool,
+    pub supports_streaming: bool,
 }
 
 /// Floors a string to a valid UTF-8 character boundary.

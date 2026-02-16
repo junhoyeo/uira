@@ -46,6 +46,7 @@ impl Channel for SlackChannel {
         ChannelCapabilities {
             max_message_length: SLACK_MAX_MESSAGE_LENGTH,
             supports_markdown: true,
+            supports_streaming: false,
         }
     }
 
