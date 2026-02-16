@@ -196,13 +196,21 @@ fn is_valid_commit_reference(target: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_git_command(args: &[&str]) -> Result<String, String> {
+fn run_git_command(args: &[&str], working_directory: &str) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-c")
         .arg("core.quotePath=false")
         .args(args)
+        .current_dir(working_directory)
         .output()
-        .map_err(|err| format!("Failed to run `git {}`: {}", args.join(" "), err))?;
+        .map_err(|err| {
+            format!(
+                "Failed to run `git {}` in `{}`: {}",
+                args.join(" "),
+                working_directory,
+                err
+            )
+        })?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout)
@@ -342,11 +350,14 @@ fn filter_binary_sections(diff: &str, binary_paths: &HashSet<String>) -> String 
     out.trim_end().to_string()
 }
 
-fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>), String> {
+fn collect_review_content(
+    target: &ReviewTarget,
+    working_directory: &str,
+) -> Result<(String, Vec<String>), String> {
     match target {
         ReviewTarget::Staged => {
-            let diff = run_git_command(&["diff", "--staged", "--no-color"])?;
-            let numstat = run_git_command(&["diff", "--staged", "--numstat"])?;
+            let diff = run_git_command(&["diff", "--staged", "--no-color"], working_directory)?;
+            let numstat = run_git_command(&["diff", "--staged", "--numstat"], working_directory)?;
             let binary_paths = parse_binary_paths(&numstat);
             let filtered = filter_binary_sections(&diff, &binary_paths);
             let mut skipped: Vec<String> = binary_paths.into_iter().collect();
@@ -354,10 +365,17 @@ fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>)
             Ok((filtered, skipped))
         }
         ReviewTarget::File(path) => {
-            let staged = run_git_command(&["diff", "--staged", "--no-color", "--", path])?;
-            let unstaged = run_git_command(&["diff", "--no-color", "--", path])?;
-            let staged_numstat = run_git_command(&["diff", "--staged", "--numstat", "--", path])?;
-            let unstaged_numstat = run_git_command(&["diff", "--numstat", "--", path])?;
+            let staged = run_git_command(
+                &["diff", "--staged", "--no-color", "--", path],
+                working_directory,
+            )?;
+            let unstaged = run_git_command(&["diff", "--no-color", "--", path], working_directory)?;
+            let staged_numstat = run_git_command(
+                &["diff", "--staged", "--numstat", "--", path],
+                working_directory,
+            )?;
+            let unstaged_numstat =
+                run_git_command(&["diff", "--numstat", "--", path], working_directory)?;
 
             let mut chunks = Vec::new();
             if !staged.is_empty() {
@@ -376,8 +394,14 @@ fn collect_review_content(target: &ReviewTarget) -> Result<(String, Vec<String>)
             Ok((filtered, skipped))
         }
         ReviewTarget::Revision(revision) => {
-            let diff = run_git_command(&["show", "--no-color", "--patch", revision])?;
-            let numstat = run_git_command(&["show", "--numstat", "--format=", revision])?;
+            let diff = run_git_command(
+                &["show", "--no-color", "--patch", revision],
+                working_directory,
+            )?;
+            let numstat = run_git_command(
+                &["show", "--numstat", "--format=", revision],
+                working_directory,
+            )?;
             let binary_paths = parse_binary_paths(&numstat);
             let filtered = filter_binary_sections(&diff, &binary_paths);
             let mut skipped: Vec<String> = binary_paths.into_iter().collect();
@@ -2487,7 +2511,7 @@ impl App {
         }
     }
 
-    fn resolve_image_path(raw_path: &str) -> Result<PathBuf, String> {
+    fn resolve_image_path(raw_path: &str, working_directory: &str) -> Result<PathBuf, String> {
         let path = raw_path.trim();
         if path.is_empty() {
             return Err("empty path".to_string());
@@ -2510,9 +2534,7 @@ impl App {
         let absolute = if expanded.is_absolute() {
             expanded
         } else {
-            std::env::current_dir()
-                .map_err(|e| format!("failed to read current directory: {}", e))?
-                .join(expanded)
+            PathBuf::from(working_directory).join(expanded)
         };
 
         if !absolute.exists() {
@@ -2577,7 +2599,7 @@ impl App {
     }
 
     fn attach_image_from_path(&self, raw_path: &str) -> Result<PendingImage, String> {
-        let path = Self::resolve_image_path(raw_path)?;
+        let path = Self::resolve_image_path(raw_path, &self.working_directory)?;
         Self::load_pending_image(&path)
     }
 
@@ -2655,7 +2677,7 @@ impl App {
         };
         let target_description = target.description();
 
-        let (content, skipped_binary) = match collect_review_content(&target) {
+        let (content, skipped_binary) = match collect_review_content(&target, &self.working_directory) {
             Ok(content) => content,
             Err(err) => {
                 self.chat_view
