@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uira_core::{Event, EventBus};
-use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
+use uira_orchestration::hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_providers::ModelClient;
 use uira_core::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,

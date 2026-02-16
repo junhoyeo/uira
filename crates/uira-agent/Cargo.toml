@@ -16,7 +16,6 @@ uira-providers = { workspace = true }
 uira-security = { workspace = true }
 uira-orchestration = { workspace = true }
 uira-core = { workspace = true }
-uira-hooks = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

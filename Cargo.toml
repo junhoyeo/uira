@@ -4,17 +4,16 @@ members = [
   "crates/uira-commit-hook-cli",
   "crates/uira-orchestration",
   "crates/uira-comment-checker",
-  "crates/uira-hooks",
   "crates/uira-core",
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
-"crates/uira-providers",
-"crates/uira-security",
-"crates/uira-agent",
-    "crates/uira-cli",
-    "crates/uira-tui",
-    "crates/uira-gateway",
+  "crates/uira-providers",
+  "crates/uira-security",
+  "crates/uira-agent",
+  "crates/uira-cli",
+  "crates/uira-tui",
+  "crates/uira-gateway",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -29,7 +28,6 @@ uira-core = { path = "crates/uira-core" }
 
 # Internal crates - Features
 uira-orchestration = { path = "crates/uira-orchestration" }
-uira-hooks = { path = "crates/uira-hooks" }
 
 # Internal crates - Tools
 uira-mcp-client = { path = "crates/uira-mcp-client" }

@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod features;
+pub mod hooks;
 pub mod sdk;
 pub mod tools;
 
@@ -15,6 +16,10 @@ pub use agents::{
 };
 pub use features::{background_agent, model_routing, uira_state};
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
+pub use hooks::{
+    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
+    HookRegistry, VerificationResult,
+};
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,
     AgentTierOverride, AgentsConfig, BackgroundTask, Context7Config, ExaConfig, FeaturesConfig,

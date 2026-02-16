@@ -714,7 +714,7 @@ async fn run_config(
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_core::loader::load_config;
-                    use uira_hooks::GoalRunner;
+                    use uira_orchestration::hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {

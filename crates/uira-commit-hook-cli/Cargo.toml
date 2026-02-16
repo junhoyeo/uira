@@ -12,7 +12,6 @@ categories = ["command-line-utilities", "development-tools"]
 [dependencies]
 uira-orchestration = { workspace = true }
 uira-core = { workspace = true }
-uira-hooks = { workspace = true }
 uira-oxc = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-agent = { workspace = true }

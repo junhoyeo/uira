@@ -5589,7 +5589,6 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uira-core",
- "uira-hooks",
  "uira-orchestration",
  "uira-providers",
  "uira-security",
@@ -5622,7 +5621,6 @@ dependencies = [
  "uira-agent",
  "uira-core",
  "uira-gateway",
- "uira-hooks",
  "uira-mcp-client",
  "uira-orchestration",
  "uira-providers",
@@ -5693,7 +5691,6 @@ dependencies = [
  "uira-agent",
  "uira-comment-checker",
  "uira-core",
- "uira-hooks",
  "uira-orchestration",
  "uira-oxc",
  "uira-providers",
@@ -5745,27 +5742,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-hooks"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "lazy_static",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "uira-comment-checker",
- "uira-core",
-]
-
-[[package]]
 name = "uira-mcp-client"
 version = "0.1.0"
 dependencies = [
@@ -5813,6 +5789,7 @@ dependencies = [
  "ast-grep-language",
  "async-trait",
  "chrono",
+ "dirs",
  "futures",
  "glob",
  "hex",
@@ -5835,7 +5812,6 @@ dependencies = [
  "tracing",
  "uira-comment-checker",
  "uira-core",
- "uira-hooks",
  "uira-mcp-client",
  "uira-security",
  "uuid",

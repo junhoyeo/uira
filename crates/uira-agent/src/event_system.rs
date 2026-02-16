@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uira_core::{BroadcastBus, EventBus, HandlerRegistry, SubscriberRunner};
-use uira_hooks::create_hook_event_adapter;
+use uira_orchestration::create_hook_event_adapter;
 
 pub struct EventSystem {
     pub bus: Arc<BroadcastBus>,

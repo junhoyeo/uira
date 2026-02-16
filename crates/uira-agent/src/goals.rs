@@ -4,7 +4,7 @@ use crate::events::EventSender;
 use futures::future::join_all;
 use std::path::Path;
 use uira_core::schema::GoalConfig;
-use uira_hooks::{GoalCheckResult, GoalRunner, VerificationResult};
+use uira_orchestration::hooks::{GoalCheckResult, GoalRunner, VerificationResult};
 use uira_core::ThreadEvent;
 
 /// Goal verifier for agent execution

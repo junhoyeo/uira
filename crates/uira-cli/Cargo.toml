@@ -18,7 +18,6 @@ uira-providers = { workspace = true, features = ["oauth-server"] }
 uira-mcp-client = { workspace = true }
 uira-security = { workspace = true }
 uira-orchestration = { workspace = true }
-uira-hooks = { workspace = true }
 uira-tui = { workspace = true }
 uira-gateway = { workspace = true }
 secrecy = "0.10"
