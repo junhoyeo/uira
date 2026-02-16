@@ -34,6 +34,7 @@ struct StreamingState {
     last_edit_time: Option<Instant>,
     last_edited_text: String,
     accumulated_text: String,
+    throttle_ms: u64,
 }
 
 impl StreamingState {
@@ -48,6 +49,7 @@ impl StreamingState {
             last_edit_time: None,
             last_edited_text: String::new(),
             accumulated_text: String::new(),
+            throttle_ms: ChannelBridge::DEFAULT_STREAM_THROTTLE_MS,
         }
     }
 
@@ -361,7 +363,10 @@ impl ChannelBridge {
                                 if supports_streaming {
                                     streaming_state.channel = Some(channel);
                                     streaming_state.recipient = Some(recipient);
-                                    streaming_state.capabilities = Some(capabilities);
+                                    streaming_state.capabilities = Some(capabilities.clone());
+                                    streaming_state.throttle_ms = capabilities
+                                        .stream_throttle_ms
+                                        .unwrap_or(ChannelBridge::DEFAULT_STREAM_THROTTLE_MS);
                                 }
                             } else {
                                 streaming_state.supported = Some(false);
@@ -384,6 +389,11 @@ impl ChannelBridge {
                                 pending_text.push_str(&delta);
                                 continue;
                             };
+
+                            if streaming_state.overflow_mode {
+                                pending_text.push_str(&delta);
+                                continue;
+                            }
 
                             streaming_state.accumulated_text.push_str(&delta);
                             let adapted_text =
@@ -471,7 +481,7 @@ impl ChannelBridge {
                                     .last_edit_time
                                     .map(|last| {
                                         now.duration_since(last)
-                                            >= Duration::from_millis(Self::DEFAULT_STREAM_THROTTLE_MS)
+                                            >= Duration::from_millis(streaming_state.throttle_ms)
                                     })
                                     .unwrap_or(true);
 
@@ -494,8 +504,6 @@ impl ChannelBridge {
                                         }
                                     }
                                 }
-                            } else if streaming_state.overflow_mode {
-                                pending_text.push_str(&delta);
                             }
                         } else {
                             pending_text.push_str(&delta);
@@ -1782,6 +1790,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: true,
                 supports_streaming: true,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();
@@ -1825,6 +1834,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: true,
                 supports_streaming: true,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();
@@ -1872,6 +1882,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: true,
                 supports_streaming: false,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();
@@ -1912,6 +1923,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: false,
                 supports_streaming: false,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();
@@ -1949,6 +1961,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: false,
                 supports_streaming: false,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();
@@ -1987,6 +2000,7 @@ mod tests {
                 max_message_length: 4096,
                 supports_markdown: false,
                 supports_streaming: false,
+                stream_throttle_ms: None,
             },
         );
         let tx = channel.sender();

@@ -153,6 +153,7 @@ impl Channel for TelegramChannel {
             max_message_length: TELEGRAM_MAX_MESSAGE_LENGTH,
             supports_markdown: true,
             supports_streaming: self.config.stream_mode.eq_ignore_ascii_case("partial"),
+            stream_throttle_ms: Some(self.config.stream_throttle_ms),
         }
     }
 
