@@ -1802,10 +1802,10 @@ impl App {
         
         // Skip Context content if expanded
         if self.sidebar_sections[0] {
-            let context_lines = 3; // Model, Branch, and possibly token info
-            let token_info = self.status.clone();
-            let extra_lines = if token_info.contains("tokens") { 1 } else { 0 };
-            current_line += context_lines + extra_lines + 1; // +1 for blank line
+            let context_lines = 3;
+            let session_lines = usize::from(self.session_id.is_some());
+            let token_lines = usize::from(self.status.contains("tokens"));
+            current_line += context_lines + session_lines + token_lines + 1; // +1 for blank line
         }
         
         // Section 2: MCP header
