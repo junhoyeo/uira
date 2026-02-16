@@ -82,14 +82,8 @@ pub struct KeybindConfig {
 impl Default for KeybindConfig {
     fn default() -> Self {
         Self {
-            scroll_up: vec![
-                KeyBinding::new(KeyCode::Up, KeyModifiers::empty()),
-                KeyBinding::new(KeyCode::Char('k'), KeyModifiers::empty()),
-            ],
-            scroll_down: vec![
-                KeyBinding::new(KeyCode::Down, KeyModifiers::empty()),
-                KeyBinding::new(KeyCode::Char('j'), KeyModifiers::empty()),
-            ],
+            scroll_up: vec![KeyBinding::new(KeyCode::Char('k'), KeyModifiers::empty())],
+            scroll_down: vec![KeyBinding::new(KeyCode::Char('j'), KeyModifiers::empty())],
             page_up: vec![KeyBinding::new(KeyCode::PageUp, KeyModifiers::empty())],
             page_down: vec![KeyBinding::new(KeyCode::PageDown, KeyModifiers::empty())],
             command_palette: vec![
