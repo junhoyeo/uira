@@ -1,7 +1,7 @@
 //! Provider configuration
 
 use secrecy::SecretString;
-use uira_types::Provider;
+use uira_core::Provider;
 
 /// Configuration for a model provider
 #[derive(Clone)]

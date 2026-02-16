@@ -17,7 +17,6 @@ uira-oxc = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-agent = { workspace = true }
 uira-providers = { workspace = true }
-uira-types = { workspace = true }
 uira-sandbox = { workspace = true }
 
 # Async runtime

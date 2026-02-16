@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 use uira_agent::EventStream;
-use uira_types::ThreadEvent;
+use uira_core::ThreadEvent;
 
 use crate::channels::{Channel, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 

@@ -8,7 +8,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 

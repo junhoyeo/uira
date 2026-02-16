@@ -25,7 +25,6 @@ teloxide = { workspace = true }
 
 # Internal dependencies
 uira-agent = { workspace = true }
-uira-types = { workspace = true }
 uira-core = { workspace = true }
 uira-providers = { workspace = true }
 uira-orchestration = { workspace = true }

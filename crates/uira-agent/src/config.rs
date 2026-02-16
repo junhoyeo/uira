@@ -9,7 +9,7 @@ use uira_core::schema::{
 };
 use uira_permissions::{ConfigAction, ConfigRule};
 use uira_sandbox::SandboxPolicy;
-use uira_types::{SandboxPreference, ToolSpec};
+use uira_core::{SandboxPreference, ToolSpec};
 
 /// Configuration for the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]

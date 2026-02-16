@@ -3,7 +3,7 @@
 //! Merges consecutive user messages and preserves tool-role turns.
 
 use tracing::warn;
-use uira_types::{ContentBlock, Message, MessageContent, Role};
+use uira_core::{ContentBlock, Message, MessageContent, Role};
 
 pub fn validate_anthropic_turns(messages: &[Message]) -> Vec<Message> {
     let mut result = Vec::new();

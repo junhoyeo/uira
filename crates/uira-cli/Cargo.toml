@@ -12,7 +12,6 @@ name = "uira-agent"
 path = "src/main.rs"
 
 [dependencies]
-uira-types = { workspace = true }
 uira-agent = { workspace = true }
 uira-core = { workspace = true }
 uira-providers = { workspace = true, features = ["oauth-server"] }

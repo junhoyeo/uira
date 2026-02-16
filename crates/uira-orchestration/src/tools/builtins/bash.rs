@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::time::timeout;
 use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
-use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 

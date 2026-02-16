@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxPolicy;
-use uira_types::{ReviewDecision, SandboxPreference};
+use uira_core::{ReviewDecision, SandboxPreference};
 
 /// Per-turn immutable context
 pub struct TurnContext {

@@ -8,21 +8,21 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uira_types::{JsonSchema, ToolSpec};
+use uira_core::{JsonSchema, ToolSpec};
 
-/// Convert from crate::tools::types::ToolOutput to uira_types::ToolOutput
-fn convert_tool_output(output: crate::tools::types::ToolOutput) -> uira_types::ToolOutput {
+/// Convert from crate::tools::types::ToolOutput to uira_core::ToolOutput
+fn convert_tool_output(output: crate::tools::types::ToolOutput) -> uira_core::ToolOutput {
     let content = output
         .content
         .into_iter()
         .map(|c| match c {
             crate::tools::types::ToolContent::Text { text } => {
-                uira_types::ToolOutputContent::Text { text }
+                uira_core::ToolOutputContent::Text { text }
             }
         })
         .collect();
 
-    uira_types::ToolOutput { content }
+    uira_core::ToolOutput { content }
 }
 
 /// Provider for LSP-based tools with lazy initialization
@@ -216,7 +216,7 @@ impl ToolProvider for LspToolProvider {
         name: &str,
         input: Value,
         ctx: &ToolContext,
-    ) -> Result<uira_types::ToolOutput, ToolError> {
+    ) -> Result<uira_core::ToolOutput, ToolError> {
         let client = self.get_client(ctx).await?;
 
         let result = match name {
@@ -234,7 +234,7 @@ impl ToolProvider for LspToolProvider {
             }
         }?;
 
-        // Convert from crate::tools::types::ToolOutput to uira_types::ToolOutput
+        // Convert from crate::tools::types::ToolOutput to uira_core::ToolOutput
         Ok(convert_tool_output(result))
     }
 }

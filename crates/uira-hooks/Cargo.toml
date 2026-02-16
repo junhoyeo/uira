@@ -9,7 +9,6 @@ repository.workspace = true
 
 [dependencies]
 uira-comment-checker = { workspace = true }
-uira-types = { workspace = true }
 uira-core = { workspace = true }
 
 serde = { workspace = true }

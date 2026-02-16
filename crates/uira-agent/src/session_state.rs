@@ -11,7 +11,7 @@ use uira_orchestration::{
 use uira_permissions::build_evaluator_from_rules;
 use uira_providers::ModelClient;
 use uira_sandbox::SandboxManager;
-use uira_types::{MessageId, SessionId, TokenUsage};
+use uira_core::{MessageId, SessionId, TokenUsage};
 
 use crate::AgentConfig;
 
@@ -142,7 +142,7 @@ impl Session {
             .with_compaction_config(config.compaction.clone());
 
         if let Some(system_prompt) = config.get_full_system_prompt() {
-            if let Err(e) = context.add_message(uira_types::Message::system(&system_prompt)) {
+            if let Err(e) = context.add_message(uira_core::Message::system(&system_prompt)) {
                 tracing::warn!("Failed to add system prompt: {}", e);
             }
         }
@@ -225,7 +225,7 @@ impl Session {
     }
 
     /// Get tool specifications for the model API
-    pub fn tool_specs(&self) -> Vec<uira_types::ToolSpec> {
+    pub fn tool_specs(&self) -> Vec<uira_core::ToolSpec> {
         self.tool_router.specs()
     }
 

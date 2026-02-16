@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
-use uira_types::{
+use uira_core::{
     ContentBlock, Message, ModelResponse, StopReason, StreamChunk, TokenUsage, ToolSpec,
 };
 
@@ -248,7 +248,7 @@ impl ModelClient for MockModelClient {
 
 /// Convert a ModelResponse to stream chunks
 fn response_to_chunks(response: ModelResponse) -> Vec<StreamChunk> {
-    use uira_types::{ContentDelta, StreamMessageStart};
+    use uira_core::{ContentDelta, StreamMessageStart};
 
     let mut chunks = Vec::new();
 
@@ -299,7 +299,7 @@ fn response_to_chunks(response: ModelResponse) -> Vec<StreamChunk> {
 
     // Message delta with final usage
     chunks.push(StreamChunk::MessageDelta {
-        delta: uira_types::MessageDelta {
+        delta: uira_core::MessageDelta {
             stop_reason: response.stop_reason.clone(),
         },
         usage: Some(response.usage),
@@ -375,7 +375,7 @@ mod tests {
                 &[
                     Message::user("List files"),
                     Message::with_blocks(
-                        uira_types::Role::Assistant,
+                        uira_core::Role::Assistant,
                         vec![ContentBlock::ToolUse {
                             id: "tc_1".to_string(),
                             name: "bash".to_string(),
@@ -383,7 +383,7 @@ mod tests {
                         }],
                     ),
                     Message::with_blocks(
-                        uira_types::Role::User,
+                        uira_core::Role::User,
                         vec![ContentBlock::tool_result("tc_1", "file1.txt\nfile2.txt")],
                     ),
                 ],

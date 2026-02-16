@@ -3,7 +3,7 @@
 use futures::future::join_all;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uira_types::ToolOutput;
+use uira_core::ToolOutput;
 
 use crate::tools::{ToolContext, ToolError, ToolOrchestrator, ToolRouter};
 
@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use crate::tools::FunctionTool;
     use serde_json::json;
-    use uira_types::JsonSchema;
+    use uira_core::JsonSchema;
 
     fn create_test_router() -> Arc<ToolRouter> {
         let mut router = ToolRouter::new();

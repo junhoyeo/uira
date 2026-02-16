@@ -8,7 +8,7 @@ use futures_util::stream;
 use tokio::sync::mpsc;
 
 use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
-use uira_types::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
+use uira_core::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
 
 use crate::channels::channel::Channel;
 use crate::channels::error::ChannelError;
@@ -54,8 +54,8 @@ impl MockModelClient {
 impl ModelClient for MockModelClient {
     async fn chat(
         &self,
-        _messages: &[uira_types::Message],
-        _tools: &[uira_types::ToolSpec],
+        _messages: &[uira_core::Message],
+        _tools: &[uira_core::ToolSpec],
     ) -> ModelResult<ModelResponse> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
 
@@ -74,15 +74,15 @@ impl ModelClient for MockModelClient {
             content: vec![ContentBlock::Text {
                 text: self.response_text.clone(),
             }],
-            stop_reason: Some(uira_types::StopReason::EndTurn),
+            stop_reason: Some(uira_core::StopReason::EndTurn),
             usage: TokenUsage::default(),
         })
     }
 
     async fn chat_stream(
         &self,
-        _messages: &[uira_types::Message],
-        _tools: &[uira_types::ToolSpec],
+        _messages: &[uira_core::Message],
+        _tools: &[uira_core::ToolSpec],
     ) -> ModelResult<ResponseStream> {
         self.call_count.fetch_add(1, Ordering::SeqCst);
 

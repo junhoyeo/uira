@@ -1,7 +1,7 @@
 //! Agent loop error types
 
 use thiserror::Error;
-use uira_types::AgentError;
+use uira_core::AgentError;
 
 #[derive(Debug, Error)]
 pub enum AgentLoopError {

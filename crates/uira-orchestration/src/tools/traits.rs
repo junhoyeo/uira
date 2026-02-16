@@ -6,7 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use uira_sandbox::{SandboxPolicy, SandboxType};
-use uira_types::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::ToolError;
 

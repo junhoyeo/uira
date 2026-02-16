@@ -12,7 +12,7 @@
 use uira_providers::{
     classify_error, validate_anthropic_turns, BetaFeatures, ProviderError, RetryConfig,
 };
-use uira_types::{ContentBlock, Message, MessageContent, Role};
+use uira_core::{ContentBlock, Message, MessageContent, Role};
 
 const PROVIDER: &str = "anthropic";
 

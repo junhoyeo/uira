@@ -1,7 +1,7 @@
 //! Compaction strategies for context management
 
 use serde::{Deserialize, Serialize};
-use uira_types::{ContentBlock, Message, Role};
+use uira_core::{ContentBlock, Message, Role};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,7 +77,7 @@ impl PruningStrategy {
     }
 
     fn truncate_tool_output(&self, message: &mut Message) {
-        use uira_types::MessageContent;
+        use uira_core::MessageContent;
 
         match &mut message.content {
             MessageContent::Text(text) => {
@@ -109,7 +109,7 @@ impl PruningStrategy {
     }
 
     fn remove_thinking(&self, message: &mut Message) {
-        use uira_types::MessageContent;
+        use uira_core::MessageContent;
 
         if let MessageContent::Blocks(blocks) = &mut message.content {
             blocks.retain(|block| !matches!(block, ContentBlock::Thinking { .. }));

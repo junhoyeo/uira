@@ -14,7 +14,7 @@ use uira_agent::{
     RecursiveAgentExecutor, TelemetryConfig,
 };
 use uira_orchestration::{get_agent_definitions, ModelRegistry};
-use uira_types::ExecutionResult;
+use uira_core::ExecutionResult;
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
@@ -150,7 +150,7 @@ async fn run_exec(
     json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use futures::StreamExt;
-    use uira_types::{Item, ThreadEvent};
+    use uira_core::{Item, ThreadEvent};
 
     let uira_config = uira_core::loader::load_config(None).ok();
     let agent_model_overrides = build_agent_model_overrides(uira_config.as_ref());
@@ -331,10 +331,10 @@ async fn run_resume(
 
             for msg in messages_to_show {
                 let role = match msg.role {
-                    uira_types::Role::User => "User".green(),
-                    uira_types::Role::Assistant => "Assistant".blue(),
-                    uira_types::Role::System => "System".yellow(),
-                    uira_types::Role::Tool => "Tool".magenta(),
+                    uira_core::Role::User => "User".green(),
+                    uira_core::Role::Assistant => "Assistant".blue(),
+                    uira_core::Role::System => "System".yellow(),
+                    uira_core::Role::Tool => "Tool".magenta(),
                 };
                 let content = get_message_text(&msg.content);
                 println!("{}: {}", role.bold(), content);
@@ -1472,7 +1472,7 @@ fn create_client(
     agent_model_overrides: &std::collections::HashMap<String, String>,
     uira_config: Option<&uira_core::schema::UiraConfig>,
 ) -> Result<(Arc<dyn ModelClient>, ProviderConfig), Box<dyn std::error::Error>> {
-    use uira_types::Provider;
+    use uira_core::Provider;
 
     let provider = cli
         .provider
@@ -1574,7 +1574,7 @@ fn build_opencode_provider_config(
     settings: Option<&uira_core::schema::OpencodeSettings>,
 ) -> ProviderConfig {
     let mut provider_config = ProviderConfig {
-        provider: uira_types::Provider::OpenCode,
+        provider: uira_core::Provider::OpenCode,
         api_key,
         model: model.unwrap_or_else(|| "gpt-5-nano".to_string()),
         ..Default::default()
@@ -1750,7 +1750,7 @@ fn create_agent_config(
     agent_defs: &std::collections::HashMap<String, uira_orchestration::AgentConfig>,
     uira_config: Option<&uira_core::schema::UiraConfig>,
     external_mcp_servers: Vec<uira_core::schema::NamedMcpServerConfig>,
-    external_mcp_specs: Vec<uira_types::ToolSpec>,
+    external_mcp_specs: Vec<uira_core::ToolSpec>,
 ) -> AgentConfig {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox_policy = match cli.sandbox.as_str() {
@@ -1884,7 +1884,7 @@ async fn prepare_external_mcp(
 ) -> Result<
     (
         Vec<uira_core::schema::NamedMcpServerConfig>,
-        Vec<uira_types::ToolSpec>,
+        Vec<uira_core::ToolSpec>,
     ),
     Box<dyn std::error::Error>,
 > {
@@ -1920,9 +1920,9 @@ async fn prepare_external_mcp(
     let specs = discovered
         .into_iter()
         .map(|tool| {
-            let schema = serde_json::from_value::<uira_types::JsonSchema>(tool.input_schema)
-                .unwrap_or_else(|_| uira_types::JsonSchema::object());
-            uira_types::ToolSpec::new(tool.namespaced_name, tool.description, schema)
+            let schema = serde_json::from_value::<uira_core::JsonSchema>(tool.input_schema)
+                .unwrap_or_else(|_| uira_core::JsonSchema::object());
+            uira_core::ToolSpec::new(tool.namespaced_name, tool.description, schema)
         })
         .collect::<Vec<_>>();
 
@@ -1957,19 +1957,19 @@ fn generate_completions(shell: Shell) {
 }
 
 /// Extract text content from a message content
-fn get_message_text(content: &uira_types::MessageContent) -> String {
+fn get_message_text(content: &uira_core::MessageContent) -> String {
     match content {
-        uira_types::MessageContent::Text(t) => t.clone(),
-        uira_types::MessageContent::Blocks(blocks) => blocks
+        uira_core::MessageContent::Text(t) => t.clone(),
+        uira_core::MessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                uira_types::ContentBlock::Text { text } => Some(text.as_str()),
-                uira_types::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
+                uira_core::ContentBlock::Text { text } => Some(text.as_str()),
+                uira_core::ContentBlock::ToolResult { content, .. } => Some(content.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
-        uira_types::MessageContent::ToolCalls(calls) => calls
+        uira_core::MessageContent::ToolCalls(calls) => calls
             .iter()
             .map(|c| format!("Tool: {} ({})", c.name, c.id))
             .collect::<Vec<_>>()

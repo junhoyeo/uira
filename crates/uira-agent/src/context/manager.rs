@@ -1,6 +1,6 @@
 //! Context manager for tracking and managing conversation context
 
-use uira_types::{ContentBlock, Message, MessageContent, Role, TokenUsage};
+use uira_core::{ContentBlock, Message, MessageContent, Role, TokenUsage};
 
 use crate::{
     CompactionConfig, CompactionResult, CompactionStrategy, ContextError, MessageHistory,

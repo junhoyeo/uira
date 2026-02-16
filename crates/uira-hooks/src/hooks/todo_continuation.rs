@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::hook::{Hook, HookContext, HookResult};
 use crate::types::{HookEvent, HookInput, HookOutput};
-use uira_types::{TodoItem, TodoPriority, TodoStatus};
+use uira_core::{TodoItem, TodoPriority, TodoStatus};
 
 /// Lenient deserialization struct for backward-compatible parsing of todo files
 /// written by Claude Code (`~/.claude/todos/`) which use optional fields.

@@ -5594,7 +5594,6 @@ dependencies = [
  "uira-permissions",
  "uira-providers",
  "uira-sandbox",
- "uira-types",
  "uuid",
 ]
 
@@ -5630,7 +5629,6 @@ dependencies = [
  "uira-providers",
  "uira-sandbox",
  "uira-tui",
- "uira-types",
  "webbrowser",
 ]
 
@@ -5701,7 +5699,6 @@ dependencies = [
  "uira-oxc",
  "uira-providers",
  "uira-sandbox",
- "uira-types",
  "unicase",
 ]
 
@@ -5720,7 +5717,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-types",
+ "uuid",
 ]
 
 [[package]]
@@ -5746,7 +5743,6 @@ dependencies = [
  "uira-core",
  "uira-orchestration",
  "uira-providers",
- "uira-types",
 ]
 
 [[package]]
@@ -5768,7 +5764,6 @@ dependencies = [
  "tokio-test",
  "uira-comment-checker",
  "uira-core",
- "uira-types",
 ]
 
 [[package]]
@@ -5845,7 +5840,6 @@ dependencies = [
  "uira-mcp-client",
  "uira-permissions",
  "uira-sandbox",
- "uira-types",
  "uuid",
  "walkdir",
 ]
@@ -5907,7 +5901,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
- "uira-types",
+ "uira-core",
  "url",
  "uuid",
  "wiremock",
@@ -5926,7 +5920,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uira-types",
+ "uira-core",
 ]
 
 [[package]]
@@ -5949,20 +5943,6 @@ dependencies = [
  "uira-agent",
  "uira-core",
  "uira-providers",
- "uira-types",
-]
-
-[[package]]
-name = "uira-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
 ]
 
 [[package]]

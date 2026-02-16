@@ -13,7 +13,7 @@ use tokio::time::timeout;
 use uira_core::{Event, EventBus};
 use uira_hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_providers::ModelClient;
-use uira_types::{
+use uira_core::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
@@ -370,7 +370,7 @@ impl Agent {
 
                     current_input = InteractiveInput::Prompt(format!(
                         "{}\n\n[Status: {}/{} completed, {} remaining]",
-                        uira_types::TODO_CONTINUATION_PROMPT,
+                        uira_core::TODO_CONTINUATION_PROMPT,
                         total.saturating_sub(incomplete_count),
                         total,
                         incomplete_count
@@ -885,7 +885,7 @@ impl Agent {
 
             // Add assistant message to context
             let assistant_message =
-                Message::with_blocks(uira_types::Role::Assistant, response.content.clone());
+                Message::with_blocks(uira_core::Role::Assistant, response.content.clone());
             self.record_message(assistant_message.clone());
             self.session
                 .context
@@ -945,8 +945,8 @@ impl Agent {
     /// Get model response with streaming, emitting ContentDelta events
     async fn get_response_streaming(
         &mut self,
-        tool_specs: &[uira_types::ToolSpec],
-    ) -> Result<uira_types::ModelResponse, AgentLoopError> {
+        tool_specs: &[uira_core::ToolSpec],
+    ) -> Result<uira_core::ModelResponse, AgentLoopError> {
         let stream = self
             .session
             .client
@@ -1151,8 +1151,8 @@ impl Agent {
                     .rev()
                     .find(|m| m.role == Role::Assistant)
                     .map(|m| match &m.content {
-                        uira_types::MessageContent::Text(s) => s.clone(),
-                        uira_types::MessageContent::Blocks(blocks) => blocks
+                        uira_core::MessageContent::Text(s) => s.clone(),
+                        uira_core::MessageContent::Blocks(blocks) => blocks
                             .iter()
                             .filter_map(|b| {
                                 if let ContentBlock::Text { text } = b {
@@ -1163,7 +1163,7 @@ impl Agent {
                             })
                             .collect::<Vec<_>>()
                             .join(""),
-                        uira_types::MessageContent::ToolCalls(_) => String::new(),
+                        uira_core::MessageContent::ToolCalls(_) => String::new(),
                     })
                     .unwrap_or_default();
 
@@ -1240,7 +1240,7 @@ impl Agent {
     }
 
     /// Record turn context to the session log
-    fn record_turn(&mut self, turn: usize, usage: uira_types::TokenUsage) {
+    fn record_turn(&mut self, turn: usize, usage: uira_core::TokenUsage) {
         if let Some(ref mut recorder) = self.session_recorder {
             if let Err(e) = recorder.record_turn(turn, usage) {
                 tracing::warn!("Failed to record turn to session log: {}", e);
@@ -1503,7 +1503,7 @@ impl Agent {
                             .await;
 
                             if decision.is_denied() {
-                                let deny_reason = if let uira_types::ReviewDecision::Deny {
+                                let deny_reason = if let uira_core::ReviewDecision::Deny {
                                     reason,
                                 } = &decision
                                 {

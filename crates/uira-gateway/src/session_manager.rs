@@ -12,7 +12,7 @@ use tokio::time::{timeout, Duration};
 use uira_agent::{Agent, AgentConfig, EventStream};
 use uira_core::schema::GatewaySettings;
 use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
-use uira_types::{Message, Provider, ThreadEvent};
+use uira_core::{Message, Provider, ThreadEvent};
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;

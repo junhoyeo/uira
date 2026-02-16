@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use uira_types::ToolOutput;
+use uira_core::ToolOutput;
 
 use crate::tools::provider::ToolProvider;
 use crate::tools::{BoxedTool, Tool, ToolContext, ToolError};
@@ -98,11 +98,11 @@ impl ToolRouter {
     }
 
     /// Get tool specifications for model API
-    pub fn specs(&self) -> Vec<uira_types::ToolSpec> {
-        let mut specs: Vec<uira_types::ToolSpec> = self
+    pub fn specs(&self) -> Vec<uira_core::ToolSpec> {
+        let mut specs: Vec<uira_core::ToolSpec> = self
             .tools
             .values()
-            .map(|t| uira_types::ToolSpec::new(t.name(), t.description(), t.schema()))
+            .map(|t| uira_core::ToolSpec::new(t.name(), t.description(), t.schema()))
             .collect();
 
         // Add provider specs
@@ -125,7 +125,7 @@ mod tests {
     use super::*;
     use crate::tools::FunctionTool;
     use serde_json::json;
-    use uira_types::JsonSchema;
+    use uira_core::JsonSchema;
 
     #[tokio::test]
     async fn test_router_dispatch() {

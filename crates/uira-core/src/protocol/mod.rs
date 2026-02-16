@@ -6,14 +6,14 @@
 //! - Tool call/response types
 //! - Common error types
 
-mod core;
 mod events;
 mod messages;
+mod primitives;
 mod tools;
 mod types;
 
-pub use core::*;
 pub use events::*;
 pub use messages::*;
+pub use primitives::*;
 pub use tools::*;
 pub use types::*;

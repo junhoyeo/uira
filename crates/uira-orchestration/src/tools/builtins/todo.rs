@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uira_types::{
+use uira_core::{
     ApprovalRequirement, JsonSchema, SandboxPreference, TodoItem, TodoPriority, TodoStatus,
     ToolOutput,
 };

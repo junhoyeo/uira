@@ -18,7 +18,8 @@ anyhow = { workspace = true }
 tracing = "0.1"
 async-trait = "0.1"
 parking_lot = "0.12"
-uira-types = { workspace = true }
+uuid = { version = "1", features = ["v4", "serde"] }
+tempfile = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

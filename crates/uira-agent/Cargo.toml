@@ -12,7 +12,6 @@ default = []
 otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic", "tracing-opentelemetry"]
 
 [dependencies]
-uira-types = { workspace = true }
 uira-providers = { workspace = true }
 uira-sandbox = { workspace = true }
 uira-orchestration = { workspace = true }

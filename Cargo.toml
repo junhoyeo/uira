@@ -9,8 +9,6 @@ members = [
   "crates/uira-mcp-client",
   "crates/uira-mcp-server",
   "crates/uira-oxc",
-# New agent harness crates
-"crates/uira-types",
 "crates/uira-providers",
 "crates/uira-sandbox",
 "crates/uira-agent",
@@ -28,7 +26,6 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
-uira-types = { path = "crates/uira-types" }
 uira-core = { path = "crates/uira-core" }
 
 # Internal crates - Features
