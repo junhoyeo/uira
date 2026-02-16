@@ -1334,14 +1334,35 @@ async fn run_gateway(command: &GatewayCommands) -> Result<(), Box<dyn std::error
     }
 }
 
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        use crossterm::{
+            cursor::Show,
+            event::DisableMouseCapture,
+            execute,
+            terminal::{disable_raw_mode, LeaveAlternateScreen},
+        };
+        let _ = execute!(
+            std::io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            Show
+        );
+        let _ = disable_raw_mode();
+    }
+}
+
 async fn run_interactive(
     cli: &Cli,
     config: &CliConfig,
     tracing_rx: Option<UnboundedReceiver<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crossterm::{
+        event::EnableMouseCapture,
         execute,
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        terminal::{enable_raw_mode, EnterAlternateScreen},
     };
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
@@ -1373,7 +1394,8 @@ async fn run_interactive(
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let _terminal_guard = TerminalGuard;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -1402,22 +1424,15 @@ async fn run_interactive(
     let executor_config = ExecutorConfig::new(provider_config.clone(), agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
 
-    let result = app
-        .run_with_agent(
-            &mut terminal,
-            agent_config,
-            client,
-            Some(executor),
-            tracing_rx,
-        )
-        .await;
-
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    result.map_err(|e| e.into())
+    app.run_with_agent(
+        &mut terminal,
+        agent_config,
+        client,
+        Some(executor),
+        tracing_rx,
+    )
+    .await
+    .map_err(|e| e.into())
 }
 
 fn build_agent_model_overrides(
