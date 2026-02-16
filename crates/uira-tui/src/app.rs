@@ -25,7 +25,10 @@ use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
 };
-use uira_core::{schema::SidebarConfig, UIRA_DIR};
+use uira_core::{
+    schema::SidebarConfig, ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY,
+    ENV_OPENAI_API_KEY, UIRA_DIR,
+};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
@@ -713,7 +716,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
 
     match provider {
         "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
+            let api_key = std::env::var(ENV_ANTHROPIC_API_KEY)
                 .ok()
                 .map(SecretString::from);
 
@@ -729,7 +732,9 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 .map_err(|e| e.to_string())
         }
         "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+            let api_key = std::env::var(ENV_OPENAI_API_KEY)
+                .ok()
+                .map(SecretString::from);
 
             let config = ProviderConfig {
                 provider: Provider::OpenAI,
@@ -743,8 +748,8 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 .map_err(|e| e.to_string())
         }
         "google" | "gemini" => {
-            let api_key = std::env::var("GEMINI_API_KEY")
-                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            let api_key = std::env::var(ENV_GEMINI_API_KEY)
+                .or_else(|_| std::env::var(ENV_GOOGLE_API_KEY))
                 .ok()
                 .map(SecretString::from);
 

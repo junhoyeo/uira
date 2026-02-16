@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
+use uira_core::{
+    ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY, ENV_OPENAI_API_KEY,
+};
 use uira_agent::{
     init_subscriber, init_tui_subscriber, Agent, AgentConfig, EventStream, ExecutorConfig,
     RecursiveAgentExecutor, TelemetryConfig,
@@ -1497,7 +1500,7 @@ fn create_client(
 
     match provider {
         "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY")
+            let api_key = std::env::var(ENV_ANTHROPIC_API_KEY)
                 .ok()
                 .map(SecretString::from);
 
@@ -1512,7 +1515,9 @@ fn create_client(
             Ok((Arc::new(client), provider_config))
         }
         "openai" => {
-            let api_key = std::env::var("OPENAI_API_KEY").ok().map(SecretString::from);
+            let api_key = std::env::var(ENV_OPENAI_API_KEY)
+                .ok()
+                .map(SecretString::from);
 
             let provider_config = ProviderConfig {
                 provider: Provider::OpenAI,
@@ -1525,8 +1530,8 @@ fn create_client(
             Ok((Arc::new(client), provider_config))
         }
         "gemini" | "google" => {
-            let api_key = std::env::var("GEMINI_API_KEY")
-                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+            let api_key = std::env::var(ENV_GEMINI_API_KEY)
+                .or_else(|_| std::env::var(ENV_GOOGLE_API_KEY))
                 .map_err(|_| "GEMINI_API_KEY or GOOGLE_API_KEY not set")?;
 
             let provider_config = ProviderConfig {

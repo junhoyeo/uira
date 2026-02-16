@@ -10,6 +10,7 @@ const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
 const OAUTH_PORT: u16 = 1455;
+const ENV_OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 
 /// OpenAI Codex CLI OAuth Client ID (public, used by OpenCode/Codex CLI)
 const OPENAI_CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -174,7 +175,7 @@ impl AuthProvider for OpenAIAuth {
     fn auth_methods(&self) -> Vec<AuthMethod> {
         let mut methods = vec![AuthMethod::ApiKey {
             label: "OpenAI API Key".to_string(),
-            env_var: "OPENAI_API_KEY".to_string(),
+            env_var: ENV_OPENAI_API_KEY.to_string(),
         }];
 
         if self.client_id.is_some() {
