@@ -15,7 +15,7 @@ pub enum AgentLoopError {
     Context(#[from] crate::context::ContextError),
 
     #[error("sandbox error: {0}")]
-    Sandbox(#[from] uira_sandbox::SandboxError),
+    Sandbox(#[from] uira_security::SandboxError),
 
     #[error("tool error: {tool} - {message}")]
     Tool { tool: String, message: String },

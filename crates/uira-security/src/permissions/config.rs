@@ -1,4 +1,4 @@
-use crate::{Action, PatternError, PermissionEvaluator, PermissionRule};
+use super::{Action, PatternError, PermissionEvaluator, PermissionRule};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigAction {

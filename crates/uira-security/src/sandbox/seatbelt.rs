@@ -1,6 +1,6 @@
 //! macOS Seatbelt (sandbox-exec) implementation
 
-use crate::SandboxPolicy;
+use super::SandboxPolicy;
 
 /// Generate a Seatbelt policy string for the given sandbox policy
 #[allow(dead_code)] // Used when sandbox is applied

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SandboxPolicy;
+use super::{SandboxError, SandboxPolicy};
 
 /// Landlock access rights for files
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -133,7 +133,7 @@ pub fn generate_rules(policy: &SandboxPolicy) -> Vec<LandlockRule> {
 
 /// Apply Landlock rules to the current process
 #[cfg(target_os = "linux")]
-pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError> {
+pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), SandboxError> {
     use enumflags2::BitFlag;
     use landlock::{AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr};
 
@@ -159,9 +159,9 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
     // Create the ruleset
     let mut ruleset = Ruleset::default()
         .handle_access(access_fs_all)
-        .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?
+        .map_err(|e| SandboxError::PolicyViolation(e.to_string()))?
         .create()
-        .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?;
+        .map_err(|e| SandboxError::PolicyViolation(e.to_string()))?;
 
     // Add rules for each path
     for rule in rules {
@@ -171,10 +171,7 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
         }
 
         let path_fd = PathFd::new(path).map_err(|e| {
-            crate::SandboxError::PolicyViolation(format!(
-                "Failed to open path {}: {}",
-                rule.path, e
-            ))
+            SandboxError::PolicyViolation(format!("Failed to open path {}: {}", rule.path, e))
         })?;
 
         let mut access = AccessFs::empty();
@@ -202,21 +199,21 @@ pub fn apply_landlock(rules: &[LandlockRule]) -> Result<(), crate::SandboxError>
         if !access.is_empty() {
             ruleset = ruleset
                 .add_rule(PathBeneath::new(path_fd, access))
-                .map_err(|e| crate::SandboxError::PolicyViolation(e.to_string()))?;
+                .map_err(|e| SandboxError::PolicyViolation(e.to_string()))?;
         }
     }
 
     // Restrict the current thread
-    ruleset.restrict_self().map_err(|e| {
-        crate::SandboxError::PolicyViolation(format!("Failed to restrict self: {}", e))
-    })?;
+    ruleset
+        .restrict_self()
+        .map_err(|e| SandboxError::PolicyViolation(format!("Failed to restrict self: {}", e)))?;
 
     Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn apply_landlock(_rules: &[LandlockRule]) -> Result<(), crate::SandboxError> {
-    Err(crate::SandboxError::NotAvailable)
+pub fn apply_landlock(_rules: &[LandlockRule]) -> Result<(), SandboxError> {
+    Err(SandboxError::NotAvailable)
 }
 
 #[cfg(test)]

@@ -19,7 +19,7 @@ use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
 };
-use uira_sandbox::SandboxPolicy;
+use uira_security::SandboxPolicy;
 
 mod commands;
 mod config;

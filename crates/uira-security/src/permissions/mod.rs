@@ -27,7 +27,7 @@
 //! # Example
 //!
 //! ```rust
-//! use uira_permissions::{PermissionEvaluator, PermissionRule, Action, EvaluatorBuilder};
+//! use uira_security::permissions::{PermissionEvaluator, PermissionRule, Action, EvaluatorBuilder};
 //!
 //! // Using the builder
 //! let evaluator = EvaluatorBuilder::new()
@@ -77,7 +77,6 @@ pub mod pattern;
 pub mod rule;
 pub mod types;
 
-// Re-export main types
 pub use config::{build_evaluator_from_rules, ConfigAction, ConfigRule};
 pub use evaluator::{EvaluationResult, EvaluatorBuilder, PermissionEvaluator};
 pub use pattern::{expand_path, normalize_path, Pattern, PatternError};
@@ -86,9 +85,9 @@ pub use types::{Action, Permission};
 
 /// Prelude for common imports
 pub mod prelude {
-    pub use crate::evaluator::{EvaluationResult, EvaluatorBuilder, PermissionEvaluator};
-    pub use crate::rule::PermissionRule;
-    pub use crate::types::{Action, Permission};
+    pub use super::evaluator::{EvaluationResult, EvaluatorBuilder, PermissionEvaluator};
+    pub use super::rule::PermissionRule;
+    pub use super::types::{Action, Permission};
 }
 
 #[cfg(test)]

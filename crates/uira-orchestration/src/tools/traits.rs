@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use uira_sandbox::{SandboxPolicy, SandboxType};
+use uira_security::{SandboxPolicy, SandboxType};
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::ToolError;

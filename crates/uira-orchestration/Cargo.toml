@@ -12,8 +12,7 @@ uira-core = { workspace = true }
 uira-hooks = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-mcp-client = { workspace = true }
-uira-permissions = { workspace = true }
-uira-sandbox = { workspace = true }
+uira-security = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

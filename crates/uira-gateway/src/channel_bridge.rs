@@ -684,6 +684,24 @@ fn strip_markdown_formatting(content: &str) -> String {
         .replace("__", "")
         .replace("~~", "");
 
+    let chars: Vec<char> = stripped.chars().collect();
+    let mut no_single_underscore = String::with_capacity(stripped.len());
+    for (i, ch) in chars.iter().enumerate() {
+        if *ch == '_' {
+            let prev = i.checked_sub(1).and_then(|idx| chars.get(idx)).copied();
+            let next = chars.get(i + 1).copied();
+            let opens_emphasis = prev.map(|c| !c.is_alphanumeric()).unwrap_or(true)
+                && next.map(|c| c.is_alphanumeric()).unwrap_or(false);
+            let closes_emphasis = prev.map(|c| c.is_alphanumeric()).unwrap_or(false)
+                && next.map(|c| !c.is_alphanumeric()).unwrap_or(true);
+            if opens_emphasis || closes_emphasis {
+                continue;
+            }
+        }
+        no_single_underscore.push(*ch);
+    }
+    stripped = no_single_underscore;
+
     stripped = stripped
         .lines()
         .map(|line| {

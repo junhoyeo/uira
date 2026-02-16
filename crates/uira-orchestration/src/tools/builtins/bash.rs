@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::time::timeout;
-use uira_sandbox::{SandboxManager, SandboxPolicy, SandboxType};
+use uira_security::{SandboxManager, SandboxPolicy, SandboxType};
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};

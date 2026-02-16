@@ -245,7 +245,7 @@ impl AstToolProvider {
 
         let dry_run = input["dryRun"].as_bool().unwrap_or(true);
 
-        if !dry_run && ctx.sandbox_type != uira_sandbox::SandboxType::None {
+        if !dry_run && ctx.sandbox_type != uira_security::SandboxType::None {
             return Err(ToolError::SandboxDenied {
                 message: "ast_replace write mode is not available in sandboxed sessions; use dryRun=true or disable sandbox for this run".to_string(),
                 retryable: false,

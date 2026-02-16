@@ -1394,7 +1394,7 @@ impl Agent {
                 .orchestrator
                 .evaluate_permission(&call.name, &call.input)
             {
-                use uira_permissions::Action as PermAction;
+                use uira_security::Action as PermAction;
                 match permission_action {
                     PermAction::Deny => {
                         let error_msg = format!("Permission denied for tool: {}", call.name);

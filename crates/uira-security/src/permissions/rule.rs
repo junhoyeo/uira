@@ -4,8 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::pattern::{Pattern, PatternError};
-use crate::types::Action;
+use super::pattern::{Pattern, PatternError};
+use super::types::Action;
 
 /// A permission rule that matches a permission and path pattern
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,9 +10,8 @@ members = [
   "crates/uira-mcp-server",
   "crates/uira-oxc",
 "crates/uira-providers",
-"crates/uira-sandbox",
+"crates/uira-security",
 "crates/uira-agent",
-"crates/uira-permissions",
     "crates/uira-cli",
     "crates/uira-tui",
     "crates/uira-gateway",
@@ -39,9 +38,8 @@ uira-comment-checker = { path = "crates/uira-comment-checker" }
 
 # Internal crates - Agent harness
 uira-providers = { path = "crates/uira-providers" }
-uira-sandbox = { path = "crates/uira-sandbox" }
+uira-security = { path = "crates/uira-security" }
 uira-agent = { path = "crates/uira-agent" }
-uira-permissions = { path = "crates/uira-permissions" }
 
 # Internal crates - Applications
 uira-cli = { path = "crates/uira-cli" }

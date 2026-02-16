@@ -3,9 +3,9 @@
 //! Evaluates permissions against a set of rules.
 //! Default action is Allow (per user preference in plan).
 
-use crate::pattern::PatternError;
-use crate::rule::{CompiledRule, PermissionRule};
-use crate::types::Action;
+use super::pattern::PatternError;
+use super::rule::{CompiledRule, PermissionRule};
+use super::types::{Action, Permission};
 
 /// Result of permission evaluation
 #[derive(Debug, Clone)]
@@ -123,7 +123,7 @@ impl PermissionEvaluator {
     ///
     /// Extracts the path from common tool input formats.
     pub fn evaluate_tool(&self, tool_name: &str, input: &serde_json::Value) -> EvaluationResult {
-        let permission = crate::types::Permission::from_tool_name(tool_name);
+        let permission = Permission::from_tool_name(tool_name);
         let path = extract_path_from_input(input);
 
         self.evaluate(permission.as_str(), &path)

@@ -5591,9 +5591,8 @@ dependencies = [
  "uira-core",
  "uira-hooks",
  "uira-orchestration",
- "uira-permissions",
  "uira-providers",
- "uira-sandbox",
+ "uira-security",
  "uuid",
 ]
 
@@ -5627,7 +5626,7 @@ dependencies = [
  "uira-mcp-client",
  "uira-orchestration",
  "uira-providers",
- "uira-sandbox",
+ "uira-security",
  "uira-tui",
  "webbrowser",
 ]
@@ -5698,7 +5697,7 @@ dependencies = [
  "uira-orchestration",
  "uira-oxc",
  "uira-providers",
- "uira-sandbox",
+ "uira-security",
  "unicase",
 ]
 
@@ -5838,8 +5837,7 @@ dependencies = [
  "uira-core",
  "uira-hooks",
  "uira-mcp-client",
- "uira-permissions",
- "uira-sandbox",
+ "uira-security",
  "uuid",
  "walkdir",
 ]
@@ -5850,18 +5848,6 @@ version = "0.1.0"
 dependencies = [
  "oxc",
  "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "uira-permissions"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "globset",
  "serde",
  "serde_json",
  "tempfile",
@@ -5908,10 +5894,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "uira-sandbox"
+name = "uira-security"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "enumflags2",
+ "globset",
  "landlock",
  "nix",
  "serde",

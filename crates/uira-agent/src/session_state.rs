@@ -8,9 +8,9 @@ use uira_orchestration::{
     DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
     ToolContext, ToolOrchestrator, ToolRouter,
 };
-use uira_permissions::build_evaluator_from_rules;
+use uira_security::build_evaluator_from_rules;
 use uira_providers::ModelClient;
-use uira_sandbox::SandboxManager;
+use uira_security::SandboxManager;
 use uira_core::{MessageId, SessionId, TokenUsage};
 
 use crate::AgentConfig;
@@ -174,9 +174,9 @@ impl Session {
 
     pub fn tool_context(&self) -> ToolContext {
         let sandbox_type = if self.config.sandbox_policy.is_restrictive() {
-            uira_sandbox::SandboxType::Native
+            uira_security::SandboxType::Native
         } else {
-            uira_sandbox::SandboxType::None
+            uira_security::SandboxType::None
         };
 
         ToolContext {

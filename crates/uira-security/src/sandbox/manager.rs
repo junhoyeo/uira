@@ -5,7 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use uira_core::SandboxPreference;
 
-use crate::{SandboxError, SandboxPolicy, SandboxType};
+use super::{SandboxError, SandboxPolicy, SandboxType};
 
 /// Manages sandbox selection and command execution
 pub struct SandboxManager {
@@ -96,7 +96,7 @@ impl SandboxManager {
 
     #[cfg(target_os = "macos")]
     fn wrap_seatbelt(&self, cmd: &mut Command) -> Result<(), SandboxError> {
-        use crate::seatbelt;
+        use super::seatbelt;
 
         // Generate the seatbelt policy
         let policy = seatbelt::generate_policy(&self.policy);
@@ -117,7 +117,7 @@ impl SandboxManager {
 
     #[cfg(target_os = "linux")]
     fn wrap_landlock(&self, cmd: &mut Command) -> Result<(), SandboxError> {
-        use crate::landlock;
+        use super::landlock;
 
         // Landlock requires applying restrictions BEFORE fork/exec.
         // We use pre_exec to apply the restrictions in the child process.
