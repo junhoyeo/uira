@@ -1473,9 +1473,9 @@ More output"#;
             ..Default::default()
         };
 
-        let goals_result = super::super::VerificationResult {
+        let goals_result = crate::VerificationResult {
             all_passed: false,
-            results: vec![super::super::GoalCheckResult {
+            results: vec![crate::GoalCheckResult {
                 name: "pixel-match".to_string(),
                 score: 85.0,
                 target: 99.0,
@@ -1518,9 +1518,9 @@ More output"#;
 
     #[test]
     fn test_detect_completion_signals_with_goals_passing() {
-        let goals_result = super::super::VerificationResult {
+        let goals_result = crate::VerificationResult {
             all_passed: true,
-            results: vec![super::super::GoalCheckResult {
+            results: vec![crate::GoalCheckResult {
                 name: "test".to_string(),
                 score: 100.0,
                 target: 95.0,
