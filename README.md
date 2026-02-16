@@ -115,7 +115,9 @@ Credentials are securely stored in `~/.uira/auth.json`.
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `↑` / `↓` | Scroll through messages |
+| `↑` / `↓` | Navigate input history |
+| `k` / `j` | Scroll chat view |
+| `Mouse wheel` | Scroll chat view |
 | `←` / `→` | Move cursor in input |
 | `Ctrl+G` | Open external editor for composing input |
 | `Ctrl+C` | Quit |
