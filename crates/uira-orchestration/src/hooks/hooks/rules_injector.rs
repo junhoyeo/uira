@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -671,7 +672,7 @@ pub fn find_rule_files(
 // =============================================================================
 
 fn rules_injector_storage_dir_for_home(home: &Path) -> PathBuf {
-    home.join(".uira").join("rules-injector")
+    home.join(UIRA_DIR).join("rules-injector")
 }
 
 fn _rules_injector_storage_dir() -> Option<PathBuf> {

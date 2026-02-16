@@ -28,6 +28,7 @@ use crate::{
 
 const DEFAULT_MAX_TOKENS: usize = 4096;
 const PROVIDER_NAME: &str = "openai";
+const ENV_OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024;
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 const OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -117,7 +118,7 @@ impl OpenAIClient {
             return Ok(CredentialSource::ApiKey(api_key.clone()));
         }
 
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        if let Ok(key) = std::env::var(ENV_OPENAI_API_KEY) {
             return Ok(CredentialSource::ApiKey(SecretString::from(key)));
         }
 

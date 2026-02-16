@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use super::agent::{AgentDefinitionEntry, AgentDefinitions};
 use super::config::PluginConfig;
@@ -358,7 +359,7 @@ continue working until everything is done."#
             let home_path = PathBuf::from(home);
 
             // ~/.uira/config.yaml
-            let uira_config = home_path.join(".uira").join("config.yaml");
+            let uira_config = home_path.join(UIRA_DIR).join("config.yaml");
             if uira_config.exists() {
                 paths.push(uira_config);
             }

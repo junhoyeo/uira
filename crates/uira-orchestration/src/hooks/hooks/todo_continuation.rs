@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
-use uira_core::{TodoItem, TodoPriority, TodoStatus};
+use uira_core::{TodoItem, TodoPriority, TodoStatus, UIRA_DIR};
 
 /// Lenient deserialization struct for backward-compatible parsing of todo files
 /// written by Claude Code (`~/.claude/todos/`) which use optional fields.
@@ -110,14 +110,14 @@ impl TodoContinuationHook {
                 paths.push(claude_dir.join("todos").join(format!("{}.json", sid)));
             }
 
-            let uira_dir = home.join(".uira");
+            let uira_dir = home.join(UIRA_DIR);
             if let Some(sid) = session_id {
                 paths.push(uira_dir.join("todos").join(format!("{}.json", sid)));
             }
         }
 
         let dir = Path::new(directory);
-        paths.push(dir.join(".uira").join("todos.json"));
+        paths.push(dir.join(UIRA_DIR).join("todos.json"));
         paths.push(dir.join(".claude").join("todos.json"));
 
         paths

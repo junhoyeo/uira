@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::RwLock;
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -33,7 +34,7 @@ fn agents_injector_storage_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(dir));
     }
 
-    dirs::home_dir().map(|h| h.join(".uira").join("directory-agents"))
+    dirs::home_dir().map(|h| h.join(UIRA_DIR).join("directory-agents"))
 }
 
 fn get_agents_storage_path(session_id: &str) -> Option<PathBuf> {

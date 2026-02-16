@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -193,14 +194,14 @@ impl UltrapilotHook {
     /// Get the state file path
     fn get_state_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("state")
             .join("ultrapilot-state.json")
     }
 
     /// Ensure the state directory exists
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let state_dir = Path::new(directory).join(".uira").join("state");
+        let state_dir = Path::new(directory).join(UIRA_DIR).join("state");
         if !state_dir.exists() {
             fs::create_dir_all(&state_dir)?;
         }

@@ -12,6 +12,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -69,11 +70,11 @@ impl NotepadHook {
     }
 
     pub fn get_notepad_path(directory: &str) -> PathBuf {
-        Path::new(directory).join(".uira").join(NOTEPAD_FILENAME)
+        Path::new(directory).join(UIRA_DIR).join(NOTEPAD_FILENAME)
     }
 
     fn ensure_uira_dir(directory: &str) -> std::io::Result<()> {
-        let uira_dir = Path::new(directory).join(".uira");
+        let uira_dir = Path::new(directory).join(UIRA_DIR);
         if !uira_dir.exists() {
             fs::create_dir_all(&uira_dir)?;
         }

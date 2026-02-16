@@ -25,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -1600,7 +1601,7 @@ fn get_progress_paths(directory: &str) -> (PathBuf, PathBuf) {
     let dir = Path::new(directory);
     (
         dir.join(PROGRESS_FILENAME),
-        dir.join(".uira").join(PROGRESS_FILENAME),
+        dir.join(UIRA_DIR).join(PROGRESS_FILENAME),
     )
 }
 

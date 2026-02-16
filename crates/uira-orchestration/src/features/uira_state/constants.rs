@@ -1,4 +1,4 @@
-pub const UIRA_DIR: &str = ".uira";
+pub use uira_core::UIRA_DIR;
 
 pub const UIRA_STATE_FILE: &str = "boulder.json";
 

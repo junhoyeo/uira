@@ -58,7 +58,7 @@ impl DelegationToolProvider {
                     .get(agent)
                     .and_then(|agent_config| agent_config.model.clone())
             })
-            .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string())
+            .unwrap_or_else(|| uira_core::DEFAULT_ANTHROPIC_MODEL.to_string())
     }
 
     fn format_completion_result(

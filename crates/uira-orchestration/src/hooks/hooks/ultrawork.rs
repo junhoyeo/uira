@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::ralph::RalphHook;
@@ -61,7 +62,7 @@ impl UltraworkHook {
     /// Get the state file path for Ultrawork (local)
     fn get_state_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("ultrawork-state.json")
     }
 
@@ -72,7 +73,7 @@ impl UltraworkHook {
 
     /// Ensure the .uira directory exists
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let uira_dir = Path::new(directory).join(".uira");
+        let uira_dir = Path::new(directory).join(UIRA_DIR);
         if !uira_dir.exists() {
             fs::create_dir_all(&uira_dir)?;
         }

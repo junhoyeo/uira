@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +30,23 @@ use crate::{
 
 /// Timeout for approval requests (5 minutes)
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn get_git_branch() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 struct BranchState {
     parent: Option<String>,
@@ -67,7 +85,7 @@ impl Agent {
         Self {
             session: Session::new_with_executor(config, client, executor),
             branches: HashMap::new(),
-            current_branch: "main".to_string(),
+            current_branch: get_git_branch(),
             current_branch_parent: None,
             control: AgentControl::default(),
             state: AgentState::Idle,

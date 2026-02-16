@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::super::types::{HookEvent, HookInput, HookOutput};
@@ -79,7 +80,7 @@ fn uira_storage_dir() -> Option<PathBuf> {
         }
     }
 
-    dirs::home_dir().map(|h| h.join(".uira"))
+    dirs::home_dir().map(|h| h.join(UIRA_DIR))
 }
 
 fn agent_usage_reminder_storage_dir() -> Option<PathBuf> {

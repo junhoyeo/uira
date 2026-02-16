@@ -38,6 +38,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_MAX_TOKENS: usize = 8192;
 const MAX_SSE_BUFFER: usize = 10 * 1024 * 1024; // 10MB SSE buffer cap
 const PROVIDER_NAME: &str = "anthropic";
+const ENV_ANTHROPIC_API_KEY: &str = "ANTHROPIC_API_KEY";
 /// Buffer time before token expiration to trigger refresh (5 minutes)
 const TOKEN_REFRESH_BUFFER_SECS: i64 = 300;
 /// OAuth client ID (same as Claude Code CLI)
@@ -121,7 +122,7 @@ impl AnthropicClient {
             return Ok(Self::credential_from_key(api_key.clone()));
         }
 
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        if let Ok(key) = std::env::var(ENV_ANTHROPIC_API_KEY) {
             tracing::debug!("Using credential from ANTHROPIC_API_KEY env var");
             return Ok(Self::credential_from_key(SecretString::from(key)));
         }

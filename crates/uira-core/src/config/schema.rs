@@ -285,7 +285,7 @@ impl TyposAiSettings {
 }
 
 fn default_typos_model() -> String {
-    "anthropic/claude-sonnet-4-20250514".to_string()
+    format!("anthropic/{}", crate::DEFAULT_ANTHROPIC_MODEL)
 }
 
 // ============================================================================
@@ -335,7 +335,7 @@ impl DiagnosticsAiSettings {
 }
 
 fn default_diagnostics_model() -> String {
-    "anthropic/claude-sonnet-4-20250514".to_string()
+    format!("anthropic/{}", crate::DEFAULT_ANTHROPIC_MODEL)
 }
 
 fn default_diagnostics_severity() -> String {
@@ -398,7 +398,7 @@ impl CommentsAiSettings {
 }
 
 fn default_comments_model() -> String {
-    "anthropic/claude-sonnet-4-20250514".to_string()
+    format!("anthropic/{}", crate::DEFAULT_ANTHROPIC_MODEL)
 }
 
 fn default_comments_pragma() -> String {
@@ -918,7 +918,7 @@ fn default_max_sessions() -> usize {
 }
 
 fn default_gateway_model() -> String {
-    "claude-sonnet-4-20250514".to_string()
+    crate::DEFAULT_ANTHROPIC_MODEL.to_string()
 }
 
 fn default_gateway_provider() -> String {

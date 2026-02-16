@@ -9,6 +9,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
 use super::ralph::RalphHook;
@@ -85,12 +86,12 @@ impl UltraQAHook {
 
     fn get_state_file_path(directory: &str) -> PathBuf {
         Path::new(directory)
-            .join(".uira")
+            .join(UIRA_DIR)
             .join("ultraqa-state.json")
     }
 
     fn ensure_state_dir(directory: &str) -> std::io::Result<()> {
-        let uira_dir = Path::new(directory).join(".uira");
+        let uira_dir = Path::new(directory).join(UIRA_DIR);
         if !uira_dir.exists() {
             fs::create_dir_all(&uira_dir)?;
         }
