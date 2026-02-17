@@ -13,6 +13,7 @@ pub mod background_agent;
 pub mod builtin_skills;
 pub mod context_injector;
 pub mod delegation_categories;
+pub mod dynamic_prompt_builder;
 pub mod keywords;
 pub mod model_routing;
 pub mod notepad_wisdom;
