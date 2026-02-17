@@ -250,13 +250,57 @@ function verify(expected) {
 function publishCrates() {
   heading("Publishing to crates.io");
 
+  const MAX_RETRIES = 10;
+  const RATE_LIMIT_DELAY_SECS = 120;
+
   for (const crate of CRATE_ORDER) {
     log(`Publishing ${crate}...`);
-    run("cargo", ["publish", "-p", crate, "--no-verify"]);
-    log(`${crate} published`);
 
-    // Wait for crates.io index to propagate before publishing dependents
-    if (crate !== CRATE_ORDER[CRATE_ORDER.length - 1]) {
+    let published = false;
+    let published_skipped = false;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Capture stderr so we can detect rate limits and already-published
+        const result = execFileSync("cargo", ["publish", "-p", crate, "--no-verify", "--allow-dirty"], {
+          encoding: "utf8",
+          cwd: ROOT,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        published = true;
+        break;
+      } catch (e) {
+        const stderr = e.stderr?.toString() || "";
+        const stdout = e.stdout?.toString() || "";
+        const output = stderr + stdout + (e.message || "");
+
+        // Already published — skip
+        if (output.includes("already uploaded") || output.includes("already exists")) {
+          log(`${crate} already published, skipping`);
+          published = true;
+          published_skipped = true;
+          break;
+        }
+
+        // Rate limited — retry with fixed delay
+        if (output.includes("429") || output.includes("Too Many Requests")) {
+          log(`Rate limited (attempt ${attempt}/${MAX_RETRIES}), waiting ${RATE_LIMIT_DELAY_SECS}s...`);
+          execFileSync("sleep", [`${RATE_LIMIT_DELAY_SECS}`]);
+          continue;
+        }
+
+        // Other error — fatal
+        throw e;
+      }
+    }
+
+    if (!published) {
+      die(`Failed to publish ${crate} after ${MAX_RETRIES} retries`);
+    }
+
+    log(`${crate} done`);
+
+    // Wait for crates.io index to propagate (skip for already-published)
+    if (!published_skipped && crate !== CRATE_ORDER[CRATE_ORDER.length - 1]) {
       log("Waiting 15s for index propagation...");
       execFileSync("sleep", ["15"]);
     }
