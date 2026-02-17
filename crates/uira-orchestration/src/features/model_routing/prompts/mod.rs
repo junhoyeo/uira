@@ -1,7 +1,7 @@
+pub mod gpt;
 mod haiku;
 mod opus;
 mod sonnet;
-pub mod gpt;
 
 use crate::model_routing::types::ModelTier;
 
@@ -205,18 +205,6 @@ pub fn create_delegation_prompt_for_model(
                     .join("\n")
             ));
         }
-        if !context.constraints.is_empty() {
-            parts.push(format!(
-                "\n**Constraints:**\n{}",
-                context
-                    .constraints
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| format!("{}. {}", i + 1, c))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
         if !context.dependencies.is_empty() {
             parts.push(format!(
                 "\n**Dependencies:**\n{}",
@@ -225,6 +213,18 @@ pub fn create_delegation_prompt_for_model(
                     .iter()
                     .enumerate()
                     .map(|(i, d)| format!("{}. {}", i + 1, d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !context.constraints.is_empty() {
+            parts.push(format!(
+                "\n**Constraints:**\n{}",
+                context
+                    .constraints
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("{}. {}", i + 1, c))
                     .collect::<Vec<_>>()
                     .join("\n")
             ));
@@ -320,6 +320,7 @@ mod tests {
         let context = DelegationContext {
             task_type: Some("debugging".to_string()),
             file_paths: vec!["src/auth.ts".to_string()],
+            dependencies: vec!["src/lib.rs".to_string()],
             constraints: vec!["No breaking changes".to_string()],
             previous_attempts: Some(2),
             ..Default::default()
@@ -335,6 +336,8 @@ mod tests {
         // GPT prompt should use numbered lists and bold formatting
         assert!(prompt.contains("**Task Type:**"));
         assert!(prompt.contains("1. src/auth.ts"));
+        assert!(prompt.contains("**Dependencies:**"));
+        assert!(prompt.contains("1. src/lib.rs"));
         assert!(prompt.contains("WARNING"));
         assert!(prompt.contains("DIFFERENT approach"));
     }
