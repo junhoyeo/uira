@@ -533,9 +533,16 @@ impl SessionManager {
             agent_config = agent_config.with_working_directory(path);
         }
 
+        // Build additional context: environment context + optional skill context.
+        // Environment context is always injected so agents know the current
+        // date, time, and timezone.
+        let env_context =
+            uira_orchestration::features::context_injector::build_environment_context();
+        let mut additional_context = vec![env_context];
         if let Some(skill_context) = &config.skill_context {
-            agent_config = agent_config.with_additional_context(vec![skill_context.clone()]);
+            additional_context.push(skill_context.clone());
         }
+        agent_config = agent_config.with_additional_context(additional_context);
 
         Ok(agent_config)
     }
