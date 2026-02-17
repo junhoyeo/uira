@@ -1,6 +1,7 @@
 //! Main TUI application
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use arboard::Clipboard;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use futures::StreamExt;
 use ratatui::{
@@ -809,6 +810,7 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
                 tool_name: pending.tool_name,
                 input: pending.input,
                 reason: pending.reason,
+                diff_preview: None,
                 response_tx: pending.response_tx,
             };
 
@@ -890,6 +892,13 @@ pub struct App {
     history_index: Option<usize>,
     /// Saved input when entering history mode
     history_stash: String,
+    pending_g: bool,
+    undo_stack: Vec<Vec<ChatMessage>>,
+    redo_stack: Vec<Vec<ChatMessage>>,
+    session_cost: f64,
+    context_tokens: usize,
+    max_context_tokens: usize,
+    connected_lsps: Vec<String>,
     external_theme_fingerprint: u64,
 }
 
@@ -1169,6 +1178,11 @@ impl App {
         let show_todo_sidebar = !sidebar_collapsed;
         let recent_models = kv_store.get("recent_models", Vec::<String>::new());
         let frecency_store = kv_store.get("frecency_store", FrecencyStore::default());
+        let connected_lsps = if Self::command_exists("rust-analyzer") {
+            vec!["rust-analyzer ✓".to_string()]
+        } else {
+            vec!["rust-analyzer ✗".to_string()]
+        };
 
         let thinking_visible = kv_store.get("thinking_visible", true);
         let timestamps_visible = kv_store.get("timestamps_visible", true);
@@ -1235,6 +1249,13 @@ impl App {
             prompt_history: Self::load_prompt_history().unwrap_or_default(),
             history_index: None,
             history_stash: String::new(),
+            pending_g: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            session_cost: 0.0,
+            context_tokens: 0,
+            max_context_tokens: 128_000,
+            connected_lsps,
             external_theme_fingerprint: Theme::external_theme_fingerprint(),
         }
     }
@@ -1401,6 +1422,7 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
+        self.update_terminal_title();
         let area = frame.area();
         let hud_height = if self.task_registry.has_running_tasks() {
             1
@@ -1418,7 +1440,10 @@ impl App {
 
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
-            || self.current_model.is_some();
+            || self.current_model.is_some()
+            || self.session_cost > 0.0
+            || self.context_tokens > 0
+            || !self.connected_lsps.is_empty();
 
         // Responsive sidebar logic based on terminal width
         let show_sidebar = match area.width {
@@ -1498,6 +1523,12 @@ impl App {
         if self.command_palette.is_active() {
             self.command_palette.render(frame, area);
         }
+    }
+
+    fn update_terminal_title(&self) {
+        let model = self.current_model.as_deref().unwrap_or("no-model");
+        print!("\x1b]0;Uira - {}\x07", model);
+        let _ = std::io::stdout().flush();
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1731,13 +1762,33 @@ impl App {
                     Style::default().fg(self.theme.fg),
                 )));
             }
-            let token_info = self.status.clone();
-            if token_info.contains("tokens") {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", token_info),
-                    Style::default().fg(self.theme.text_muted),
-                )));
-            }
+            let context_pct = if self.max_context_tokens == 0 {
+                0.0
+            } else {
+                (self.context_tokens as f64 / self.max_context_tokens as f64) * 100.0
+            };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  Context: {} / {} ({:.0}%)",
+                    Self::format_token_count(self.context_tokens),
+                    Self::format_context_limit(self.max_context_tokens),
+                    context_pct
+                ),
+                Style::default().fg(self.theme.text_muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Cost: ${:.2}", self.session_cost),
+                Style::default().fg(self.theme.text_muted),
+            )));
+            let lsp_text = if self.connected_lsps.is_empty() {
+                "none".to_string()
+            } else {
+                self.connected_lsps.join(", ")
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  LSP: {}", lsp_text),
+                Style::default().fg(self.theme.text_muted),
+            )));
             lines.push(Line::from(""));
         }
 
@@ -1822,6 +1873,14 @@ impl App {
             Style::default().fg(self.theme.accent),
         )));
         if self.sidebar_sections[3] {
+            let file_summary = self.git_file_summary();
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  Files: +{} -{} ~{}",
+                    file_summary.0, file_summary.1, file_summary.2
+                ),
+                Style::default().fg(self.theme.text_muted),
+            )));
             if self.modified_files.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "  No modified files",
@@ -1849,6 +1908,74 @@ impl App {
 
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, inner);
+    }
+
+    fn format_token_count(tokens: usize) -> String {
+        let text = tokens.to_string();
+        let mut out = String::with_capacity(text.len() + text.len() / 3);
+        for (idx, ch) in text.chars().rev().enumerate() {
+            if idx != 0 && idx % 3 == 0 {
+                out.push(',');
+            }
+            out.push(ch);
+        }
+        out.chars().rev().collect()
+    }
+
+    fn format_context_limit(tokens: usize) -> String {
+        if tokens % 1_000 == 0 {
+            format!("{}k", tokens / 1_000)
+        } else {
+            Self::format_token_count(tokens)
+        }
+    }
+
+    fn git_file_summary(&self) -> (usize, usize, usize) {
+        let output = run_git_command(&["status", "--porcelain"], &self.working_directory)
+            .unwrap_or_default();
+        let mut added = 0usize;
+        let mut deleted = 0usize;
+        let mut modified = 0usize;
+
+        for line in output.lines() {
+            if line.len() < 2 {
+                continue;
+            }
+            let x = line.chars().nth(0).unwrap_or(' ');
+            let y = line.chars().nth(1).unwrap_or(' ');
+
+            if x == '?' && y == '?' {
+                added += 1;
+                continue;
+            }
+            if x == 'A' || y == 'A' {
+                added += 1;
+            } else if x == 'D' || y == 'D' {
+                deleted += 1;
+            } else if x != ' ' || y != ' ' {
+                modified += 1;
+            }
+        }
+
+        (added, deleted, modified)
+    }
+
+    fn estimate_turn_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
+        let model_lower = model.to_ascii_lowercase();
+        let (input_per_million, output_per_million) = if model_lower.contains("opus") {
+            (15.0, 75.0)
+        } else if model_lower.contains("sonnet") {
+            (3.0, 15.0)
+        } else if model_lower.contains("haiku") {
+            (0.25, 1.25)
+        } else if model_lower.contains("gpt-5") {
+            (1.25, 10.0)
+        } else {
+            (1.0, 5.0)
+        };
+
+        (input_tokens as f64 / 1_000_000.0) * input_per_million
+            + (output_tokens as f64 / 1_000_000.0) * output_per_million
     }
 
     fn ensure_todo_selection(&mut self) {
@@ -2081,7 +2208,10 @@ impl App {
 
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
-            || self.current_model.is_some();
+            || self.current_model.is_some()
+            || self.session_cost > 0.0
+            || self.context_tokens > 0
+            || !self.connected_lsps.is_empty();
         let show_sidebar = if area.width > 120 {
             self.show_todo_sidebar
         } else {
@@ -2227,10 +2357,9 @@ impl App {
 
         // Skip Context content if expanded
         if self.sidebar_sections[0] {
-            let context_lines = 3;
+            let context_lines = 6;
             let session_lines = usize::from(self.session_id.is_some());
-            let token_lines = usize::from(self.status.contains("tokens"));
-            current_line += context_lines + session_lines + token_lines + 1; // +1 for blank line
+            current_line += context_lines + session_lines + 1; // +1 for blank line
         }
 
         // Section 2: MCP header
@@ -2413,6 +2542,48 @@ impl App {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        if key.code == KeyCode::F(2) {
+            self.cycle_recent_model();
+            self.pending_g = false;
+            return KeyAction::None;
+        }
+
+        if !self.input_focused {
+            match key.code {
+                KeyCode::Char('g') if key.modifiers.is_empty() => {
+                    if self.pending_g {
+                        self.chat_view.scroll_to_top();
+                        self.status = "Jumped to first message".to_string();
+                        self.pending_g = false;
+                    } else {
+                        self.pending_g = true;
+                    }
+                    return KeyAction::None;
+                }
+                KeyCode::Char('G') => {
+                    self.chat_view.scroll_to_bottom();
+                    self.status = "Jumped to last message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                KeyCode::Char('n') => {
+                    self.chat_view.scroll_to_next_user_message();
+                    self.status = "Moved to next message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                KeyCode::Char('p') | KeyCode::Char('N') => {
+                    self.chat_view.scroll_to_prev_user_message();
+                    self.status = "Moved to previous message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                _ => {
+                    self.pending_g = false;
+                }
             }
         }
 
@@ -2955,6 +3126,7 @@ impl App {
 
         let pending_images = std::mem::take(&mut self.pending_images);
         let has_images = !pending_images.is_empty();
+        self.redo_stack.clear();
 
         let display_message = Self::format_user_display(&input, &pending_images);
         self.chat_view.push_message("user", display_message, None);
@@ -3366,6 +3538,148 @@ impl App {
         }
     }
 
+    fn undo_last_message_pair(&mut self) {
+        let assistant_index = self
+            .chat_view
+            .messages
+            .iter()
+            .rposition(|message| message.role == "assistant");
+        let Some(assistant_index) = assistant_index else {
+            self.status = "Nothing to undo".to_string();
+            return;
+        };
+
+        let user_index = self.chat_view.messages[..assistant_index]
+            .iter()
+            .rposition(|message| message.role == "user");
+        let Some(user_index) = user_index else {
+            self.status = "Nothing to undo".to_string();
+            return;
+        };
+
+        let removed: Vec<ChatMessage> = self
+            .chat_view
+            .messages
+            .drain(user_index..=assistant_index)
+            .collect();
+        self.chat_view.invalidate_render_cache();
+        self.chat_view.scroll_to_bottom();
+        self.undo_stack.push(removed);
+        self.redo_stack.clear();
+        self.status = format!("Undid message pair ({} available)", self.undo_stack.len());
+    }
+
+    fn redo_last_message_pair(&mut self) {
+        let Some(restored) = self.undo_stack.pop() else {
+            self.status = "Nothing to redo".to_string();
+            return;
+        };
+
+        self.chat_view.messages.extend(restored.clone());
+        self.chat_view.invalidate_render_cache();
+        self.chat_view.scroll_to_bottom();
+        self.redo_stack.push(restored);
+        self.status = format!(
+            "Restored message pair ({} remaining, {} reapplied)",
+            self.undo_stack.len(),
+            self.redo_stack.len()
+        );
+    }
+
+    fn copy_last_assistant_message(&mut self) {
+        let Some(message) = self
+            .chat_view
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "assistant")
+        else {
+            self.status = "No assistant message to copy".to_string();
+            self.toast_manager
+                .show("No assistant message".to_string(), ToastVariant::Warning, 1800);
+            return;
+        };
+
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(message.content.clone())) {
+            Ok(()) => {
+                self.status = "Copied last assistant message".to_string();
+                self.toast_manager.show(
+                    "Copied last assistant message".to_string(),
+                    ToastVariant::Success,
+                    1800,
+                );
+            }
+            Err(error) => {
+                self.status = format!("Clipboard error: {}", error);
+                self.toast_manager
+                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+            }
+        }
+    }
+
+    fn copy_session_transcript(&mut self) {
+        if self.chat_view.messages.is_empty() {
+            self.status = "No messages to copy".to_string();
+            return;
+        }
+
+        let transcript = self
+            .chat_view
+            .messages
+            .iter()
+            .map(|message| format!("{}: {}", message.role, message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(transcript)) {
+            Ok(()) => {
+                self.status = "Copied session transcript".to_string();
+                self.toast_manager.show(
+                    "Copied transcript".to_string(),
+                    ToastVariant::Success,
+                    1800,
+                );
+            }
+            Err(error) => {
+                self.status = format!("Clipboard error: {}", error);
+                self.toast_manager
+                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+            }
+        }
+    }
+
+    fn export_session_markdown(&mut self) {
+        if self.chat_view.messages.is_empty() {
+            self.status = "No messages to export".to_string();
+            return;
+        }
+
+        let markdown = render_session_markdown(
+            &self.chat_view.messages,
+            self.session_id.as_deref(),
+            self.current_model.as_deref(),
+        );
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let filename = format!("session-{}.md", timestamp);
+        let path = PathBuf::from(&self.working_directory).join(&filename);
+
+        match std::fs::write(&path, markdown) {
+            Ok(()) => {
+                self.status = format!("Exported {}", filename);
+                self.toast_manager
+                    .show(format!("Exported {}", filename), ToastVariant::Success, 2200);
+            }
+            Err(error) => {
+                self.status = format!("Export failed: {}", error);
+                self.toast_manager
+                    .show(format!("Export failed: {}", error), ToastVariant::Error, 3200);
+            }
+        }
+    }
+
     fn handle_slash_command(&mut self, input: &str) {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let command = parts.first().copied().unwrap_or("");
@@ -3377,7 +3691,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.chat_view.messages.push(ChatMessage::new(
                     "system",
-                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
+                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /undo               - Undo last user+assistant pair\n  /redo               - Restore last undone pair\n  /copy               - Copy full transcript to clipboard\n  /copy-last          - Copy last assistant message\n  /export             - Export session as markdown\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
                 ));
             }
             "/auth" | "/status" => {
@@ -3396,7 +3710,24 @@ impl App {
                 self.chat_view.messages.clear();
                 self.pending_images.clear();
                 self.message_queue.clear();
+                self.undo_stack.clear();
+                self.redo_stack.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/undo" => {
+                self.undo_last_message_pair();
+            }
+            "/redo" => {
+                self.redo_last_message_pair();
+            }
+            "/copy-last" => {
+                self.copy_last_assistant_message();
+            }
+            "/copy" => {
+                self.copy_session_transcript();
+            }
+            "/export" => {
+                self.export_session_markdown();
             }
             "/image" => {
                 let path_arg = input[command.len()..].trim();
@@ -3699,6 +4030,13 @@ impl App {
                 self.status = format!("Turn {}", turn_number);
             }
             ThreadEvent::TurnCompleted { turn_number, usage } => {
+                self.context_tokens =
+                    (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
+                if let Some(model) = self.current_model.clone() {
+                    self.max_context_tokens = Self::infer_max_context_tokens(&model);
+                    self.session_cost +=
+                        Self::estimate_turn_cost(&model, usage.input_tokens, usage.output_tokens);
+                }
                 self.status = format!(
                     "Turn {} complete ({} in / {} out tokens)",
                     turn_number, usage.input_tokens, usage.output_tokens
@@ -3822,6 +4160,7 @@ impl App {
             },
             ThreadEvent::ThreadCompleted { usage } => {
                 self.set_agent_state(AgentState::Complete);
+                self.context_tokens = (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
                 self.status = format!(
                     "Complete (total: {} in / {} out tokens)",
                     usage.input_tokens, usage.output_tokens
@@ -3988,6 +4327,10 @@ impl App {
                 );
             }
             ThreadEvent::ModelSwitched { model, provider } => {
+                let full_model = format!("{}/{}", provider, model);
+                self.current_model = Some(full_model.clone());
+                self.record_model_selection(&full_model);
+                self.max_context_tokens = Self::infer_max_context_tokens(&full_model);
                 self.status = format!("Model: {}/{}", provider, model);
                 self.chat_view.push_message(
                     "system",
@@ -4038,6 +4381,7 @@ impl App {
     fn switch_model(&mut self, model_str: &str) {
         self.current_model = Some(model_str.to_string());
         self.record_model_selection(model_str);
+        self.max_context_tokens = Self::infer_max_context_tokens(model_str);
         self.status = format!("Switching to {}...", model_str);
 
         match create_client_for_model(model_str) {
@@ -4083,6 +4427,49 @@ impl App {
                     None,
                 );
             }
+        }
+    }
+
+    fn cycle_recent_model(&mut self) {
+        if self.recent_models.is_empty() {
+            self.status = "No recent models available".to_string();
+            return;
+        }
+
+        let limit = self.recent_models.len().min(5);
+        let window = &self.recent_models[..limit];
+        let current = self.current_model.clone();
+        let next_idx = match current {
+            Some(current_model) => window
+                .iter()
+                .position(|model| model == &current_model)
+                .map(|idx| (idx + 1) % limit)
+                .unwrap_or(0),
+            None => 0,
+        };
+
+        if let Some(next_model) = window.get(next_idx).cloned() {
+            self.switch_model(&next_model);
+            self.toast_manager.show(
+                format!("Model: {}", next_model),
+                ToastVariant::Info,
+                2000,
+            );
+        }
+    }
+
+    fn infer_max_context_tokens(model: &str) -> usize {
+        let lower = model.to_ascii_lowercase();
+        if lower.contains("haiku") {
+            200_000
+        } else if lower.contains("sonnet") || lower.contains("opus") {
+            200_000
+        } else if lower.contains("gpt-4o") {
+            128_000
+        } else if lower.contains("gpt-5") {
+            200_000
+        } else {
+            128_000
         }
     }
 

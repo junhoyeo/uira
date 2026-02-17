@@ -24,6 +24,7 @@ tracing = "0.1"
 tempfile = { workspace = true }
 base64 = "0.22"
 dirs = "5"
+arboard = "3"
 
 [dev-dependencies]
 tokio = { workspace = true }
