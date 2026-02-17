@@ -1,0 +1,147 @@
+name: Build Binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build ${{ matrix.code-target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            code-target: darwin-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            code-target: darwin-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            code-target: linux-x64-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            code-target: linux-arm64-gnu
+            cross: true
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            code-target: linux-x64-musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            code-target: linux-arm64-musl
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            code-target: win32-x64-msvc
+
+    env:
+      RUSTFLAGS: "-C strip=symbols -C codegen-units=1"
+      CARGO_PROFILE_RELEASE_LTO: thin
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Apply version to Cargo.toml
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -n "$VERSION" ]; then
+            # Cross-platform sed: write to temp then move (works on macOS + Linux)
+            sed -E '/^\[workspace\.package\]/,/^\[/ s/^version = "[^"]+"/version = "'"$VERSION"'"/' Cargo.toml > Cargo.toml.tmp
+            mv Cargo.toml.tmp Cargo.toml
+            echo "Set workspace version to $VERSION"
+            grep '^version' Cargo.toml | head -3
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl') && !matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@288875dd3d64326724fa6d9593062d9f8ba0b131 # v2.67.30
+        with:
+          tool: cross
+
+      # Build all three binaries: uira-agent (main CLI), uira-commit-hook-cli, uira-mcp (MCP server)
+      - name: Build binaries (native)
+        if: "!matrix.cross"
+        run: cargo build --release --target ${{ matrix.target }} -p uira-cli -p uira-commit-hook-cli -p uira-mcp-server
+
+      - name: Build binaries (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} -p uira-cli -p uira-commit-hook-cli -p uira-mcp-server
+
+      # Stage binaries
+      # Binary names from Cargo.toml [[bin]]:
+      #   uira-cli         -> uira-agent
+      #   uira-commit-hook-cli -> uira-commit-hook-cli
+      #   uira-mcp-server  -> uira-mcp
+      - name: Stage binaries (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/npm dist/release
+
+          # npm binaries (uira-agent + uira-commit-hook-cli)
+          cp target/${{ matrix.target }}/release/uira-agent dist/npm/uira-agent
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli dist/npm/uira-commit-hook-cli
+
+          # GitHub Release binaries (all three, named with platform suffix)
+          cp target/${{ matrix.target }}/release/uira-agent dist/release/uira-agent-${{ matrix.code-target }}
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli dist/release/uira-commit-hook-cli-${{ matrix.code-target }}
+          cp target/${{ matrix.target }}/release/uira-mcp dist/release/uira-mcp-${{ matrix.code-target }}
+
+      - name: Stage binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/npm dist/release
+
+          cp target/${{ matrix.target }}/release/uira-agent.exe dist/npm/uira-agent.exe
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli.exe dist/npm/uira-commit-hook-cli.exe
+
+          cp target/${{ matrix.target }}/release/uira-agent.exe dist/release/uira-agent-${{ matrix.code-target }}.exe
+          cp target/${{ matrix.target }}/release/uira-commit-hook-cli.exe dist/release/uira-commit-hook-cli-${{ matrix.code-target }}.exe
+          cp target/${{ matrix.target }}/release/uira-mcp.exe dist/release/uira-mcp-${{ matrix.code-target }}.exe
+
+      # Attest build provenance
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: dist/release/*
+
+      # Upload npm artifacts (for publish-npm job)
+      - name: Upload npm artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: npm-${{ matrix.code-target }}
+          path: dist/npm/
+          if-no-files-found: error
+
+      # Upload release artifacts (for github-release job)
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-${{ matrix.code-target }}
+          path: dist/release/
+          if-no-files-found: error

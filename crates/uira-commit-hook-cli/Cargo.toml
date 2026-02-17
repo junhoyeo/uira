@@ -6,7 +6,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-keywords = ["git", "hooks", "oxc", "linter", "ai", "claude", "opencode"]
+keywords = ["git", "hooks", "linter", "ai", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
