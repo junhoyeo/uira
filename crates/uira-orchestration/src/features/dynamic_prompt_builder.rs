@@ -65,11 +65,7 @@ pub fn build_dynamic_orchestrator_prompt(
     // Dedicated agent sections
     for agent in agents {
         if let Some(ref desc) = agent.metadata.prompt_description {
-            sections.push(format!(
-                "## {} Agent\n\n{}",
-                capitalize(&agent.name),
-                desc
-            ));
+            sections.push(format!("## {} Agent\n\n{}", capitalize(&agent.name), desc));
         }
     }
 
@@ -181,7 +177,10 @@ fn build_tool_selection_table(agents: &[AvailableAgent]) -> String {
             } else {
                 agent.metadata.avoid_when.join("; ")
             };
-            lines.push(format!("| {} | {} | {} |", agent.name, tools_str, avoid_str));
+            lines.push(format!(
+                "| {} | {} | {} |",
+                agent.name, tools_str, avoid_str
+            ));
         }
     }
 
@@ -211,7 +210,9 @@ fn build_category_skills_guide(
 
     if !skills.is_empty() {
         lines.push("### Available Skills\n".to_string());
-        lines.push("Skills can be injected into delegated agent prompts via `load_skills`:\n".to_string());
+        lines.push(
+            "Skills can be injected into delegated agent prompts via `load_skills`:\n".to_string(),
+        );
         for skill in skills {
             lines.push(format!("- **{}**: {}", skill.name, skill.description));
         }
@@ -245,7 +246,7 @@ fn capitalize(s: &str) -> String {
 /// Returns a map of agent name -> AgentPromptMetadata for all agents
 /// that have defined metadata.
 pub fn builtin_agent_metadata() -> HashMap<String, AgentPromptMetadata> {
-    use crate::agents::types::{DelegationTrigger};
+    use crate::agents::types::DelegationTrigger;
 
     let mut map = HashMap::new();
 
@@ -394,7 +395,10 @@ pub fn builtin_agent_metadata() -> HashMap<String, AgentPromptMetadata> {
                 domain: "frontend".to_string(),
                 trigger: "UI/UX implementation, design systems, frontend work".to_string(),
             }],
-            use_when: vec!["UI component work".to_string(), "Frontend tasks".to_string()],
+            use_when: vec![
+                "UI component work".to_string(),
+                "Frontend tasks".to_string(),
+            ],
             avoid_when: vec!["Backend-only tasks".to_string()],
             prompt_description: None,
             tools: vec![
@@ -545,5 +549,42 @@ mod tests {
         assert!(meta.contains_key("executor"));
         assert!(meta.contains_key("critic"));
         assert!(meta.contains_key("planner"));
+    }
+
+    #[test]
+    fn test_architect_tools_match_runtime_allowlist() {
+        let meta = builtin_agent_metadata();
+        let architect = meta
+            .get("architect")
+            .expect("architect metadata must exist");
+
+        assert_eq!(
+            architect.tools,
+            vec![
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "WebSearch".to_string(),
+                "WebFetch".to_string(),
+            ]
+        );
+        assert!(!architect.tools.iter().any(|t| t == "Bash"));
+    }
+
+    #[test]
+    fn test_planner_tools_match_runtime_allowlist() {
+        let meta = builtin_agent_metadata();
+        let planner = meta.get("planner").expect("planner metadata must exist");
+
+        assert_eq!(
+            planner.tools,
+            vec![
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Grep".to_string(),
+                "Write".to_string(),
+            ]
+        );
+        assert!(!planner.tools.iter().any(|t| t == "TodoWrite"));
     }
 }
