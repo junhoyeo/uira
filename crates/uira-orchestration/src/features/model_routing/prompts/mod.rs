@@ -217,6 +217,18 @@ pub fn create_delegation_prompt_for_model(
                     .join("\n")
             ));
         }
+        if !context.dependencies.is_empty() {
+            parts.push(format!(
+                "\n**Dependencies:**\n{}",
+                context
+                    .dependencies
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| format!("{}. {}", i + 1, d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
         if let Some(attempts) = context.previous_attempts {
             parts.push(format!(
                 "\n**WARNING:** This task has failed {} time(s). Use a DIFFERENT approach.",

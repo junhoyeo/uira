@@ -54,13 +54,30 @@ Structure your response as:\n\
 /// Detect if a model string is a GPT/OpenAI model
 pub fn is_gpt_model(model: &str) -> bool {
     let lower = model.to_lowercase();
-    lower.starts_with("gpt-")
+    if lower.starts_with("gpt-")
         || lower.starts_with("gpt4")
         || lower.starts_with("o1")
         || lower.starts_with("o3")
         || lower.starts_with("o4")
         || lower.contains("openai/")
         || lower.contains("openai-")
+    {
+        return true;
+    }
+
+    // Check the model segment after provider prefix (e.g., "opencode/gpt-5-nano")
+    if let Some(model_part) = lower.split('/').last() {
+        if model_part.starts_with("gpt-")
+            || model_part.starts_with("gpt4")
+            || model_part.starts_with("o1")
+            || model_part.starts_with("o3")
+            || model_part.starts_with("o4")
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Get GPT-optimized task instructions
@@ -124,6 +141,9 @@ mod tests {
         assert!(is_gpt_model("o1-preview"));
         assert!(is_gpt_model("o3-mini"));
         assert!(is_gpt_model("openai/gpt-4"));
+        assert!(is_gpt_model("opencode/gpt-5-nano"));
+        assert!(is_gpt_model("azure/gpt-4-turbo"));
+        assert!(is_gpt_model("custom-provider/o3-mini"));
         assert!(!is_gpt_model("claude-sonnet-4"));
         assert!(!is_gpt_model("claude-opus-4"));
         assert!(!is_gpt_model("llama-3.1"));
