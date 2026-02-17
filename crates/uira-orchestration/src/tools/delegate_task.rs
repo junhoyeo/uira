@@ -71,6 +71,9 @@ struct DelegateTaskResponse {
     /// Skills that were injected into the agent's prompt
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     loaded_skills: Vec<String>,
+    /// The final prompt with injected skills and category guidance
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_prompt: Option<String>,
 }
 
 /// Parse model string to ModelType
@@ -118,8 +121,29 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         None => (None, None),
     };
 
+    // Resolve delegation category FIRST (so it can influence model routing)
+    let explicit_category = params
+        .category
+        .as_deref()
+        .and_then(delegation_categories::types::DelegationCategory::parse);
+
+    let category_context = delegation_categories::types::CategoryContext {
+        task_prompt: params.prompt.clone(),
+        agent_type: Some(agent_name.to_string()),
+        explicit_category,
+        explicit_tier: None,
+    };
+    let resolved_category = delegation_categories::get_category_for_task(&category_context);
+
+    // Convert category tier to model type for routing
+    let category_model = match resolved_category.tier {
+        delegation_categories::types::ComplexityTier::Low => Some(ModelType::Haiku),
+        delegation_categories::types::ComplexityTier::Medium => Some(ModelType::Sonnet),
+        delegation_categories::types::ComplexityTier::High => Some(ModelType::Opus),
+    };
+
     // Determine model to use
-    // Priority: explicit model param > routing decision > agent default > Sonnet
+    // Priority: explicit model param > explicit category > routing decision > agent default > Sonnet
     let (final_model, final_tier, routing_reasons) = if let Some(model_str) = &params.model {
         // Explicit model override
         if let Some(model_type) = parse_model_type(model_str) {
@@ -139,6 +163,15 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
                 message: format!("Invalid model: {}. Use haiku, sonnet, or opus.", model_str),
             });
         }
+    } else if params.category.is_some() {
+        // Category explicitly specified — use its tier for model selection
+        let model = category_model.unwrap_or(ModelType::Sonnet);
+        let tier = match model {
+            ModelType::Haiku => ModelTier::Low,
+            ModelType::Sonnet => ModelTier::Medium,
+            ModelType::Opus | ModelType::Inherit => ModelTier::High,
+        };
+        (model, tier, vec![format!("Category override: {}", resolved_category.category.as_str())])
     } else {
         // Use model routing to determine best model
         let routing_context = RoutingContext {
@@ -155,22 +188,6 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
             decision.tier,
             decision.reasons,
         )
-    };
-
-    // Resolve delegation category (explicit > auto-detect)
-    let resolved_category = {
-        let explicit_category = params
-            .category
-            .as_deref()
-            .and_then(delegation_categories::types::DelegationCategory::parse);
-
-        let context = delegation_categories::types::CategoryContext {
-            task_prompt: params.prompt.clone(),
-            agent_type: Some(agent_name.to_string()),
-            explicit_category,
-            explicit_tier: None,
-        };
-        delegation_categories::get_category_for_task(&context)
     };
 
     // Build effective prompt: skill content + category guidance + task prompt
@@ -192,8 +209,6 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         resolved_category.category,
     );
     // effective_prompt is the final prompt that would be sent to the delegated agent.
-    // It's stored here for use by the actual agent executor.
-    let _ = &effective_prompt;
 
     // Generate task/session IDs
     let session_id = Uuid::new_v4().to_string();
@@ -229,6 +244,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         agent_description,
         category: Some(resolved_category.category.as_str().to_string()),
         loaded_skills,
+        effective_prompt: Some(effective_prompt),
     };
 
     let json_response =
