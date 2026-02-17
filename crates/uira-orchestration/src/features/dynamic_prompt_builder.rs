@@ -456,6 +456,21 @@ pub fn builtin_agent_metadata() -> HashMap<String, AgentPromptMetadata> {
     map
 }
 
+/// Convenience: build the full dynamic orchestrator prompt using all builtin agents.
+/// This is the main entry point for callers who just want the complete prompt section.
+pub fn build_default_orchestrator_prompt() -> String {
+    let metadata = builtin_agent_metadata();
+    let agents: Vec<AvailableAgent> = metadata
+        .into_iter()
+        .map(|(name, meta)| AvailableAgent {
+            description: meta.prompt_description.clone().unwrap_or_default(),
+            name,
+            metadata: meta,
+        })
+        .collect();
+    build_dynamic_orchestrator_prompt(&agents, &[], &[])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use super::types::{AgentConfig, AgentOverrides, ModelType};
+use super::types::{AgentConfig, AgentOverrides, AgentPromptMetadata, ModelType};
 use crate::config::apply_overrides;
+use crate::features::dynamic_prompt_builder::builtin_agent_metadata;
 use crate::prompt_loader::PromptLoader;
 use crate::tool_restrictions::ToolRestrictionsRegistry;
 
@@ -35,6 +36,7 @@ pub fn get_agent_definitions_with_loader(
 ) -> HashMap<String, AgentConfig> {
     let tools = ToolRestrictionsRegistry::with_default_allowlists();
     let mut agents = HashMap::<String, AgentConfig>::new();
+    let prompt_metadata = builtin_agent_metadata();
 
     // Primary agents (name, base_description, default_model)
     let primary_agents: Vec<(&str, &str, ModelType)> = vec![
@@ -82,6 +84,7 @@ pub fn get_agent_definitions_with_loader(
             name,
             &description,
             Some(default_model),
+            prompt_metadata.get(name).cloned(),
         );
     }
 
@@ -144,6 +147,7 @@ pub fn get_agent_definitions_with_loader(
             name,
             &description,
             Some(default_model),
+            prompt_metadata.get(name).cloned(),
         );
     }
 
@@ -201,6 +205,7 @@ pub fn get_agent_definitions_with_loader(
             name,
             &description,
             Some(default_model),
+            prompt_metadata.get(name).cloned(),
         );
     }
 
@@ -229,6 +234,7 @@ fn insert(
     name: &str,
     description: &str,
     model: Option<ModelType>,
+    metadata: Option<AgentPromptMetadata>,
 ) {
     let mut cfg = AgentConfig {
         name: name.to_string(),
@@ -268,7 +274,7 @@ fn insert(
             .unwrap_or_default(),
         model,
         default_model: model,
-        metadata: None,
+        metadata,
     };
 
     tool_registry.apply(&mut cfg);
