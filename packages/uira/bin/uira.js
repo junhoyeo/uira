@@ -4,14 +4,15 @@ const { execFileSync } = require('child_process');
 const { existsSync } = require('fs');
 const path = require('path');
 
+// npm: aliases — npm installs these as node_modules/@uiradev/uira-<tag>
 const PLATFORMS = {
   'darwin-arm64': '@uiradev/uira-darwin-arm64',
   'darwin-x64': '@uiradev/uira-darwin-x64',
-  'linux-x64-gnu': '@uiradev/uira-linux-x64-gnu',
+  'linux-x64-gnu': '@uiradev/uira-linux-x64',
   'linux-x64-musl': '@uiradev/uira-linux-x64-musl',
-  'linux-arm64-gnu': '@uiradev/uira-linux-arm64-gnu',
+  'linux-arm64-gnu': '@uiradev/uira-linux-arm64',
   'linux-arm64-musl': '@uiradev/uira-linux-arm64-musl',
-  'win32-x64': '@uiradev/uira-win32-x64-msvc',
+  'win32-x64': '@uiradev/uira-win32-x64',
 };
 
 function isMusl() {
