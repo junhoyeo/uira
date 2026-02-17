@@ -893,13 +893,14 @@ pub struct App {
     /// Saved input when entering history mode
     history_stash: String,
     pending_g: bool,
-    undo_stack: Vec<Vec<ChatMessage>>,
     redo_stack: Vec<Vec<ChatMessage>>,
     session_cost: f64,
     context_tokens: usize,
     max_context_tokens: usize,
     connected_lsps: Vec<String>,
     external_theme_fingerprint: u64,
+    cached_git_summary: (usize, usize, usize),
+    git_summary_last_update: std::time::Instant,
 }
 
 impl App {
@@ -1250,13 +1251,14 @@ impl App {
             history_index: None,
             history_stash: String::new(),
             pending_g: false,
-            undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             session_cost: 0.0,
             context_tokens: 0,
             max_context_tokens: 128_000,
             connected_lsps,
             external_theme_fingerprint: Theme::external_theme_fingerprint(),
+            cached_git_summary: (0, 0, 0),
+            git_summary_last_update: std::time::Instant::now(),
         }
     }
 
@@ -1721,7 +1723,7 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
-    fn render_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let outer_block = Block::default()
             .title(" Info ")
             .borders(Borders::ALL)
@@ -1930,7 +1932,13 @@ impl App {
         }
     }
 
-    fn git_file_summary(&self) -> (usize, usize, usize) {
+    fn git_file_summary(&mut self) -> (usize, usize, usize) {
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+        if self.git_summary_last_update.elapsed() < CACHE_TTL {
+            return self.cached_git_summary;
+        }
+
         let output = run_git_command(&["status", "--porcelain"], &self.working_directory)
             .unwrap_or_default();
         let mut added = 0usize;
@@ -1957,7 +1965,9 @@ impl App {
             }
         }
 
-        (added, deleted, modified)
+        self.cached_git_summary = (added, deleted, modified);
+        self.git_summary_last_update = std::time::Instant::now();
+        self.cached_git_summary
     }
 
     fn estimate_turn_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
@@ -3564,24 +3574,24 @@ impl App {
             .collect();
         self.chat_view.invalidate_render_cache();
         self.chat_view.scroll_to_bottom();
-        self.undo_stack.push(removed);
-        self.redo_stack.clear();
-        self.status = format!("Undid message pair ({} available)", self.undo_stack.len());
+        self.redo_stack.push(removed);
+        self.status = format!(
+            "Undid message pair ({} to redo)",
+            self.redo_stack.len()
+        );
     }
 
     fn redo_last_message_pair(&mut self) {
-        let Some(restored) = self.undo_stack.pop() else {
+        let Some(restored) = self.redo_stack.pop() else {
             self.status = "Nothing to redo".to_string();
             return;
         };
 
-        self.chat_view.messages.extend(restored.clone());
+        self.chat_view.messages.extend(restored);
         self.chat_view.invalidate_render_cache();
         self.chat_view.scroll_to_bottom();
-        self.redo_stack.push(restored);
         self.status = format!(
-            "Restored message pair ({} remaining, {} reapplied)",
-            self.undo_stack.len(),
+            "Restored message pair ({} remaining to redo)",
             self.redo_stack.len()
         );
     }
@@ -3710,7 +3720,6 @@ impl App {
                 self.chat_view.messages.clear();
                 self.pending_images.clear();
                 self.message_queue.clear();
-                self.undo_stack.clear();
                 self.redo_stack.clear();
                 self.status = "Chat cleared".to_string();
             }

@@ -31,13 +31,31 @@ pub struct SlashCommand {
     pub description: &'static str,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct AutocompleteState {
     pub mode: AutocompleteMode,
     pub selected: usize,
     pub suggestions: Vec<Suggestion>,
     pub token_start: usize,
     pub token_end: usize,
+    file_cache: Vec<String>,
+    cache_directory: String,
+    cache_time: std::time::Instant,
+}
+
+impl Default for AutocompleteState {
+    fn default() -> Self {
+        Self {
+            mode: AutocompleteMode::None,
+            selected: 0,
+            suggestions: Vec::new(),
+            token_start: 0,
+            token_end: 0,
+            file_cache: Vec::new(),
+            cache_directory: String::new(),
+            cache_time: std::time::Instant::now(),
+        }
+    }
 }
 
 impl Default for AutocompleteMode {
@@ -150,7 +168,16 @@ impl AutocompleteState {
             None => (raw_query, None),
         };
 
-        let candidates = collect_files(working_directory, 1200);
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+        let cache_stale =
+            self.cache_directory != working_directory || self.cache_time.elapsed() >= CACHE_TTL;
+        if cache_stale {
+            self.file_cache = collect_files(working_directory, 1200);
+            self.cache_directory = working_directory.to_string();
+            self.cache_time = std::time::Instant::now();
+        }
+
+        let candidates = &self.file_cache;
         let query_lower = file_query.to_lowercase();
         let mut ranked: Vec<Suggestion> = candidates
             .into_iter()
