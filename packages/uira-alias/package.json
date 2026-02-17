@@ -1,0 +1,39 @@
+{
+  "name": "uira",
+  "version": "0.0.1",
+  "description": "Alias for @uiradev/uira — Native Rust AI agent with multi-provider orchestration",
+  "type": "commonjs",
+  "main": "index.js",
+  "bin": {
+    "uira": "./bin.js",
+    "uira-agent": "./bin.js",
+    "uira-commit-hook-cli": "./bin.js"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/uira.git"
+  },
+  "bugs": {
+    "url": "https://github.com/junhoyeo/uira/issues"
+  },
+  "homepage": "https://github.com/junhoyeo/uira#readme",
+  "keywords": [
+    "ai",
+    "agent",
+    "rust",
+    "cli",
+    "claude"
+  ],
+  "dependencies": {
+    "@uiradev/uira": "0.0.1"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "files": [
+    "index.js",
+    "bin.js"
+  ]
+}

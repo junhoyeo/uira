@@ -33,6 +33,7 @@ const ROOT = path.resolve(__dirname, "..");
 const CARGO_TOML = path.join(ROOT, "Cargo.toml");
 const UIRA_PKG = path.join(ROOT, "packages/uira/package.json");
 const HOOK_PKG = path.join(ROOT, "packages/hook/package.json");
+const ALIAS_PKG = path.join(ROOT, "packages/uira-alias/package.json");
 
 const REPO = process.env.GITHUB_REPOSITORY || "junhoyeo/uira";
 
@@ -208,6 +209,15 @@ function bump(input) {
   writeJson(HOOK_PKG, hookPkg);
   log("packages/hook/package.json");
 
+  // 4. packages/uira-alias/package.json (unscoped alias)
+  const aliasPkg = readJson(ALIAS_PKG);
+  aliasPkg.version = version;
+  if (aliasPkg.dependencies?.["@uiradev/uira"]) {
+    aliasPkg.dependencies["@uiradev/uira"] = version;
+  }
+  writeJson(ALIAS_PKG, aliasPkg);
+  log("packages/uira-alias/package.json");
+
   // Verify
   verify(version);
 
@@ -227,14 +237,16 @@ function verify(expected) {
   const cargoVer = currentCargoVersion();
   const uiraVer = readJson(UIRA_PKG).version;
   const hookVer = readJson(HOOK_PKG).version;
+  const aliasVer = readJson(ALIAS_PKG).version;
 
   log(`Cargo.toml:       ${cargoVer}`);
   log(`packages/uira:    ${uiraVer}`);
   log(`packages/hook:    ${hookVer}`);
+  log(`packages/uira-alias: ${aliasVer}`);
 
-  // All three must match each other
-  if (cargoVer !== uiraVer || cargoVer !== hookVer) {
-    die(`Version mismatch: Cargo.toml=${cargoVer}, uira=${uiraVer}, hook=${hookVer}`);
+  // All must match each other
+  if (cargoVer !== uiraVer || cargoVer !== hookVer || cargoVer !== aliasVer) {
+    die(`Version mismatch: Cargo.toml=${cargoVer}, uira=${uiraVer}, hook=${hookVer}, alias=${aliasVer}`);
   }
 
   // If an expected version was provided, check against it
@@ -422,6 +434,18 @@ function publishNpmHook() {
   console.log(`\n@uiradev/hook@${version} published`);
 }
 
+// ── publish-npm-alias ────────────────────────────────────────────────────────
+
+function publishNpmAlias() {
+  heading("Publishing uira (alias)");
+
+  const pkgDir = path.join(ROOT, "packages/uira-alias");
+  run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+
+  const version = readJson(ALIAS_PKG).version;
+  console.log(`\nuira@${version} published`);
+}
+
 // ── release-notes ────────────────────────────────────────────────────────────
 
 function releaseNotes(version) {
@@ -559,7 +583,7 @@ function finalize(version) {
   log("Committing version bump...");
   run("git", ["config", "user.name", "github-actions[bot]"]);
   run("git", ["config", "user.email", "github-actions[bot]@users.noreply.github.com"]);
-  run("git", ["add", "Cargo.toml", "packages/uira/package.json", "packages/hook/package.json"]);
+  run("git", ["add", "Cargo.toml", "packages/uira/package.json", "packages/hook/package.json", "packages/uira-alias/package.json"]);
   run("git", ["commit", "-m", `chore: bump version to ${version}`]);
 
   // Pull with rebase to handle main advancing during the long publish jobs
@@ -714,6 +738,7 @@ const commands = {
   "publish-npm-platforms": publishNpmPlatforms,
   "publish-npm-main": publishNpmMain,
   "publish-npm-hook": publishNpmHook,
+  "publish-npm-alias": publishNpmAlias,
   "release-notes": releaseNotes,
   finalize,
 };
@@ -732,6 +757,7 @@ function main() {
     console.log("  publish-npm-platforms <dir>         Publish platform packages");
     console.log("  publish-npm-main                    Publish @uiradev/uira");
     console.log("  publish-npm-hook                    Publish @uiradev/hook");
+    console.log("  publish-npm-alias                   Publish uira (unscoped alias)");
     console.log("  release-notes <version>             Generate release notes");
     console.log("  finalize <version>                  Commit, tag, GitHub release");
     process.exit(0);

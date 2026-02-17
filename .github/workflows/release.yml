@@ -60,6 +60,7 @@ jobs:
             Cargo.toml
             packages/uira/package.json
             packages/hook/package.json
+            packages/uira-alias/package.json
           retention-days: 1
 
   # ─── 2. Build all binaries (cross-platform matrix) ──────────────────
@@ -140,6 +141,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node scripts/release.mjs publish-npm-hook
+
+      - name: Publish uira (alias)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release.mjs publish-npm-alias
 
   # ─── 5. Finalize: commit + tag + GitHub release (ONLY after all publishes) ──
   finalize:
