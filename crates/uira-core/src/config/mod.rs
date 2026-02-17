@@ -8,7 +8,7 @@ pub use loader::{
 pub use schema::{
     AgentConfig, AgentSettings, AiHookCommand, AiHooksConfig, AnthropicProviderSettings,
     CommentsAiSettings, CommentsSettings, DiagnosticsAiSettings, DiagnosticsSettings, HookCommand,
-    HookConfig, HooksConfig, McpServerConfig, McpSettings, NamedMcpServerConfig,
+    HookConfig, HooksConfig, KeybindsConfig, McpServerConfig, McpSettings, NamedMcpServerConfig,
     PayloadLogSettings, ProvidersSettings, SidebarConfig, ThemeColorOverrides, TyposAiSettings,
     TyposSettings, UiraConfig,
 };

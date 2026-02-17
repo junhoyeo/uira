@@ -975,7 +975,7 @@ impl App {
         }
     }
 
-    /// Move cursor down one line in multi-line input  
+    /// Move cursor down one line in multi-line input
     fn move_cursor_down(&mut self, inner_width: usize) {
         let chars: Vec<char> = self.input.chars().collect();
         if self.cursor_pos >= chars.len() {
@@ -2231,6 +2231,21 @@ impl App {
                 ) =>
                 {
                     self.toggle_todo_sidebar();
+                    return KeyAction::None;
+                }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.toggle_todos,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
+                    self.sidebar_sections[2] = !self.sidebar_sections[2];
+                    let state = if self.sidebar_sections[2] {
+                        "expanded"
+                    } else {
+                        "collapsed"
+                    };
+                    self.status = format!("Todos section {}", state);
                     return KeyAction::None;
                 }
                 KeyCode::Char('g') => {
