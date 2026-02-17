@@ -39,6 +39,7 @@ use uira_providers::{
 
 use crate::keybinds::KeybindConfig;
 use crate::kv_store::KvStore;
+use crate::widgets::autocomplete::{AutocompleteMode, AutocompleteState, SlashCommand};
 use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
@@ -46,7 +47,7 @@ use crate::views::{
 };
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
-use crate::{AppEvent, Theme, ThemeOverrides};
+use crate::{AppEvent, FrecencyStore, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
@@ -880,7 +881,9 @@ pub struct App {
     keybinds: KeybindConfig,
     kv_store: KvStore,
     recent_models: Vec<String>,
-    frecency_data: HashMap<String, u64>,
+    frecency_store: FrecencyStore,
+    autocomplete_state: AutocompleteState,
+    slash_commands: Vec<SlashCommand>,
     /// Prompt history for Up/Down navigation
     prompt_history: Vec<String>,
     /// Current position in history (None = not browsing, Some(idx) = browsing)
@@ -1024,6 +1027,128 @@ impl App {
         }
     }
 
+    fn available_slash_commands() -> Vec<SlashCommand> {
+        vec![
+            SlashCommand {
+                command: "help",
+                description: "Show help",
+            },
+            SlashCommand {
+                command: "status",
+                description: "Show status",
+            },
+            SlashCommand {
+                command: "models",
+                description: "Open model selector",
+            },
+            SlashCommand {
+                command: "model",
+                description: "Switch model",
+            },
+            SlashCommand {
+                command: "theme",
+                description: "Theme management",
+            },
+            SlashCommand {
+                command: "image",
+                description: "Attach image",
+            },
+            SlashCommand {
+                command: "screenshot",
+                description: "Attach screenshot",
+            },
+            SlashCommand {
+                command: "review",
+                description: "Review diffs",
+            },
+            SlashCommand {
+                command: "share",
+                description: "Share session gist",
+            },
+            SlashCommand {
+                command: "clear",
+                description: "Clear chat",
+            },
+            SlashCommand {
+                command: "undo",
+                description: "Undo last message",
+            },
+            SlashCommand {
+                command: "redo",
+                description: "Redo last message",
+            },
+            SlashCommand {
+                command: "copy",
+                description: "Copy transcript",
+            },
+            SlashCommand {
+                command: "copy-last",
+                description: "Copy last assistant message",
+            },
+            SlashCommand {
+                command: "export",
+                description: "Export session markdown",
+            },
+            SlashCommand {
+                command: "fork",
+                description: "Fork session",
+            },
+            SlashCommand {
+                command: "switch",
+                description: "Switch branch",
+            },
+            SlashCommand {
+                command: "branches",
+                description: "List branches",
+            },
+            SlashCommand {
+                command: "tree",
+                description: "Show branch tree",
+            },
+            SlashCommand {
+                command: "exit",
+                description: "Exit app",
+            },
+        ]
+    }
+
+    fn char_index_to_byte_index(input: &str, index: usize) -> usize {
+        input
+            .char_indices()
+            .nth(index)
+            .map(|(i, _)| i)
+            .unwrap_or(input.len())
+    }
+
+    fn refresh_autocomplete(&mut self) {
+        self.autocomplete_state.update(
+            &self.input,
+            self.cursor_pos,
+            &self.working_directory,
+            &self.frecency_store,
+            &self.slash_commands,
+        );
+    }
+
+    fn apply_autocomplete_selection(&mut self) -> bool {
+        let Some(mut selected) = self.autocomplete_state.selected_value() else {
+            return false;
+        };
+
+        if self.autocomplete_state.mode == AutocompleteMode::Slash && !selected.ends_with(' ') {
+            selected.push(' ');
+        }
+
+        let start = self.autocomplete_state.token_start;
+        let end = self.autocomplete_state.token_end;
+        let start_b = Self::char_index_to_byte_index(&self.input, start);
+        let end_b = Self::char_index_to_byte_index(&self.input, end);
+        self.input.replace_range(start_b..end_b, &selected);
+        self.cursor_pos = start + selected.chars().count();
+        self.refresh_autocomplete();
+        true
+    }
+
     pub fn new_with_sidebar(sidebar: SidebarConfig) -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
         let mut kv_store = KvStore::new();
@@ -1043,7 +1168,7 @@ impl App {
         let sidebar_collapsed = kv_store.get("sidebar_collapsed", false);
         let show_todo_sidebar = !sidebar_collapsed;
         let recent_models = kv_store.get("recent_models", Vec::<String>::new());
-        let frecency_data = kv_store.get("frecency_data", HashMap::<String, u64>::new());
+        let frecency_store = kv_store.get("frecency_store", FrecencyStore::default());
 
         let thinking_visible = kv_store.get("thinking_visible", true);
         let timestamps_visible = kv_store.get("timestamps_visible", true);
@@ -1060,7 +1185,7 @@ impl App {
         kv_store.set("animations_enabled", animations_enabled);
         kv_store.set("diff_wrap_mode", diff_wrap_mode);
         kv_store.set("recent_models", recent_models.clone());
-        kv_store.set("frecency_data", frecency_data.clone());
+        kv_store.set("frecency_store", frecency_store.clone());
 
         Self {
             should_quit: false,
@@ -1104,7 +1229,9 @@ impl App {
             keybinds: KeybindConfig::default(),
             kv_store,
             recent_models,
-            frecency_data,
+            frecency_store,
+            autocomplete_state: AutocompleteState::default(),
+            slash_commands: Self::available_slash_commands(),
             prompt_history: Self::load_prompt_history().unwrap_or_default(),
             history_index: None,
             history_stash: String::new(),
@@ -1338,6 +1465,8 @@ impl App {
             self.render_hud(frame, chunks[3]);
             self.render_status(frame, chunks[4]);
             self.render_input(frame, chunks[5]);
+            self.autocomplete_state
+                .render(frame, chunks[5], &self.theme);
         } else {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -1355,6 +1484,8 @@ impl App {
             self.render_hud(frame, chunks[2]);
             self.render_status(frame, chunks[3]);
             self.render_input(frame, chunks[4]);
+            self.autocomplete_state
+                .render(frame, chunks[4], &self.theme);
         }
 
         self.toast_manager.tick();
@@ -2336,6 +2467,7 @@ impl App {
                         .unwrap_or(self.input.len());
                     self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {
                     if self.cursor_pos > 0 {
@@ -2362,6 +2494,7 @@ impl App {
                             .unwrap_or(self.input.len());
                         self.input.replace_range(start_byte..end_byte, "");
                         self.cursor_pos = start;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Backspace => {
@@ -2374,6 +2507,7 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(0);
                         self.input.remove(byte_pos);
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Delete => {
@@ -2385,6 +2519,7 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(self.input.len());
                         self.input.remove(byte_pos);
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -2398,11 +2533,13 @@ impl App {
                             pos -= 1;
                         }
                         self.cursor_pos = pos;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Left => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -2416,20 +2553,38 @@ impl App {
                             pos += 1;
                         }
                         self.cursor_pos = pos;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Right => {
                     if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Home => {
                     self.cursor_pos = 0;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::End => {
                     self.cursor_pos = char_count;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::Enter => {
+                    if self.autocomplete_state.is_active()
+                        && self.autocomplete_state.mode == AutocompleteMode::Slash
+                        && self.input.starts_with('/')
+                        && !self.input.chars().take(self.cursor_pos).any(|c| c.is_whitespace())
+                    {
+                        if let Some(command) = self.autocomplete_state.selected_value() {
+                            self.input.clear();
+                            self.cursor_pos = 0;
+                            self.autocomplete_state.clear();
+                            self.submit_input(command);
+                            return KeyAction::None;
+                        }
+                    }
+
                     if self.input.is_empty() && self.pending_images.is_empty() {
                         let selected_task_id = self
                             .chat_view
@@ -2461,6 +2616,7 @@ impl App {
                     if !self.input.trim().is_empty() || !self.pending_images.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
+                        self.autocomplete_state.clear();
 
                         if self.is_agent_busy() {
                             if key.modifiers.contains(KeyModifiers::ALT) {
@@ -2476,22 +2632,31 @@ impl App {
                     }
                 }
                 KeyCode::Tab => {
-                    if let Some(status) = self.chat_view.toggle_selected_tool_output() {
+                    if self.autocomplete_state.is_active() {
+                        let _ = self.apply_autocomplete_selection();
+                    } else if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                         self.status = status;
                     }
                 }
                 KeyCode::Esc => {
                     if self.session_stack.is_in_child() {
                         self.session_stack.pop_session();
+                    } else if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.clear();
                     } else if self.history_index.is_some() {
                         self.history_index = None;
                         self.input = self.history_stash.clone();
                         self.cursor_pos = self.input.chars().count();
+                        self.refresh_autocomplete();
                     } else {
                         self.should_quit = true;
                     }
                 }
                 KeyCode::Up => {
+                    if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.prev();
+                        return KeyAction::None;
+                    }
                     if !self.input.is_empty() && self.history_index.is_none() {
                         let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
@@ -2506,16 +2671,22 @@ impl App {
                             self.history_index = Some(idx);
                             self.input = self.prompt_history[idx].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     } else if let Some(idx) = self.history_index {
                         if idx > 0 {
                             self.history_index = Some(idx - 1);
                             self.input = self.prompt_history[idx - 1].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     }
                 }
                 KeyCode::Down => {
+                    if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.next();
+                        return KeyAction::None;
+                    }
                     if !self.input.is_empty() && self.history_index.is_none() {
                         let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
@@ -2528,10 +2699,12 @@ impl App {
                             self.history_index = Some(idx + 1);
                             self.input = self.prompt_history[idx + 1].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         } else {
                             self.history_index = None;
                             self.input = self.history_stash.clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     }
                 }
@@ -2761,6 +2934,12 @@ impl App {
     }
 
     fn submit_input(&mut self, input: String) {
+        if input.starts_with('!') {
+            let command = input.trim_start_matches('!').trim().to_string();
+            self.run_shell_escape(command);
+            return;
+        }
+
         if input.starts_with('/') {
             self.handle_slash_command(&input);
             return;
@@ -2821,6 +3000,62 @@ impl App {
             self.set_agent_state(AgentState::Thinking);
         } else {
             self.status = "No agent connected".to_string();
+        }
+    }
+
+    fn run_shell_escape(&mut self, command: String) {
+        if command.is_empty() {
+            self.chat_view
+                .push_message("system", "Usage: !<shell command>".to_string(), None);
+            return;
+        }
+
+        self.frecency_store
+            .touch(format!("command:!{}", command.clone()));
+        self.kv_store
+            .set("frecency_store", self.frecency_store.clone());
+
+        self.chat_view
+            .push_message("user", format!("!{}", command), None);
+        let output = Command::new("bash").args(["-lc", &command]).output();
+        match output {
+            Ok(result) => {
+                let mut rendered = String::new();
+                let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+                if !stdout.is_empty() {
+                    rendered.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !rendered.is_empty() {
+                        rendered.push_str("\n\n");
+                    }
+                    rendered.push_str(&format!("stderr:\n{}", stderr));
+                }
+                if rendered.is_empty() {
+                    rendered = "(no output)".to_string();
+                }
+                let code = result.status.code().unwrap_or(-1);
+                self.chat_view.push_tool_message(
+                    if result.status.success() { "tool" } else { "error" },
+                    format!("shell (exit {})", code),
+                    rendered,
+                    true,
+                    None,
+                );
+                self.status = if result.status.success() {
+                    format!("Shell command finished: {}", code)
+                } else {
+                    format!("Shell command failed: {}", code)
+                };
+            }
+            Err(err) => {
+                self.chat_view.push_message(
+                    "error",
+                    format!("Failed to execute shell command: {}", err),
+                    None,
+                );
+            }
         }
     }
 
@@ -3859,18 +4094,12 @@ impl App {
             self.recent_models.truncate(20);
         }
 
-        let next_score = self
-            .frecency_data
-            .get(&model)
-            .copied()
-            .unwrap_or(0)
-            .saturating_add(1);
-        self.frecency_data.insert(model, next_score);
+        self.frecency_store.touch(format!("model:{}", model));
 
         self.kv_store
             .set("recent_models", self.recent_models.clone());
         self.kv_store
-            .set("frecency_data", self.frecency_data.clone());
+            .set("frecency_store", self.frecency_store.clone());
     }
 
     fn share_session(&mut self, options: ShareCommandOptions) {
