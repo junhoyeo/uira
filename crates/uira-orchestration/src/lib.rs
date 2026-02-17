@@ -15,7 +15,10 @@ pub use agents::{
     PromptSource, RoutingTier, TierBuilder, ToolRestrictions, ToolRestrictionsRegistry,
 };
 pub use features::{background_agent, model_routing, uira_state};
-pub use features::{KeywordDetector, KeywordPattern, StateManager};
+pub use features::{
+    build_environment_context, register_environment_context, KeywordDetector, KeywordPattern,
+    StateManager,
+};
 pub use hooks::{
     create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
     HookRegistry, VerificationResult,

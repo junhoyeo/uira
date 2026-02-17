@@ -22,5 +22,6 @@ pub mod task_decomposer;
 pub mod uira_state;
 pub mod verification;
 
+pub use context_injector::{build_environment_context, register_environment_context};
 pub use keywords::{KeywordDetector, KeywordPattern};
 pub use state_manager::{SessionState, StateManager};

@@ -356,7 +356,12 @@ pub fn build_environment_context() -> String {
 /// Register environment context for a session.
 ///
 /// Call this when a session is created to auto-inject date/time/timezone
-/// into the agent's prompt on the first user message.
+/// into the agent's prompt on the first user message via the [`ContextInjectorHook`].
+///
+/// Note: For initial agent creation, [`build_environment_context()`] can be called
+/// directly and passed as additional context. This function is for ongoing
+/// context injection through the hook pipeline, ensuring environment info is
+/// re-injected when the [`ContextCollector`] is consumed by a hook.
 pub fn register_environment_context(collector: &ContextCollector, session_id: &str) {
     let env_ctx = build_environment_context();
     collector.register(
