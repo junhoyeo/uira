@@ -358,7 +358,7 @@ function publishNpmMain() {
   heading("Publishing @uiradev/uira");
 
   const pkgDir = path.join(ROOT, "packages/uira");
-  run("npm", ["run", "build"], { cwd: pkgDir, allowFailure: true });
+  run("npm", ["run", "build"], { cwd: pkgDir });
   run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
 
   const version = readJson(UIRA_PKG).version;
@@ -371,7 +371,7 @@ function publishNpmHook() {
   heading("Publishing @uiradev/hook");
 
   const pkgDir = path.join(ROOT, "packages/hook");
-  run("npm", ["run", "build"], { cwd: pkgDir, allowFailure: true });
+  run("npm", ["run", "build"], { cwd: pkgDir });
   run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
 
   const version = readJson(HOOK_PKG).version;
@@ -517,6 +517,9 @@ function finalize(version) {
   run("git", ["config", "user.email", "github-actions[bot]@users.noreply.github.com"]);
   run("git", ["add", "Cargo.toml", "packages/uira/package.json", "packages/hook/package.json"]);
   run("git", ["commit", "-m", `chore: bump version to ${version}`]);
+
+  // Pull with rebase to handle main advancing during the long publish jobs
+  run("git", ["pull", "--rebase", "origin", "main"]);
   run("git", ["push"]);
   log("Version bump committed and pushed");
 
