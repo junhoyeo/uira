@@ -96,6 +96,18 @@ fn tier_to_model_type(tier: ModelTier) -> ModelType {
     }
 }
 
+fn parse_explicit_category_tier(category: &str) -> Option<ModelTier> {
+    match category.to_lowercase().as_str() {
+        "quick" | "unspecified-low" | "unspecifiedlow" => Some(ModelTier::Low),
+        "visual-engineering" | "visualengineering" | "ultrabrain" | "unspecified-high"
+        | "unspecifiedhigh" | "deep" => Some(ModelTier::High),
+        "artistry" | "writing" | "unspecified-medium" | "unspecifiedmedium" => {
+            Some(ModelTier::Medium)
+        }
+        _ => None,
+    }
+}
+
 /// Extract base agent name from prefixed agent type
 /// e.g., "uira:executor" -> "executor"
 fn extract_agent_name(agent_type: &str) -> &str {
@@ -136,16 +148,8 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     };
     let resolved_category = delegation_categories::get_category_for_task(&category_context);
 
-    // Convert category tier to model type for routing
-    let category_model = match resolved_category.tier {
-        delegation_categories::types::ComplexityTier::Low => Some(ModelType::Haiku),
-        delegation_categories::types::ComplexityTier::Medium => Some(ModelType::Sonnet),
-        delegation_categories::types::ComplexityTier::High => Some(ModelType::Opus),
-    };
-
     // Determine model to use
-    // Priority: explicit model param > explicit category > routing decision > agent default > Sonnet
-    let (final_model, final_tier, routing_reasons) = if let Some(model_str) = &params.model {
+    let (mut final_model, mut final_tier, mut routing_reasons) = if let Some(model_str) = &params.model {
         // Explicit model override
         if let Some(model_type) = parse_model_type(model_str) {
             let tier = match model_type {
@@ -164,15 +168,6 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
                 message: format!("Invalid model: {}. Use haiku, sonnet, or opus.", model_str),
             });
         }
-    } else if params.category.is_some() {
-        // Category explicitly specified — use its tier for model selection
-        let model = category_model.unwrap_or(ModelType::Sonnet);
-        let tier = match model {
-            ModelType::Haiku => ModelTier::Low,
-            ModelType::Sonnet => ModelTier::Medium,
-            ModelType::Opus | ModelType::Inherit => ModelTier::High,
-        };
-        (model, tier, vec![format!("Category override: {}", resolved_category.category.as_str())])
     } else {
         // Use model routing to determine best model
         let routing_context = RoutingContext {
@@ -190,6 +185,16 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
             decision.reasons,
         )
     };
+
+    if params.model.is_none() {
+        if let Some(explicit_category_str) = params.category.as_deref() {
+            if let Some(explicit_category_tier) = parse_explicit_category_tier(explicit_category_str) {
+                final_tier = explicit_category_tier;
+                final_model = tier_to_model_type(explicit_category_tier);
+                routing_reasons.push(format!("Category override: {}", explicit_category_str));
+            }
+        }
+    }
 
     // Build effective prompt: skill content + category guidance + task prompt
     let mut effective_prompt = params.prompt.clone();
@@ -334,6 +339,17 @@ mod tests {
         assert_eq!(parse_model_type("medium"), Some(ModelType::Sonnet));
         assert_eq!(parse_model_type("high"), Some(ModelType::Opus));
         assert_eq!(parse_model_type("invalid"), None);
+    }
+
+    #[test]
+    fn test_parse_explicit_category_tier() {
+        assert_eq!(parse_explicit_category_tier("quick"), Some(ModelTier::Low));
+        assert_eq!(parse_explicit_category_tier("visual-engineering"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("unspecified-high"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("unspecified-low"), Some(ModelTier::Low));
+        assert_eq!(parse_explicit_category_tier("deep"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("writing"), Some(ModelTier::Medium));
+        assert_eq!(parse_explicit_category_tier("invalid"), None);
     }
 
     #[tokio::test]
@@ -496,5 +512,53 @@ mod tests {
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
         assert!(response.success);
         assert!(response.agent_description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_explicit_category_overrides_routing_model() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Debug this complex race condition in the concurrent architecture",
+            "category": "quick"
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        assert_eq!(response.model_type, "haiku");
+        assert!(response
+            .routing_reasons
+            .iter()
+            .any(|r| r.contains("Category override")));
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_effective_prompt_includes_skill_and_category_guidance() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Implement the login form",
+            "category": "writing",
+            "loadSkills": ["frontend-ui-ux"]
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        let effective_prompt = response.effective_prompt.unwrap_or_default();
+        assert!(effective_prompt.contains("<injected-skills>"));
+        assert!(effective_prompt.contains("<skill name=\"frontend-ui-ux\">"));
+        assert!(effective_prompt.contains("Focus on clarity, completeness, and proper structure."));
     }
 }
