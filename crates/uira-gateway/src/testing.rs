@@ -16,6 +16,7 @@ use crate::channels::types::{ChannelCapabilities, ChannelMessage, ChannelRespons
 
 pub struct MockModelClient {
     response_text: String,
+    stream_deltas: Option<Vec<String>>,
     delay: Option<Duration>,
     error: Mutex<Option<ProviderError>>,
     call_count: AtomicUsize,
@@ -25,10 +26,16 @@ impl MockModelClient {
     pub fn new(response: &str) -> Self {
         Self {
             response_text: response.to_string(),
+            stream_deltas: None,
             delay: None,
             error: Mutex::new(None),
             call_count: AtomicUsize::new(0),
         }
+    }
+
+    pub fn with_stream_deltas(mut self, deltas: Vec<String>) -> Self {
+        self.stream_deltas = Some(deltas);
+        self
     }
 
     pub fn with_delay(mut self, delay: Duration) -> Self {
@@ -94,14 +101,20 @@ impl ModelClient for MockModelClient {
             return Err(err);
         }
 
-        let text = self.response_text.clone();
-        let chunks: Vec<Result<StreamChunk, ProviderError>> = vec![
-            Ok(StreamChunk::ContentBlockDelta {
-                index: 0,
-                delta: ContentDelta::TextDelta { text },
-            }),
-            Ok(StreamChunk::MessageStop),
-        ];
+        let deltas = self
+            .stream_deltas
+            .clone()
+            .unwrap_or_else(|| vec![self.response_text.clone()]);
+        let mut chunks: Vec<Result<StreamChunk, ProviderError>> = deltas
+            .into_iter()
+            .map(|text| {
+                Ok(StreamChunk::ContentBlockDelta {
+                    index: 0,
+                    delta: ContentDelta::TextDelta { text },
+                })
+            })
+            .collect();
+        chunks.push(Ok(StreamChunk::MessageStop));
         Ok(Box::pin(stream::iter(chunks)))
     }
 
@@ -128,6 +141,8 @@ pub struct MockChannel {
     message_tx: Option<mpsc::Sender<ChannelMessage>>,
     message_rx: Option<mpsc::Receiver<ChannelMessage>>,
     sent_messages: Arc<Mutex<Vec<ChannelResponse>>>,
+    edited_messages: Arc<Mutex<Vec<(String, String, String)>>>,
+    next_message_id: AtomicUsize,
 }
 
 impl MockChannel {
@@ -139,6 +154,8 @@ impl MockChannel {
             message_tx: Some(tx),
             message_rx: Some(rx),
             sent_messages: Arc::new(Mutex::new(Vec::new())),
+            edited_messages: Arc::new(Mutex::new(Vec::new())),
+            next_message_id: AtomicUsize::new(1),
         }
     }
 
@@ -171,6 +188,10 @@ impl MockChannel {
     pub fn sent_messages_shared(&self) -> Arc<Mutex<Vec<ChannelResponse>>> {
         self.sent_messages.clone()
     }
+
+    pub fn edited_messages_shared(&self) -> Arc<Mutex<Vec<(String, String, String)>>> {
+        self.edited_messages.clone()
+    }
 }
 
 #[async_trait]
@@ -183,6 +204,8 @@ impl Channel for MockChannel {
         ChannelCapabilities {
             max_message_length: 4096,
             supports_markdown: true,
+            supports_streaming: false,
+            stream_throttle_ms: None,
         }
     }
 
@@ -205,6 +228,32 @@ impl Channel for MockChannel {
 
     async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
         self.sent_messages.lock().unwrap().push(response);
+        Ok(())
+    }
+
+    async fn send_message_returning_id(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<Option<String>, ChannelError> {
+        self.sent_messages.lock().unwrap().push(response);
+        if !self.capabilities().supports_streaming {
+            return Ok(None);
+        }
+        let id = self.next_message_id.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(id.to_string()))
+    }
+
+    async fn edit_message(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), ChannelError> {
+        self.edited_messages.lock().unwrap().push((
+            recipient.to_string(),
+            message_id.to_string(),
+            new_content.to_string(),
+        ));
         Ok(())
     }
 

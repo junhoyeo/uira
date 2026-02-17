@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod goals;
 pub mod hook;
+#[allow(clippy::module_inception)]
 pub mod hooks;
 pub mod registry;
 pub mod types;

@@ -64,7 +64,6 @@ pub struct SessionManager {
     reaper_started: Arc<AtomicBool>,
     reaper_interval: Duration,
     reaper_handle: Arc<std::sync::Mutex<Option<JoinHandle<()>>>>,
-    #[cfg(test)]
     test_model_client: Option<Arc<dyn ModelClient>>,
 }
 
@@ -82,13 +81,11 @@ impl SessionManager {
             reaper_started: Arc::new(AtomicBool::new(false)),
             reaper_interval: Duration::from_secs(60),
             reaper_handle: Arc::new(std::sync::Mutex::new(None)),
-            #[cfg(test)]
             test_model_client: None,
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn new_with_test_client(
+    pub fn new_with_test_client(
         max_sessions: usize,
         settings: GatewaySettings,
         test_model_client: Arc<dyn ModelClient>,
@@ -113,7 +110,6 @@ impl SessionManager {
 
     /// Create a new session. Returns the session ID.
     pub async fn create_session(&self, config: SessionConfig) -> Result<String, GatewayError> {
-        #[cfg(test)]
         if let Some(test_model_client) = &self.test_model_client {
             return self
                 .create_session_with_client(config, test_model_client.clone())

@@ -44,6 +44,10 @@ pub struct ChannelResponse {
 pub struct ChannelCapabilities {
     pub max_message_length: usize,
     pub supports_markdown: bool,
+    pub supports_streaming: bool,
+    /// Minimum interval between message edits in milliseconds.
+    /// If None, uses the default (300ms).
+    pub stream_throttle_ms: Option<u64>,
 }
 
 /// Floors a string to a valid UTF-8 character boundary.

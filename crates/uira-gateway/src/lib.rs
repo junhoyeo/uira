@@ -8,6 +8,7 @@ pub mod protocol;
 pub mod server;
 pub mod session_manager;
 pub mod skills;
+pub mod testing;
 
 pub use channel_bridge::ChannelBridge;
 pub use channels::*;
@@ -17,6 +18,3 @@ pub use protocol::{GatewayMessage, GatewayResponse};
 pub use server::GatewayServer;
 pub use session_manager::{SessionInfo, SessionManager, SessionStatus};
 pub use skills::*;
-
-#[cfg(test)]
-pub mod testing;

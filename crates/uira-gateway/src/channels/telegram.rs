@@ -152,6 +152,8 @@ impl Channel for TelegramChannel {
         ChannelCapabilities {
             max_message_length: TELEGRAM_MAX_MESSAGE_LENGTH,
             supports_markdown: true,
+            supports_streaming: self.config.stream_mode.eq_ignore_ascii_case("partial"),
+            stream_throttle_ms: Some(self.config.stream_throttle_ms),
         }
     }
 
@@ -264,6 +266,67 @@ impl Channel for TelegramChannel {
         Ok(())
     }
 
+    async fn send_message_returning_id(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<Option<String>, ChannelError> {
+        let bot = Bot::new(&self.config.bot_token);
+
+        let chat_id: i64 = response.recipient.parse().map_err(|e| {
+            ChannelError::SendFailed(format!("Invalid chat_id '{}': {e}", response.recipient))
+        })?;
+
+        let chunks = chunk_message(&response.content, TELEGRAM_MAX_MESSAGE_LENGTH);
+        let first_chunk = chunks
+            .first()
+            .ok_or_else(|| ChannelError::SendFailed("Cannot send empty message".to_string()))?;
+
+        let sent = bot
+            .send_message(ChatId(chat_id), first_chunk)
+            .await
+            .map_err(|e| ChannelError::SendFailed(format!("Telegram send error: {e}")))?;
+
+        #[cfg(test)]
+        self.sent_messages.lock().unwrap().push(response);
+
+        Ok(Some(sent.id.0.to_string()))
+    }
+
+    async fn edit_message(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        new_content: &str,
+    ) -> Result<(), ChannelError> {
+        let bot = Bot::new(&self.config.bot_token);
+
+        let chat_id: i64 = recipient
+            .parse()
+            .map_err(|e| ChannelError::SendFailed(format!("Invalid chat_id '{recipient}': {e}")))?;
+        let message_id: i32 = message_id
+            .parse()
+            .map_err(|e| ChannelError::SendFailed(format!("Invalid message_id '{message_id}': {e}")))?;
+
+        let result = bot
+            .edit_message_text(
+                ChatId(chat_id),
+                teloxide::types::MessageId(message_id),
+                new_content,
+            )
+            .await;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let error_text = e.to_string();
+                if error_text.contains("message is not modified") {
+                    return Ok(());
+                }
+                Err(ChannelError::SendFailed(format!("Telegram edit error: {e}")))
+            }
+        }
+    }
+
     fn take_message_receiver(&mut self) -> Option<mpsc::Receiver<ChannelMessage>> {
         self.message_rx.take()
     }
@@ -279,6 +342,8 @@ mod tests {
             bot_token: "test:fake-token".to_string(),
             allowed_users: Vec::new(),
             active_skills: Vec::new(),
+            stream_mode: "partial".to_string(),
+            stream_throttle_ms: 300,
         }
     }
 
@@ -344,6 +409,16 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), 4096);
         assert_eq!(chunks[1].len(), 904);
+    }
+
+    #[test]
+    fn test_chunk_message_streaming_first_chunk_limit() {
+        let text = "a".repeat(4097);
+        let chunks = chunk_message(&text, 4096);
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].len(), 4096);
+        assert_eq!(chunks[1].len(), 1);
     }
 
     #[test]
@@ -436,6 +511,18 @@ mod tests {
 
         assert_eq!(caps.max_message_length, 4096);
         assert!(caps.supports_markdown);
+        assert!(caps.supports_streaming);
+    }
+
+    #[test]
+    fn test_telegram_channel_capabilities_streaming_off() {
+        let mut config = test_config();
+        config.stream_mode = "off".to_string();
+
+        let channel = TelegramChannel::new(config);
+        let caps = channel.capabilities();
+
+        assert!(!caps.supports_streaming);
     }
 
     #[tokio::test]
