@@ -7,7 +7,11 @@ use ratatui::{
 use std::collections::HashMap;
 use uira_core::AgentState;
 
-use crate::widgets::{markdown::render_markdown, tool_renderers, ChatMessage};
+use crate::widgets::tool_renderers::{ToolRenderContext, ToolState};
+use crate::widgets::{
+    markdown::{render_markdown_with_options, MarkdownRenderOptions},
+    tool_renderers, ChatMessage,
+};
 use crate::Theme;
 
 pub struct ChatView {
@@ -29,6 +33,7 @@ pub struct ChatView {
     cached_static_entry_count: usize,
     cached_message_count: usize,
     cache_dirty: bool,
+    show_tool_details: bool,
     pub agent_state: AgentState,
 }
 
@@ -53,7 +58,18 @@ impl ChatView {
             cached_static_entry_count: 0,
             cached_message_count: 0,
             cache_dirty: true,
+            show_tool_details: true,
             agent_state: AgentState::Idle,
+        }
+    }
+
+    pub fn toggle_tool_details(&mut self) -> String {
+        self.show_tool_details = !self.show_tool_details;
+        self.invalidate_render_cache();
+        if self.show_tool_details {
+            "Tool details shown".to_string()
+        } else {
+            "Tool details hidden".to_string()
         }
     }
 
@@ -497,7 +513,7 @@ impl ChatView {
         };
 
         if let Some(tool_output) = &msg.tool_output {
-            if tool_output.collapsed {
+            if tool_output.collapsed || !self.show_tool_details {
                 let body = format!(
                     "▶ {}: {} [Tab/Enter to expand]",
                     tool_output.tool_name, tool_output.summary
@@ -516,6 +532,11 @@ impl ChatView {
                 &msg.content,
                 content_width,
                 &self.theme,
+                ToolRenderContext {
+                    state: tool_state_from_message(&msg),
+                    expanded: !tool_output.collapsed,
+                    wide: inner_width > 120,
+                },
             ));
             return self.add_message_border(lines, &msg);
         }
@@ -579,6 +600,19 @@ impl ChatView {
             }
         }
 
+        if msg.role == "system" {
+            if is_compaction_marker(&msg.content) {
+                let mut lines = render_compaction_marker(content_width, &self.theme);
+                lines.extend(render_attachment_badges(&msg.content, &self.theme));
+                return self.add_message_border(lines, &msg);
+            }
+            if let Some(revert_lines) =
+                render_revert_banner(&msg.content, content_width, &self.theme)
+            {
+                return self.add_message_border(revert_lines, &msg);
+            }
+        }
+
         if msg.role == "assistant" || msg.role == "system" {
             let mut lines = render_message_markdown(
                 &role_prefix,
@@ -593,10 +627,12 @@ impl ChatView {
                     lines.push(footer);
                 }
             }
+            lines.extend(render_attachment_badges(&msg.content, &self.theme));
             return self.add_message_border(lines, &msg);
         }
 
-        let lines = wrap_message(&role_prefix, &msg.content, content_width, style);
+        let mut lines = wrap_message(&role_prefix, &msg.content, content_width, style);
+        lines.extend(render_attachment_badges(&msg.content, &self.theme));
         self.add_message_border(lines, &msg)
     }
 
@@ -609,8 +645,17 @@ impl ChatView {
                     .fg(border_color)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(agent_name.clone(), Style::default().fg(border_color)),
+            Span::styled("Mode", Style::default().fg(border_color)),
         ];
+
+        spans.push(Span::styled(
+            " · ",
+            Style::default().fg(self.theme.text_muted),
+        ));
+        spans.push(Span::styled(
+            agent_name.clone(),
+            Style::default().fg(border_color),
+        ));
 
         if let Some(ref model_id) = msg.session_id {
             spans.push(Span::styled(
@@ -631,6 +676,19 @@ impl ChatView {
             spans.push(Span::styled(
                 format!("{}ms", timestamp),
                 Style::default().fg(self.theme.text_muted),
+            ));
+        }
+
+        if msg.content.to_lowercase().contains("interrupt") {
+            spans.push(Span::styled(
+                " · ",
+                Style::default().fg(self.theme.text_muted),
+            ));
+            spans.push(Span::styled(
+                "interrupted",
+                Style::default()
+                    .fg(self.theme.warning)
+                    .add_modifier(Modifier::ITALIC),
             ));
         }
 
@@ -812,7 +870,15 @@ fn render_message_markdown(
     let prefix_style = style.add_modifier(Modifier::BOLD);
     let prefix_len = prefix.chars().count();
     let markdown_width = max_width.saturating_sub(prefix_len).max(1);
-    let mut markdown_lines = render_markdown(content, markdown_width, theme);
+    let mut markdown_lines = render_markdown_with_options(
+        content,
+        markdown_width,
+        theme,
+        MarkdownRenderOptions {
+            conceal: true,
+            streaming_friendly: true,
+        },
+    );
 
     if markdown_lines.is_empty() {
         return vec![Line::from(Span::styled(prefix.to_string(), prefix_style))];
@@ -905,6 +971,114 @@ fn summarize_tool_output(output: &str) -> String {
             total_lines.saturating_sub(1)
         )
     }
+}
+
+fn tool_state_from_message(msg: &ChatMessage) -> ToolState {
+    if msg.role == "error" {
+        let denied = msg.content.contains("rejected permission")
+            || msg.content.contains("specified a rule")
+            || msg.content.contains("user dismissed");
+        return if denied {
+            ToolState::Denied
+        } else {
+            ToolState::Error
+        };
+    }
+
+    if msg.content.trim().is_empty() {
+        ToolState::Pending
+    } else {
+        ToolState::Completed
+    }
+}
+
+fn is_compaction_marker(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("compaction") || lower.contains("compacted")
+}
+
+fn render_compaction_marker(width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    let rule_width = width.saturating_sub(14).max(8);
+    let left = "─".repeat(rule_width / 2);
+    let right = "─".repeat(rule_width.saturating_sub(rule_width / 2));
+    vec![Line::from(vec![
+        Span::styled(left, Style::default().fg(theme.border_subtle)),
+        Span::styled(
+            " Compaction ",
+            Style::default()
+                .fg(theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(right, Style::default().fg(theme.border_subtle)),
+    ])]
+}
+
+fn render_revert_banner(content: &str, _width: usize, theme: &Theme) -> Option<Vec<Line<'static>>> {
+    let lower = content.to_lowercase();
+    if !lower.contains("revert") && !lower.contains("reverted") {
+        return None;
+    }
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled("  ", Style::default().bg(theme.bg_panel)),
+        Span::styled(
+            content.to_string(),
+            Style::default()
+                .fg(theme.warning)
+                .bg(theme.bg_panel)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])];
+
+    let files: Vec<&str> = content
+        .lines()
+        .filter(|line| line.trim_start().starts_with('+') || line.trim_start().starts_with('-'))
+        .collect();
+    for file in files {
+        let style = if file.trim_start().starts_with('+') {
+            Style::default().fg(theme.diff_added)
+        } else {
+            Style::default().fg(theme.diff_removed)
+        };
+        lines.push(Line::from(Span::styled(format!("  {file}"), style)));
+    }
+
+    Some(lines)
+}
+
+fn render_attachment_badges(content: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let mut badges = Vec::new();
+    for token in content.split_whitespace() {
+        let token_lower = token.to_lowercase();
+        let (label, color) = if token_lower.ends_with(".png")
+            || token_lower.ends_with(".jpg")
+            || token_lower.ends_with(".jpeg")
+            || token_lower.ends_with(".webp")
+        {
+            (" img ", theme.accent)
+        } else if token_lower.ends_with(".pdf") {
+            (" pdf ", theme.warning)
+        } else if token_lower.ends_with('/') {
+            (" dir ", theme.borders)
+        } else if token_lower.ends_with(".txt")
+            || token_lower.ends_with(".md")
+            || token_lower.ends_with(".rs")
+            || token_lower.ends_with(".json")
+            || token_lower.ends_with(".toml")
+        {
+            (" txt ", theme.success)
+        } else {
+            continue;
+        };
+        badges.push(Line::from(vec![Span::styled(
+            label,
+            Style::default()
+                .bg(color)
+                .fg(theme.bg)
+                .add_modifier(Modifier::BOLD),
+        )]));
+    }
+    badges
 }
 
 #[cfg(test)]
