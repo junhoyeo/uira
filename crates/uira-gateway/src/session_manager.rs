@@ -533,7 +533,15 @@ impl SessionManager {
             agent_config = agent_config.with_working_directory(path);
         }
 
-        // Build additional context: environment context + optional skill context.
+        // Resolve orchestrator personality: session config > gateway default > "balanced"
+        let agent_name = config
+            .agent
+            .as_deref()
+            .unwrap_or(settings.default_agent.as_str());
+        let personality = uira_orchestration::OrchestratorPersonality::parse(agent_name)
+            .unwrap_or(uira_orchestration::OrchestratorPersonality::Balanced);
+
+        // Build additional context: orchestrator prompt + environment context + optional skill context.
         let context_collector =
             uira_orchestration::features::context_injector::ContextCollector::new();
         uira_orchestration::features::context_injector::register_environment_context(
@@ -543,7 +551,7 @@ impl SessionManager {
         let env_context = context_collector
             .consume("gateway-session-startup")
             .merged;
-        let mut additional_context = vec![env_context];
+        let mut additional_context = vec![personality.system_prompt().to_string(), env_context];
         if let Some(skill_context) = &config.skill_context {
             additional_context.push(skill_context.clone());
         }

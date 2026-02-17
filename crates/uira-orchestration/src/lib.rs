@@ -14,6 +14,7 @@ pub use agents::{
     AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PlanningPipeline,
     PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder, ToolRestrictions,
     ToolRestrictionsRegistry,
+    OrchestratorPersonality,
 };
 pub use features::{background_agent, model_routing, uira_state};
 pub use features::{

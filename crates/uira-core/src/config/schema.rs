@@ -882,6 +882,17 @@ pub struct GatewaySettings {
     #[serde(default = "default_gateway_provider")]
     pub provider: String,
 
+    /// Default orchestrator agent for new sessions.
+    ///
+    /// Controls which primary agent personality is used:
+    /// - "balanced" (default): Delegates heavily, asks before acting
+    /// - "autonomous": Deep worker that completes tasks without asking
+    /// - "orchestrator": Conductor that never writes code, only delegates
+    ///
+    /// Can be overridden per-session via SessionConfig.
+    #[serde(default = "default_gateway_agent")]
+    pub default_agent: String,
+
     /// Optional authentication token for gateway access
     #[serde(default)]
     pub auth_token: Option<String>,
@@ -904,6 +915,7 @@ impl Default for GatewaySettings {
             max_sessions: default_max_sessions(),
             model: default_gateway_model(),
             provider: default_gateway_provider(),
+            default_agent: default_gateway_agent(),
             auth_token: None,
             idle_timeout_secs: default_idle_timeout(),
             working_directory: None,
@@ -929,6 +941,10 @@ fn default_gateway_model() -> String {
 
 fn default_gateway_provider() -> String {
     "anthropic".to_string()
+}
+
+fn default_gateway_agent() -> String {
+    "balanced".to_string()
 }
 
 fn default_idle_timeout() -> Option<u64> {
@@ -1385,6 +1401,7 @@ sidebar:
         assert_eq!(settings.max_sessions, 10);
         assert_eq!(settings.model, "claude-sonnet-4-20250514");
         assert_eq!(settings.provider, "anthropic");
+        assert_eq!(settings.default_agent, "balanced");
         assert!(settings.auth_token.is_none());
         assert_eq!(settings.idle_timeout_secs, Some(1800));
         assert!(settings.working_directory.is_none());

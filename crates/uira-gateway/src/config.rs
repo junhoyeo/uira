@@ -11,6 +11,15 @@ pub struct SessionConfig {
     #[serde(default)]
     pub provider: Option<String>,
 
+    /// Primary agent/orchestrator personality for this session.
+    ///
+    /// Overrides `gateway.default_agent`. Valid values:
+    /// - "balanced": Delegates heavily, asks before acting (default)
+    /// - "autonomous": Deep worker, completes tasks without asking
+    /// - "orchestrator": Conductor, never writes code, only delegates
+    #[serde(default)]
+    pub agent: Option<String>,
+
     /// Skills to activate for this session
     #[serde(default)]
     pub skills: Vec<String>,
@@ -42,6 +51,7 @@ mod tests {
         let mut config = SessionConfig {
             model: Some("gpt-4".to_string()),
             provider: Some("openai".to_string()),
+            agent: Some("autonomous".to_string()),
             skills: vec!["skill1".to_string()],
             skill_context: Some("<dangerous/>".to_string()),
             working_directory: Some("/etc/passwd".to_string()),
@@ -49,6 +59,7 @@ mod tests {
         config.sanitize();
         assert_eq!(config.model, Some("gpt-4".to_string())); // preserved
         assert_eq!(config.provider, Some("openai".to_string())); // preserved
+        assert_eq!(config.agent, Some("autonomous".to_string())); // preserved — user choice
         assert_eq!(config.skills, vec!["skill1".to_string()]); // preserved
         assert!(config.skill_context.is_none()); // stripped
         assert!(config.working_directory.is_none()); // stripped
