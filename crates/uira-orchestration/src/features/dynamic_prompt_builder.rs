@@ -328,7 +328,8 @@ pub fn builtin_agent_metadata() -> HashMap<String, AgentPromptMetadata> {
                 "Read".to_string(),
                 "Glob".to_string(),
                 "Grep".to_string(),
-                "Bash".to_string(),
+                "WebSearch".to_string(),
+                "WebFetch".to_string(),
             ],
         },
     );
@@ -427,7 +428,7 @@ pub fn builtin_agent_metadata() -> HashMap<String, AgentPromptMetadata> {
                 "Read".to_string(),
                 "Glob".to_string(),
                 "Grep".to_string(),
-                "TodoWrite".to_string(),
+                "Write".to_string(),
             ],
         },
     );
