@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[path = "../schema/keybinds.rs"]
+pub mod keybinds;
+#[path = "../schema/theme.rs"]
+pub mod theme;
+pub use keybinds::KeybindsConfig;
+
 /// Main Uira configuration
 ///
 /// Configuration is loaded from (in priority order):
@@ -1004,33 +1010,6 @@ pub struct SlackChannelConfig {
 // ============================================================================
 // Keybindings Configuration
 // ============================================================================
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct KeybindsConfig {
-    #[serde(default)]
-    pub scroll_up: Option<String>,
-
-    #[serde(default)]
-    pub scroll_down: Option<String>,
-
-    #[serde(default)]
-    pub page_up: Option<String>,
-
-    #[serde(default)]
-    pub page_down: Option<String>,
-
-    #[serde(default)]
-    pub command_palette: Option<String>,
-
-    #[serde(default)]
-    pub toggle_sidebar: Option<String>,
-
-    #[serde(default)]
-    pub collapse_tools: Option<String>,
-
-    #[serde(default)]
-    pub expand_tools: Option<String>,
-}
 
 #[cfg(test)]
 mod tests {

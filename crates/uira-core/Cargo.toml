@@ -20,6 +20,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 uuid = { version = "1", features = ["v4", "serde"] }
 tempfile = { workspace = true }
+dirs = "5"
 
 [dev-dependencies]
 tempfile = { workspace = true }

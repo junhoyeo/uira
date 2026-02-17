@@ -1,9 +1,7 @@
 //! Main TUI application
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
-use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
@@ -25,26 +23,27 @@ use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
 };
+use uira_core::Provider;
 use uira_core::{
     schema::SidebarConfig, ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY,
     ENV_OPENAI_API_KEY, UIRA_DIR,
+};
+use uira_core::{
+    AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
+    TodoItem, TodoPriority, TodoStatus,
 };
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
 };
-use uira_core::Provider;
-use uira_core::{
-    AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
-    TodoItem, TodoPriority, TodoStatus,
-};
 
 use crate::keybinds::KeybindConfig;
+use crate::kv_store::KvStore;
+use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
     ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
 };
-use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, Theme, ThemeOverrides};
@@ -770,8 +769,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 api_key: None,
                 model: model.to_string(),
                 base_url: Some(
-                    std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
+                    std::env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };
@@ -880,30 +878,34 @@ pub struct App {
     #[allow(dead_code)]
     toast_manager: ToastManager,
     keybinds: KeybindConfig,
+    kv_store: KvStore,
+    recent_models: Vec<String>,
+    frecency_data: HashMap<String, u64>,
     /// Prompt history for Up/Down navigation
     prompt_history: Vec<String>,
     /// Current position in history (None = not browsing, Some(idx) = browsing)
     history_index: Option<usize>,
     /// Saved input when entering history mode
     history_stash: String,
+    external_theme_fingerprint: u64,
 }
 
 impl App {
     pub fn new() -> Self {
         Self::new_with_sidebar(SidebarConfig::default())
     }
-    
+
     /// Calculate the required height for input based on content and available width
     fn calculate_input_height(&self, available_width: u16) -> u16 {
         if self.input.is_empty() {
             return 3; // Minimum height: border + 1 line content + border
         }
-        
+
         let inner_width = available_width.saturating_sub(2) as usize; // Account for borders
         if inner_width == 0 {
             return 3;
         }
-        
+
         // Count the number of lines needed
         let mut lines = 0;
         for paragraph in self.input.split('\n') {
@@ -916,7 +918,7 @@ impl App {
                 lines += chars_per_line + if remainder > 0 { 1 } else { 0 };
             }
         }
-        
+
         // Add borders (top + bottom) and ensure minimum height
         let total_height = lines + 2;
         total_height.clamp(3, 8) as u16
@@ -927,39 +929,41 @@ impl App {
         if self.cursor_pos == 0 {
             return;
         }
-        
+
         let chars: Vec<char> = self.input.chars().collect();
         let mut lines = Vec::new();
         let mut current_line = Vec::new();
         let mut char_positions = Vec::new(); // Maps char index to (line, column)
-        
+
         for &ch in &chars {
             char_positions.push((lines.len(), current_line.len()));
-            
+
             if ch == '\n' {
                 lines.push(current_line.clone());
                 current_line.clear();
                 continue;
             }
-            
+
             if current_line.len() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
-            
+
             current_line.push(ch);
         }
-        
+
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
-        
-        if let Some(&(current_line, current_col)) = char_positions.get(self.cursor_pos.saturating_sub(1)) {
+
+        if let Some(&(current_line, current_col)) =
+            char_positions.get(self.cursor_pos.saturating_sub(1))
+        {
             if current_line > 0 {
                 // Find position in previous line
                 let target_line = current_line - 1;
                 let target_col = current_col.min(lines[target_line].len());
-                
+
                 // Find the character index for this position
                 for (i, &(line, col)) in char_positions.iter().enumerate() {
                     if line == target_line && col == target_col {
@@ -970,45 +974,45 @@ impl App {
             }
         }
     }
-    
-    /// Move cursor down one line in multi-line input  
+
+    /// Move cursor down one line in multi-line input
     fn move_cursor_down(&mut self, inner_width: usize) {
         let chars: Vec<char> = self.input.chars().collect();
         if self.cursor_pos >= chars.len() {
             return;
         }
-        
+
         let mut lines = Vec::new();
         let mut current_line = Vec::new();
         let mut char_positions = Vec::new(); // Maps char index to (line, column)
-        
+
         for &ch in &chars {
             char_positions.push((lines.len(), current_line.len()));
-            
+
             if ch == '\n' {
                 lines.push(current_line.clone());
                 current_line.clear();
                 continue;
             }
-            
+
             if current_line.len() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
-            
+
             current_line.push(ch);
         }
-        
+
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
-        
+
         if let Some(&(current_line, current_col)) = char_positions.get(self.cursor_pos) {
             if current_line < lines.len() - 1 {
                 // Find position in next line
                 let target_line = current_line + 1;
                 let target_col = current_col.min(lines[target_line].len());
-                
+
                 // Find the character index for this position
                 for (i, &(line, col)) in char_positions.iter().enumerate() {
                     if line == target_line && col == target_col {
@@ -1022,6 +1026,7 @@ impl App {
 
     pub fn new_with_sidebar(sidebar: SidebarConfig) -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
+        let mut kv_store = KvStore::new();
         let theme = Theme::default();
         let mut approval_overlay = ApprovalOverlay::new();
         approval_overlay.set_theme(theme.clone());
@@ -1035,6 +1040,28 @@ impl App {
             sidebar.show_todos,
             sidebar.show_files,
         ];
+        let sidebar_collapsed = kv_store.get("sidebar_collapsed", false);
+        let show_todo_sidebar = !sidebar_collapsed;
+        let recent_models = kv_store.get("recent_models", Vec::<String>::new());
+        let frecency_data = kv_store.get("frecency_data", HashMap::<String, u64>::new());
+
+        let thinking_visible = kv_store.get("thinking_visible", true);
+        let timestamps_visible = kv_store.get("timestamps_visible", true);
+        let tool_details_visible = kv_store.get("tool_details_visible", true);
+        let scrollbar_visible = kv_store.get("scrollbar_visible", true);
+        let animations_enabled = kv_store.get("animations_enabled", true);
+        let diff_wrap_mode = kv_store.get("diff_wrap_mode", "word".to_string());
+
+        kv_store.set("sidebar_collapsed", sidebar_collapsed);
+        kv_store.set("thinking_visible", thinking_visible);
+        kv_store.set("timestamps_visible", timestamps_visible);
+        kv_store.set("tool_details_visible", tool_details_visible);
+        kv_store.set("scrollbar_visible", scrollbar_visible);
+        kv_store.set("animations_enabled", animations_enabled);
+        kv_store.set("diff_wrap_mode", diff_wrap_mode);
+        kv_store.set("recent_models", recent_models.clone());
+        kv_store.set("frecency_data", frecency_data.clone());
+
         Self {
             should_quit: false,
             event_tx,
@@ -1063,7 +1090,7 @@ impl App {
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
             todos: Vec::new(),
-            show_todo_sidebar: true,
+            show_todo_sidebar,
             todo_list_state: ListState::default(),
             sidebar_sections,
             modified_files: HashSet::new(),
@@ -1075,9 +1102,13 @@ impl App {
             message_queue: MessageQueue::default(),
             toast_manager: ToastManager::new(),
             keybinds: KeybindConfig::default(),
+            kv_store,
+            recent_models,
+            frecency_data,
             prompt_history: Self::load_prompt_history().unwrap_or_default(),
             history_index: None,
             history_stash: String::new(),
+            external_theme_fingerprint: Theme::external_theme_fingerprint(),
         }
     }
 
@@ -1117,6 +1148,8 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> std::io::Result<()> {
         loop {
+            self.refresh_external_theme_if_changed();
+
             // Draw UI
             terminal.draw(|frame| {
                 self.render(frame);
@@ -1155,6 +1188,30 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn refresh_external_theme_if_changed(&mut self) {
+        let current_fingerprint = Theme::external_theme_fingerprint();
+        if current_fingerprint == self.external_theme_fingerprint {
+            return;
+        }
+        self.external_theme_fingerprint = current_fingerprint;
+
+        let current_theme_name = self.theme.name.clone();
+        if let Ok(theme) =
+            Theme::from_name_with_overrides(&current_theme_name, &self.theme_overrides)
+        {
+            self.theme = theme;
+            self.approval_overlay.set_theme(self.theme.clone());
+            self.model_selector.set_theme(self.theme.clone());
+            self.command_palette.set_theme(self.theme.clone());
+            self.chat_view.set_theme(self.theme.clone());
+        }
+
+        let (_, warnings) = Theme::load_external_themes();
+        for warning in warnings {
+            tracing::warn!("{}", warning);
+        }
     }
 
     pub async fn run_with_agent(
@@ -1223,8 +1280,12 @@ impl App {
         } else {
             0
         };
-        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
-        
+        let session_header_height = if self.session_stack.is_in_child() {
+            1
+        } else {
+            0
+        };
+
         // Calculate dynamic input height
         self.input_height = self.calculate_input_height(area.width);
 
@@ -1455,45 +1516,42 @@ impl App {
         let mut current_line = String::new();
         let mut char_index = 0;
         let mut cursor_rendered = false;
-        
+
         for ch in self.input.chars() {
             if char_index == self.cursor_pos && !cursor_rendered {
                 current_line.push('|');
                 cursor_rendered = true;
             }
-            
+
             if ch == '\n' {
                 lines.push(current_line.clone());
                 current_line.clear();
                 char_index += 1;
                 continue;
             }
-            
+
             if current_line.chars().count() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
-            
+
             current_line.push(ch);
             char_index += 1;
         }
-        
+
         // Handle cursor at end or in current line
         if char_index == self.cursor_pos && !cursor_rendered {
             current_line.push('|');
         } else if self.cursor_pos >= self.input.chars().count() && !cursor_rendered {
             current_line.push('_');
         }
-        
+
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
-        
+
         // Convert to ratatui Lines
-        let text_lines: Vec<Line> = lines
-            .into_iter()
-            .map(Line::from)
-            .collect();
+        let text_lines: Vec<Line> = lines.into_iter().map(Line::from).collect();
 
         let input_paragraph = Paragraph::new(text_lines).wrap(Wrap { trim: false });
 
@@ -1689,6 +1747,8 @@ impl App {
 
     fn toggle_todo_sidebar(&mut self) {
         self.show_todo_sidebar = !self.show_todo_sidebar;
+        self.kv_store
+            .set("sidebar_collapsed", !self.show_todo_sidebar);
         if self.show_todo_sidebar {
             self.ensure_todo_selection();
             self.status = "TODO sidebar shown".to_string();
@@ -1882,8 +1942,12 @@ impl App {
         } else {
             0
         };
-        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
-        
+        let session_header_height = if self.session_stack.is_in_child() {
+            1
+        } else {
+            0
+        };
+
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
             || self.current_model.is_some();
@@ -1933,11 +1997,19 @@ impl App {
         self.handle_mouse_click(column, row, chat_area, sidebar_area);
     }
 
-    fn handle_mouse_click(&mut self, column: u16, row: u16, main_area: Rect, sidebar_area: Option<Rect>) {
+    fn handle_mouse_click(
+        &mut self,
+        column: u16,
+        row: u16,
+        main_area: Rect,
+        sidebar_area: Option<Rect>,
+    ) {
         // Check if click is in sidebar
         if let Some(sidebar) = sidebar_area {
-            if column >= sidebar.x && column < sidebar.x + sidebar.width
-                && row >= sidebar.y && row < sidebar.y + sidebar.height
+            if column >= sidebar.x
+                && column < sidebar.x + sidebar.width
+                && row >= sidebar.y
+                && row < sidebar.y + sidebar.height
             {
                 self.handle_sidebar_click(row, sidebar);
                 return;
@@ -1945,8 +2017,10 @@ impl App {
         }
 
         // Check if click is in chat area
-        if column >= main_area.x && column < main_area.x + main_area.width
-            && row >= main_area.y && row < main_area.y + main_area.height
+        if column >= main_area.x
+            && column < main_area.x + main_area.width
+            && row >= main_area.y
+            && row < main_area.y + main_area.height
         {
             self.handle_chat_click(row, main_area);
         }
@@ -1956,27 +2030,34 @@ impl App {
         // Chat area has borders, so inner area starts at y+1
         let inner_y = chat_area.y + 1;
         let inner_height = chat_area.height.saturating_sub(2);
-        
+
         if row < inner_y || row >= inner_y + inner_height {
             return;
         }
 
         // Calculate relative row within the chat viewport
         let relative_row = (row - inner_y) as usize;
-        
+
         // Calculate absolute line in the rendered content
         let absolute_line = self.chat_view.scroll_offset + relative_row;
-        
+
         if let Some(message_index) = self.chat_view.get_message_index_at_line(absolute_line) {
-            let has_tool_output = self.chat_view.messages.get(message_index)
+            let has_tool_output = self
+                .chat_view
+                .messages
+                .get(message_index)
                 .map(|msg| msg.tool_output.is_some())
                 .unwrap_or(false);
-            
+
             if has_tool_output {
                 if let Some(msg) = self.chat_view.messages.get_mut(message_index) {
                     if let Some(tool_output) = msg.tool_output.as_mut() {
                         tool_output.collapsed = !tool_output.collapsed;
-                        let action = if tool_output.collapsed { "Collapsed" } else { "Expanded" };
+                        let action = if tool_output.collapsed {
+                            "Collapsed"
+                        } else {
+                            "Expanded"
+                        };
                         let tool_name = tool_output.tool_name.clone();
                         self.chat_view.invalidate_render_cache();
                         self.status = format!("{} {} output", action, tool_name);
@@ -1989,26 +2070,30 @@ impl App {
     fn handle_sidebar_click(&mut self, row: u16, sidebar_area: Rect) {
         // Sidebar has borders, inner area starts at y+1
         let inner_y = sidebar_area.y + 1;
-        
+
         if row < inner_y {
             return;
         }
 
         let relative_row = (row - inner_y) as usize;
-        
+
         // Calculate which section header was clicked based on row position
         // We need to track the current line as we build the sidebar
         let mut current_line = 0;
-        
+
         // Section 1: Context header at line 0
         if relative_row == current_line {
             self.sidebar_sections[0] = !self.sidebar_sections[0];
-            let state = if self.sidebar_sections[0] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[0] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Context section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip Context content if expanded
         if self.sidebar_sections[0] {
             let context_lines = 3;
@@ -2016,40 +2101,56 @@ impl App {
             let token_lines = usize::from(self.status.contains("tokens"));
             current_line += context_lines + session_lines + token_lines + 1; // +1 for blank line
         }
-        
+
         // Section 2: MCP header
         if relative_row == current_line {
             self.sidebar_sections[1] = !self.sidebar_sections[1];
-            let state = if self.sidebar_sections[1] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[1] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("MCP section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip MCP content if expanded
         if self.sidebar_sections[1] {
             current_line += 2; // "No MCP servers" + blank line
         }
-        
+
         // Section 3: Todos header
         if relative_row == current_line {
             self.sidebar_sections[2] = !self.sidebar_sections[2];
-            let state = if self.sidebar_sections[2] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[2] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Todos section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip Todos content if expanded
         if self.sidebar_sections[2] {
-            let todo_lines = if self.todos.is_empty() { 1 } else { self.todos.len() };
+            let todo_lines = if self.todos.is_empty() {
+                1
+            } else {
+                self.todos.len()
+            };
             current_line += todo_lines + 1; // +1 for blank line
         }
-        
+
         // Section 4: Files header
         if relative_row == current_line {
             self.sidebar_sections[3] = !self.sidebar_sections[3];
-            let state = if self.sidebar_sections[3] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[3] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Files section {}", state);
         }
     }
@@ -2130,6 +2231,21 @@ impl App {
                 ) =>
                 {
                     self.toggle_todo_sidebar();
+                    return KeyAction::None;
+                }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.toggle_todos,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
+                    self.sidebar_sections[2] = !self.sidebar_sections[2];
+                    let state = if self.sidebar_sections[2] {
+                        "expanded"
+                    } else {
+                        "collapsed"
+                    };
+                    self.status = format!("Todos section {}", state);
                     return KeyAction::None;
                 }
                 KeyCode::Char('g') => {
@@ -2330,9 +2446,11 @@ impl App {
                         if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                             self.status = status;
                             if let Some(task_id) = selected_task_id {
-                                if let Some(session_id) = self.subagent_task_sessions.get(&task_id) {
+                                if let Some(session_id) = self.subagent_task_sessions.get(&task_id)
+                                {
                                     if self.session_stack.push_session(session_id) {
-                                        self.status = format!("Entered subagent session {}", session_id);
+                                        self.status =
+                                            format!("Entered subagent session {}", session_id);
                                     }
                                 }
                             }
@@ -2433,7 +2551,12 @@ impl App {
                 {
                     self.chat_view.scroll_down();
                 }
-                _ if KeybindConfig::matches_any(&self.keybinds.page_up, key.code, key.modifiers) => {
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.page_up,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
                     self.chat_view.page_up();
                 }
                 _ if KeybindConfig::matches_any(
@@ -2950,14 +3073,18 @@ impl App {
         };
         let target_description = target.description();
 
-        let (content, skipped_binary) = match collect_review_content(&target, &self.working_directory) {
-            Ok(content) => content,
-            Err(err) => {
-                self.chat_view
-                    .push_message("error", format!("Failed to gather review input: {}", err), None);
-                return;
-            }
-        };
+        let (content, skipped_binary) =
+            match collect_review_content(&target, &self.working_directory) {
+                Ok(content) => content,
+                Err(err) => {
+                    self.chat_view.push_message(
+                        "error",
+                        format!("Failed to gather review input: {}", err),
+                        None,
+                    );
+                    return;
+                }
+            };
 
         if content.is_empty() {
             let suffix = if skipped_binary.is_empty() {
@@ -2965,11 +3092,11 @@ impl App {
             } else {
                 format!(" Skipped binary files: {}.", skipped_binary.join(", "))
             };
-                self.chat_view.push_message(
-                    "system",
-                    format!("No diff found for {}.{}", target_description, suffix),
-                    None,
-                );
+            self.chat_view.push_message(
+                "system",
+                format!("No diff found for {}.{}", target_description, suffix),
+                None,
+            );
             return;
         }
 
@@ -3123,10 +3250,7 @@ impl App {
                 Err(err) => {
                     self.chat_view.messages.push(ChatMessage::new(
                         "error",
-                        format!(
-                            "{}\nUsage: /share [--public] [--description <text>]",
-                            err
-                        ),
+                        format!("{}\nUsage: /share [--public] [--description <text>]", err),
                     ));
                 }
             },
@@ -3184,10 +3308,13 @@ impl App {
                             ));
                         }
                         Err(err) => {
-                            self.chat_view.messages.push(ChatMessage::new("system", err));
+                            self.chat_view
+                                .messages
+                                .push(ChatMessage::new("system", err));
                         }
                     }
                 } else {
+                    let (_, warnings) = Theme::load_external_themes();
                     self.chat_view.messages.push(ChatMessage::new(
                         "system",
                         format!(
@@ -3196,6 +3323,12 @@ impl App {
                             Theme::available_names().join(", ")
                         ),
                     ));
+                    for warning in warnings {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Theme warning: {}", warning),
+                        ));
+                    }
                 }
             }
             _ => {
@@ -3410,7 +3543,8 @@ impl App {
                         .tool_call_names
                         .remove(&tool_call_id)
                         .unwrap_or_else(|| "tool".to_string());
-                    let subagent_task_id = if matches!(tool_name.as_str(), "delegate_task" | "Task") {
+                    let subagent_task_id = if matches!(tool_name.as_str(), "delegate_task" | "Task")
+                    {
                         extract_task_id(&output)
                     } else {
                         None
@@ -3541,8 +3675,11 @@ impl App {
                 description,
                 agent: ref agent_name,
             } => {
-                self.task_registry
-                    .on_spawned(task_id.clone(), description.clone(), agent_name.clone());
+                self.task_registry.on_spawned(
+                    task_id.clone(),
+                    description.clone(),
+                    agent_name.clone(),
+                );
                 self.chat_view.push_message(
                     "system",
                     format!("Background task started: {} ({})", description, task_id),
@@ -3567,8 +3704,11 @@ impl App {
             } => {
                 self.task_registry.on_completed(&task_id, success);
                 let status = if success { "completed" } else { "failed" };
-                self.chat_view
-                    .push_message("system", format!("Background task {}: {}", task_id, status), None);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Background task {}: {}", task_id, status),
+                    None,
+                );
             }
             ThreadEvent::SubagentStarted {
                 task_id,
@@ -3614,8 +3754,11 @@ impl App {
             }
             ThreadEvent::ModelSwitched { model, provider } => {
                 self.status = format!("Model: {}/{}", provider, model);
-                self.chat_view
-                    .push_message("system", format!("Switched to {}/{}", provider, model), None);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Switched to {}/{}", provider, model),
+                    None,
+                );
             }
             ThreadEvent::TodoUpdated { todos } => {
                 let pending = todos
@@ -3659,6 +3802,7 @@ impl App {
 
     fn switch_model(&mut self, model_str: &str) {
         self.current_model = Some(model_str.to_string());
+        self.record_model_selection(model_str);
         self.status = format!("Switching to {}...", model_str);
 
         match create_client_for_model(model_str) {
@@ -3705,6 +3849,28 @@ impl App {
                 );
             }
         }
+    }
+
+    fn record_model_selection(&mut self, model_str: &str) {
+        let model = model_str.to_string();
+        self.recent_models.retain(|entry| entry != &model);
+        self.recent_models.insert(0, model.clone());
+        if self.recent_models.len() > 20 {
+            self.recent_models.truncate(20);
+        }
+
+        let next_score = self
+            .frecency_data
+            .get(&model)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.frecency_data.insert(model, next_score);
+
+        self.kv_store
+            .set("recent_models", self.recent_models.clone());
+        self.kv_store
+            .set("frecency_data", self.frecency_data.clone());
     }
 
     fn share_session(&mut self, options: ShareCommandOptions) {

@@ -9,15 +9,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
-use uira_core::{
-    ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY, ENV_OPENAI_API_KEY,
-};
 use uira_agent::{
     init_subscriber, init_tui_subscriber, Agent, AgentConfig, EventStream, ExecutorConfig,
     RecursiveAgentExecutor, TelemetryConfig,
 };
-use uira_orchestration::{get_agent_definitions, ModelRegistry};
 use uira_core::ExecutionResult;
+use uira_core::{
+    ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY, ENV_OPENAI_API_KEY,
+};
+use uira_orchestration::{get_agent_definitions, ModelRegistry};
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig,
@@ -315,11 +315,7 @@ async fn run_resume(
             println!("{}", "─".repeat(50).dimmed());
             println!("{}: {}", "Provider".cyan(), entry.provider.yellow());
             println!("{}: {}", "Model".cyan(), entry.model.yellow());
-            println!(
-                "{}: {}",
-                "Turns".cyan(),
-                entry.turns.to_string().yellow()
-            );
+            println!("{}: {}", "Turns".cyan(), entry.turns.to_string().yellow());
             let items = uira_agent::SessionRecorder::load(&entry.path)?;
             println!(
                 "{}: {}",
@@ -720,7 +716,7 @@ async fn run_config(
 
 async fn run_goals(command: &GoalsCommands) -> Result<(), Box<dyn std::error::Error>> {
     use uira_core::loader::load_config;
-                    use uira_orchestration::hooks::GoalRunner;
+    use uira_orchestration::hooks::GoalRunner;
 
     match command {
         GoalsCommands::Check => {
@@ -938,9 +934,7 @@ async fn run_tasks(command: &TasksCommands) -> Result<(), Box<dyn std::error::Er
                 uira_orchestration::background_agent::BackgroundTaskStatus::Completed => {
                     "completed".green()
                 }
-                uira_orchestration::background_agent::BackgroundTaskStatus::Error => {
-                    "error".red()
-                }
+                uira_orchestration::background_agent::BackgroundTaskStatus::Error => "error".red(),
                 uira_orchestration::background_agent::BackgroundTaskStatus::Cancelled => {
                     "cancelled".dimmed()
                 }
@@ -1054,11 +1048,7 @@ async fn run_skills(command: &SkillsCommands) -> Result<(), Box<dyn std::error::
                 .find(|s| s.name == *name)
                 .ok_or_else(|| format!("Skill not found: {}", name))?;
 
-            println!(
-                "{} {}",
-                "Skill:".cyan().bold(),
-                skill.name.yellow().bold()
-            );
+            println!("{} {}", "Skill:".cyan().bold(), skill.name.yellow().bold());
             println!("{}", "─".repeat(80).dimmed());
 
             let content = std::fs::read_to_string(&skill.path)?;
@@ -1427,6 +1417,15 @@ async fn run_interactive(
         let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
     }
 
+    if let Some(cfg) = uira_config.as_ref() {
+        let (keybinds, warnings) =
+            uira_tui::KeybindConfig::from_config_with_warnings(&cfg.keybinds);
+        app.configure_keybinds(keybinds);
+        for warning in warnings {
+            tracing::warn!("{}", warning);
+        }
+    }
+
     let executor_config = ExecutorConfig::new(provider_config.clone(), agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
 
@@ -1550,8 +1549,7 @@ fn create_client(
                 api_key: None,
                 model: model.unwrap_or_else(|| "llama3.1".to_string()),
                 base_url: Some(
-                    std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
+                    std::env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };
@@ -1566,8 +1564,7 @@ fn create_client(
 
             let opencode_settings = uira_config.map(|cfg| &cfg.opencode);
             maybe_autostart_opencode_server(opencode_settings);
-            let provider_config =
-                build_opencode_provider_config(api_key, model, opencode_settings);
+            let provider_config = build_opencode_provider_config(api_key, model, opencode_settings);
 
             let client = OpenCodeClient::new(provider_config.clone())?;
             Ok((Arc::new(client), provider_config))
@@ -1747,7 +1744,10 @@ mod tests {
     fn wait_for_listener_detects_ready_port() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        assert!(wait_for_listener(&addr.to_string(), Duration::from_millis(300)));
+        assert!(wait_for_listener(
+            &addr.to_string(),
+            Duration::from_millis(300)
+        ));
         drop(listener);
     }
 }
@@ -1854,10 +1854,11 @@ fn load_custom_sandbox_policy(
     cwd: &Path,
 ) -> Result<SandboxPolicy, CustomSandboxRulesError> {
     let rules_file = rules_file.ok_or(CustomSandboxRulesError::MissingRulesPath)?;
-    let raw = std::fs::read_to_string(rules_file).map_err(|e| CustomSandboxRulesError::ReadError {
-        path: rules_file.display().to_string(),
-        message: e.to_string(),
-    })?;
+    let raw =
+        std::fs::read_to_string(rules_file).map_err(|e| CustomSandboxRulesError::ReadError {
+            path: rules_file.display().to_string(),
+            message: e.to_string(),
+        })?;
     let parsed: CustomSandboxRules =
         serde_json::from_str(&raw).map_err(|e| CustomSandboxRulesError::ParseError {
             path: rules_file.display().to_string(),

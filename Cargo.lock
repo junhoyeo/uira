@@ -5704,6 +5704,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs",
  "json5",
  "parking_lot",
  "serde",
