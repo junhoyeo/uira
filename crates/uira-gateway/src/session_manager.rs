@@ -534,17 +534,15 @@ impl SessionManager {
         }
 
         // Build additional context: environment context + optional skill context.
-        // Environment context is always injected so agents know the current
-        // date, time, and timezone.
-        //
-        // This uses `build_environment_context()` for one-time injection at agent
-        // creation. For ongoing injection via the hook pipeline (e.g. when a
-        // `ContextCollector` is available), callers should also invoke
-        // `register_environment_context()` to register with the collector so the
-        // `ContextInjectorHook` can re-inject environment info on subsequent
-        // user messages.
-        let env_context =
-            uira_orchestration::features::context_injector::build_environment_context();
+        let context_collector =
+            uira_orchestration::features::context_injector::ContextCollector::new();
+        uira_orchestration::features::context_injector::register_environment_context(
+            &context_collector,
+            "gateway-session-startup",
+        );
+        let env_context = context_collector
+            .consume("gateway-session-startup")
+            .merged;
         let mut additional_context = vec![env_context];
         if let Some(skill_context) = &config.skill_context {
             additional_context.push(skill_context.clone());
