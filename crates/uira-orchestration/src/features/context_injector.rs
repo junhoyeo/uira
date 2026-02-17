@@ -22,6 +22,8 @@ pub enum ContextSourceType {
     SessionContext,
     #[serde(rename = "learner")]
     Learner,
+    #[serde(rename = "environment")]
+    Environment,
     #[serde(rename = "custom")]
     Custom,
 }
@@ -36,6 +38,7 @@ impl ContextSourceType {
             ContextSourceType::BoulderState => "boulder-state",
             ContextSourceType::SessionContext => "session-context",
             ContextSourceType::Learner => "learner",
+            ContextSourceType::Environment => "environment",
             ContextSourceType::Custom => "custom",
         }
     }
@@ -324,6 +327,50 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Build environment context string with current date, time, timezone, and locale.
+///
+/// This is injected into primary agent prompts so they have awareness of
+/// the current environment. Equivalent to oh-my-opencode's `<omo-env>` block.
+pub fn build_environment_context() -> String {
+    use chrono::{Local, Utc};
+
+    let local_now = Local::now();
+    let utc_now = Utc::now();
+
+    // Format: "Mon, Feb 17, 2026"
+    let date_str = local_now.format("%a, %b %d, %Y").to_string();
+    // Format: "10:30:15 AM"
+    let time_str = local_now.format("%I:%M:%S %p").to_string();
+    // Timezone offset: "+09:00" or "UTC"
+    let tz_str = local_now.format("%Z (%:z)").to_string();
+
+    format!(
+        "<uira-env>\n  Current date: {}\n  Current time: {}\n  Timezone: {}\n  UTC: {}\n</uira-env>",
+        date_str,
+        time_str,
+        tz_str,
+        utc_now.format("%Y-%m-%dT%H:%M:%SZ")
+    )
+}
+
+/// Register environment context for a session.
+///
+/// Call this when a session is created to auto-inject date/time/timezone
+/// into the agent's prompt on the first user message.
+pub fn register_environment_context(collector: &ContextCollector, session_id: &str) {
+    let env_ctx = build_environment_context();
+    collector.register(
+        session_id,
+        RegisterContextOptions {
+            id: "env-auto".to_string(),
+            source: ContextSourceType::Environment,
+            content: env_ctx,
+            priority: Some(ContextPriority::Low),
+            metadata: None,
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +463,41 @@ mod tests {
         assert!(injected);
         assert!(msg.contains("ctx"));
         assert!(!hook.has_pending("s1"));
+    }
+
+    #[test]
+    fn test_build_environment_context() {
+        let ctx = build_environment_context();
+        assert!(ctx.starts_with("<uira-env>"));
+        assert!(ctx.ends_with("</uira-env>"));
+        assert!(ctx.contains("Current date:"));
+        assert!(ctx.contains("Current time:"));
+        assert!(ctx.contains("Timezone:"));
+        assert!(ctx.contains("UTC:"));
+    }
+
+    #[test]
+    fn test_register_environment_context() {
+        let collector = ContextCollector::new();
+        register_environment_context(&collector, "s1");
+
+        assert!(collector.has_pending("s1"));
+        let pending = collector.get_pending("s1");
+        assert_eq!(pending.entries.len(), 1);
+        assert_eq!(pending.entries[0].source, ContextSourceType::Environment);
+        assert_eq!(pending.entries[0].priority, ContextPriority::Low);
+        assert!(pending.entries[0].content.contains("<uira-env>"));
+    }
+
+    #[test]
+    fn test_environment_context_injected_into_message() {
+        let collector = ContextCollector::new();
+        register_environment_context(&collector, "s1");
+
+        let hook = create_context_injector_hook(&collector);
+        let (msg, injected) = hook.process_user_message("s1", "Hello");
+        assert!(injected);
+        assert!(msg.contains("<uira-env>"));
+        assert!(msg.contains("Hello"));
     }
 }
