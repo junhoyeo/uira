@@ -21,6 +21,12 @@ struct LineBuilder {
     current_width: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MarkdownRenderOptions {
+    pub conceal: bool,
+    pub streaming_friendly: bool,
+}
+
 impl LineBuilder {
     fn new(width: usize) -> Self {
         Self {
@@ -90,6 +96,15 @@ struct CodeBlockState {
 }
 
 pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    render_markdown_with_options(text, width, theme, MarkdownRenderOptions::default())
+}
+
+pub fn render_markdown_with_options(
+    text: &str,
+    width: usize,
+    theme: &Theme,
+    render_options: MarkdownRenderOptions,
+) -> Vec<Line<'static>> {
     let mut builder = LineBuilder::new(width);
     let base_style = Style::default().fg(theme.fg);
     let mut style_stack = vec![base_style];
@@ -156,32 +171,31 @@ pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'sta
                         pulldown_cmark::HeadingLevel::H1 => current_style(&style_stack).patch(
                             Style::default()
                                 .fg(theme.md_strong)
-                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         pulldown_cmark::HeadingLevel::H2 => current_style(&style_stack).patch(
                             Style::default()
                                 .fg(theme.md_strong)
-                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(Modifier::BOLD),
                         ),
-                        _ => current_style(&style_stack).patch(
-                            Style::default()
-                                .add_modifier(Modifier::BOLD)
-                        ),
+                        _ => current_style(&style_stack)
+                            .patch(Style::default().add_modifier(Modifier::BOLD)),
                     };
                     style_stack.push(heading_style);
-                    
+
                     // Add heading prefix
-                    let prefix = "#".repeat(level as usize);
-                    builder.push_text(&format!("{} ", prefix), heading_style);
+                    if !render_options.conceal {
+                        let prefix = "#".repeat(level as usize);
+                        builder.push_text(&format!("{} ", prefix), heading_style);
+                    }
                 }
                 Tag::Paragraph => {
                     // No special handling needed for paragraph start
                 }
                 Tag::BlockQuote(_) => {
                     builder.finish_line();
-                    let quote_style = current_style(&style_stack).patch(
-                        Style::default().fg(theme.borders)
-                    );
+                    let quote_style =
+                        current_style(&style_stack).patch(Style::default().fg(theme.borders));
                     style_stack.push(quote_style);
                 }
                 Tag::CodeBlock(kind) => {
@@ -236,6 +250,14 @@ pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'sta
             Event::SoftBreak | Event::HardBreak => builder.finish_line(),
             Event::Rule => builder.finish_line(),
             _ => {}
+        }
+    }
+
+    if render_options.streaming_friendly {
+        if let Some(state) = code_block.take() {
+            let style = Style::default().fg(theme.md_code_fg).bg(theme.md_code_bg);
+            builder.finish_line();
+            builder.push_text(&state.content, style);
         }
     }
 
@@ -389,53 +411,58 @@ mod tests {
     fn renders_unordered_list_items() {
         let theme = Theme::default();
         let lines = render_markdown("- Item 1\n- Item 2\n- Item 3", 80, &theme);
-        
+
         // Check that we have bullets
-        let has_bullets = lines.iter().flat_map(|line| &line.spans).any(|span| {
-            span.content.contains("•")
-        });
+        let has_bullets = lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .any(|span| span.content.contains("•"));
         assert!(has_bullets);
-        
+
         // Check that we have the content
         let has_items = lines.iter().flat_map(|line| &line.spans).any(|span| {
-            span.content.contains("Item 1") || span.content.contains("Item 2") || span.content.contains("Item 3")
+            span.content.contains("Item 1")
+                || span.content.contains("Item 2")
+                || span.content.contains("Item 3")
         });
         assert!(has_items);
     }
-    
+
     #[test]
     fn renders_ordered_list_items() {
         let theme = Theme::default();
         let lines = render_markdown("1. First\n2. Second\n3. Third", 80, &theme);
-        
+
         // Check that we have bullets (we use • for all lists for simplicity in TUI)
-        let has_bullets = lines.iter().flat_map(|line| &line.spans).any(|span| {
-            span.content.contains("•")
-        });
+        let has_bullets = lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .any(|span| span.content.contains("•"));
         assert!(has_bullets);
     }
-    
+
     #[test]
     fn renders_headings_with_hash_prefix() {
         let theme = Theme::default();
         let lines = render_markdown("# Heading 1\n## Heading 2", 80, &theme);
-        
+
         let has_h1 = lines.iter().flat_map(|line| &line.spans).any(|span| {
             span.content.contains("# Heading 1") && span.style.add_modifier.contains(Modifier::BOLD)
         });
         assert!(has_h1);
-        
+
         let has_h2 = lines.iter().flat_map(|line| &line.spans).any(|span| {
-            span.content.contains("## Heading 2") && span.style.add_modifier.contains(Modifier::BOLD)
+            span.content.contains("## Heading 2")
+                && span.style.add_modifier.contains(Modifier::BOLD)
         });
         assert!(has_h2);
     }
-    
+
     #[test]
     fn renders_blockquotes() {
         let theme = Theme::default();
         let lines = render_markdown("> This is a quote", 80, &theme);
-        
+
         let has_quote_styling = lines.iter().flat_map(|line| &line.spans).any(|span| {
             span.content.contains("This is a quote") && span.style.fg == Some(theme.borders)
         });
