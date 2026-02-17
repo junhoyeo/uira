@@ -5,14 +5,15 @@ pub mod sdk;
 pub mod tools;
 
 pub use agents::{
-    config, definitions, models, prompt_loader, prompts, registry, tier_builder, tool_restrictions,
-    types,
+    config, definitions, models, planning_pipeline, prompt_loader, prompts, registry, tier_builder,
+    tool_restrictions, types,
 };
 pub use agents::{
     get_agent_definitions, get_agent_definitions_with_config, AgentCategory, AgentConfig,
     AgentCost, AgentFactory, AgentOverrideConfig, AgentOverrides, AgentPromptMetadata,
-    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PromptLoader,
-    PromptSource, RoutingTier, TierBuilder, ToolRestrictions, ToolRestrictionsRegistry,
+    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PlanningPipeline,
+    PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder, ToolRestrictions,
+    ToolRestrictionsRegistry,
 };
 pub use features::{background_agent, model_routing, uira_state};
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
