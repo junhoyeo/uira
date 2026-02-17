@@ -1,4 +1,5 @@
 use ratatui::style::Color;
+use std::collections::BTreeSet;
 
 const BUILTIN_THEMES: [&str; 19] = [
     "default",
@@ -325,8 +326,24 @@ fn agent_palette_for_theme(name: &str) -> Vec<Color> {
 }
 
 impl Theme {
-    pub fn available_names() -> &'static [&'static str] {
-        &BUILTIN_THEMES
+    pub fn available_names() -> Vec<String> {
+        let mut names: BTreeSet<String> =
+            BUILTIN_THEMES.iter().map(|name| name.to_string()).collect();
+        let external = uira_core::schema::theme::load_external_themes();
+        for theme in external.themes {
+            names.insert(theme.name.to_ascii_lowercase());
+        }
+        names.into_iter().collect()
+    }
+
+    pub fn load_external_themes() -> (Vec<String>, Vec<String>) {
+        let loaded = uira_core::schema::theme::load_external_themes();
+        let names = loaded.themes.into_iter().map(|theme| theme.name).collect();
+        (names, loaded.warnings)
+    }
+
+    pub fn external_theme_fingerprint() -> u64 {
+        uira_core::schema::theme::external_theme_fingerprint()
     }
 
     /// Derive all semantic tokens from the 7 base colors.
@@ -1109,11 +1126,15 @@ impl Theme {
             }
 
             _ => {
-                return Err(format!(
-                    "Unknown theme '{}' (available: {})",
-                    name,
-                    Self::available_names().join(", ")
-                ));
+                if let Some(external_theme) = Self::external_theme_by_name(&normalized) {
+                    external_theme
+                } else {
+                    return Err(format!(
+                        "Unknown theme '{}' (available: {})",
+                        name,
+                        Self::available_names().join(", ")
+                    ));
+                }
             }
         };
 
@@ -1256,6 +1277,46 @@ impl Theme {
     }
 }
 
+impl Theme {
+    fn external_theme_by_name(name: &str) -> Option<Self> {
+        let loaded = uira_core::schema::theme::load_external_themes();
+        loaded
+            .themes
+            .into_iter()
+            .find(|theme| theme.name.eq_ignore_ascii_case(name))
+            .and_then(|theme| Self::from_external_theme(theme).ok())
+    }
+
+    fn from_external_theme(theme: uira_core::schema::theme::ThemeFile) -> Result<Self, String> {
+        let bg = parse_hex_color(&theme.colors.bg)?;
+        let fg = parse_hex_color(&theme.colors.fg)?;
+        let accent = parse_hex_color(&theme.colors.accent)?;
+        let error = parse_hex_color(&theme.colors.error)?;
+        let warning = parse_hex_color(&theme.colors.warning)?;
+        let success = parse_hex_color(&theme.colors.success)?;
+
+        let borders = if brightness(bg) >= 0.5 {
+            darken(bg, 0.2)
+        } else {
+            lighten(bg, 0.2)
+        };
+
+        let mut resolved = Self::base(
+            &theme.name,
+            bg,
+            fg,
+            accent,
+            error,
+            warning,
+            success,
+            borders,
+        )
+        .with_derived_defaults();
+        resolved.agent_colors = default_agent_palette();
+        Ok(resolved)
+    }
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self::from_name("default").expect("default theme must exist")
@@ -1314,16 +1375,16 @@ mod tests {
     fn test_builtin_themes_available() {
         let names = Theme::available_names();
         // Original 5 must still be present
-        assert!(names.contains(&"default"));
-        assert!(names.contains(&"dark"));
-        assert!(names.contains(&"light"));
-        assert!(names.contains(&"dracula"));
-        assert!(names.contains(&"nord"));
+        assert!(names.iter().any(|name| name == "default"));
+        assert!(names.iter().any(|name| name == "dark"));
+        assert!(names.iter().any(|name| name == "light"));
+        assert!(names.iter().any(|name| name == "dracula"));
+        assert!(names.iter().any(|name| name == "nord"));
         // New themes
-        assert!(names.contains(&"catppuccin-mocha"));
-        assert!(names.contains(&"tokyonight"));
-        assert!(names.contains(&"gruvbox-dark"));
-        assert!(names.contains(&"github-dark"));
+        assert!(names.iter().any(|name| name == "catppuccin-mocha"));
+        assert!(names.iter().any(|name| name == "tokyonight"));
+        assert!(names.iter().any(|name| name == "gruvbox-dark"));
+        assert!(names.iter().any(|name| name == "github-dark"));
         assert!(names.len() >= 19);
     }
 
@@ -1397,7 +1458,7 @@ mod tests {
     #[test]
     fn test_new_themes_load_correctly() {
         for name in Theme::available_names() {
-            let result = Theme::from_name(name);
+            let result = Theme::from_name(&name);
             assert!(
                 result.is_ok(),
                 "Theme '{}' failed to load: {:?}",
@@ -1405,7 +1466,7 @@ mod tests {
                 result.err()
             );
             let theme = result.unwrap();
-            assert_eq!(theme.name, *name, "Theme name mismatch for '{}'", name);
+            assert_eq!(theme.name, name, "Theme name mismatch for '{}'", name);
         }
     }
 
@@ -1465,7 +1526,7 @@ mod tests {
     fn test_all_themes_have_distinct_tokens() {
         let black = Color::Rgb(0, 0, 0);
         for name in Theme::available_names() {
-            let theme = Theme::from_name(name).unwrap();
+            let theme = Theme::from_name(&name).unwrap();
             assert_ne!(
                 theme.syntax_keyword, black,
                 "Theme '{}' has black syntax_keyword",
@@ -1504,7 +1565,7 @@ mod tests {
     #[test]
     fn test_agent_palette_present_for_all_themes() {
         for name in Theme::available_names() {
-            let theme = Theme::from_name(name).unwrap();
+            let theme = Theme::from_name(&name).unwrap();
             assert_eq!(theme.agent_colors.len(), 6);
         }
     }

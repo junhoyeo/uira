@@ -887,6 +887,7 @@ pub struct App {
     history_index: Option<usize>,
     /// Saved input when entering history mode
     history_stash: String,
+    external_theme_fingerprint: u64,
 }
 
 impl App {
@@ -1107,6 +1108,7 @@ impl App {
             prompt_history: Self::load_prompt_history().unwrap_or_default(),
             history_index: None,
             history_stash: String::new(),
+            external_theme_fingerprint: Theme::external_theme_fingerprint(),
         }
     }
 
@@ -1146,6 +1148,8 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> std::io::Result<()> {
         loop {
+            self.refresh_external_theme_if_changed();
+
             // Draw UI
             terminal.draw(|frame| {
                 self.render(frame);
@@ -1184,6 +1188,30 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn refresh_external_theme_if_changed(&mut self) {
+        let current_fingerprint = Theme::external_theme_fingerprint();
+        if current_fingerprint == self.external_theme_fingerprint {
+            return;
+        }
+        self.external_theme_fingerprint = current_fingerprint;
+
+        let current_theme_name = self.theme.name.clone();
+        if let Ok(theme) =
+            Theme::from_name_with_overrides(&current_theme_name, &self.theme_overrides)
+        {
+            self.theme = theme;
+            self.approval_overlay.set_theme(self.theme.clone());
+            self.model_selector.set_theme(self.theme.clone());
+            self.command_palette.set_theme(self.theme.clone());
+            self.chat_view.set_theme(self.theme.clone());
+        }
+
+        let (_, warnings) = Theme::load_external_themes();
+        for warning in warnings {
+            tracing::warn!("{}", warning);
+        }
     }
 
     pub async fn run_with_agent(
@@ -3271,6 +3299,7 @@ impl App {
                         }
                     }
                 } else {
+                    let (_, warnings) = Theme::load_external_themes();
                     self.chat_view.messages.push(ChatMessage::new(
                         "system",
                         format!(
@@ -3279,6 +3308,12 @@ impl App {
                             Theme::available_names().join(", ")
                         ),
                     ));
+                    for warning in warnings {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Theme warning: {}", warning),
+                        ));
+                    }
                 }
             }
             _ => {
