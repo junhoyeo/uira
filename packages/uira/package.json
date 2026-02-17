@@ -76,13 +76,13 @@
     "provenance": true
   },
   "optionalDependencies": {
-    "@uiradev/uira-darwin-arm64": "0.1.0",
-    "@uiradev/uira-darwin-x64": "0.1.0",
-    "@uiradev/uira-linux-x64-gnu": "0.1.0",
-    "@uiradev/uira-linux-arm64-gnu": "0.1.0",
-    "@uiradev/uira-linux-x64-musl": "0.1.0",
-    "@uiradev/uira-linux-arm64-musl": "0.1.0",
-    "@uiradev/uira-win32-x64-msvc": "0.1.0"
+    "@uiradev/uira-darwin-arm64": "npm:@uiradev/uira@0.1.0-darwin-arm64",
+    "@uiradev/uira-darwin-x64": "npm:@uiradev/uira@0.1.0-darwin-x64",
+    "@uiradev/uira-linux-x64": "npm:@uiradev/uira@0.1.0-linux-x64",
+    "@uiradev/uira-linux-arm64": "npm:@uiradev/uira@0.1.0-linux-arm64",
+    "@uiradev/uira-linux-x64-musl": "npm:@uiradev/uira@0.1.0-linux-x64-musl",
+    "@uiradev/uira-linux-arm64-musl": "npm:@uiradev/uira@0.1.0-linux-arm64-musl",
+    "@uiradev/uira-win32-x64": "npm:@uiradev/uira@0.1.0-win32-x64"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
