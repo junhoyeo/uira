@@ -4,6 +4,7 @@
 //! Handles agent lookup, model routing, and task delegation.
 
 use crate::agents::{get_agent_definitions, ModelType};
+use crate::features::builtin_skills;
 use crate::features::delegation_categories;
 use crate::features::model_routing::{
     route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
@@ -193,14 +194,30 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     // Build effective prompt: skill content + category guidance + task prompt
     let mut effective_prompt = params.prompt.clone();
 
-    // Inject skill content (prepended before the task prompt)
-    let loaded_skills: Vec<String> = params.load_skills.clone();
-    if !loaded_skills.is_empty() {
-        let skill_header = format!(
-            "<injected-skills>\nActive skills: {}\n</injected-skills>\n\n",
-            loaded_skills.join(", ")
-        );
-        effective_prompt = format!("{}{}", skill_header, effective_prompt);
+    // Load and inject actual skill content (not just names)
+    let mut loaded_skill_names: Vec<String> = Vec::new();
+    if !params.load_skills.is_empty() {
+        let mut skill_sections = Vec::new();
+        for skill_name in &params.load_skills {
+            if let Some(skill) = builtin_skills::get_builtin_skill(skill_name) {
+                skill_sections.push(format!(
+                    "<skill name=\"{}\">\n{}\n</skill>",
+                    skill.name,
+                    skill.template
+                ));
+                loaded_skill_names.push(skill.name.clone());
+            } else {
+                // Skill not found — still note it was requested
+                loaded_skill_names.push(format!("{}(not found)", skill_name));
+            }
+        }
+        if !skill_sections.is_empty() {
+            let skill_block = format!(
+                "<injected-skills>\n{}\n</injected-skills>\n\n",
+                skill_sections.join("\n\n")
+            );
+            effective_prompt = format!("{}{}", skill_block, effective_prompt);
+        }
     }
 
     // Apply category-specific prompt enhancement
@@ -243,7 +260,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         routing_reasons,
         agent_description,
         category: Some(resolved_category.category.as_str().to_string()),
-        loaded_skills,
+        loaded_skills: loaded_skill_names,
         effective_prompt: Some(effective_prompt),
     };
 
