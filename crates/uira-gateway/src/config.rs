@@ -36,9 +36,28 @@ pub struct SessionConfig {
 impl SessionConfig {
     /// Strip fields that should not be set by external (WebSocket) clients.
     /// Only internally-created sessions (e.g., channel bridge) may set these.
+    ///
+    /// Also warns if the `agent` field contains an unrecognized personality name.
+    /// Invalid values are preserved (session_manager handles the fallback to
+    /// Balanced), but the warning helps operators catch typos early.
     pub fn sanitize(&mut self) {
         self.working_directory = None;
         self.skill_context = None;
+
+        if let Some(agent) = &self.agent {
+            if uira_orchestration::OrchestratorPersonality::parse(agent).is_none() {
+                let valid: Vec<&str> = uira_orchestration::OrchestratorPersonality::all()
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect();
+                tracing::warn!(
+                    agent = %agent,
+                    valid = ?valid,
+                    "SessionConfig contains unrecognized agent personality; \
+                     will fall back to 'balanced'"
+                );
+            }
+        }
     }
 }
 
@@ -63,5 +82,37 @@ mod tests {
         assert_eq!(config.skills, vec!["skill1".to_string()]); // preserved
         assert!(config.skill_context.is_none()); // stripped
         assert!(config.working_directory.is_none()); // stripped
+    }
+
+    #[test]
+    fn test_sanitize_preserves_invalid_agent_for_fallback() {
+        // Invalid agent names are preserved by sanitize() — session_manager
+        // handles the fallback to Balanced. sanitize() only emits a warning.
+        let mut config = SessionConfig {
+            agent: Some("malicious-agent".to_string()),
+            ..SessionConfig::default()
+        };
+        config.sanitize();
+        // The invalid value is still there (session_manager will fall back)
+        assert_eq!(config.agent, Some("malicious-agent".to_string()));
+    }
+
+    #[test]
+    fn test_sanitize_accepts_valid_agent_names() {
+        for valid_name in ["balanced", "autonomous", "orchestrator", "sisyphus", "atlas"] {
+            let mut config = SessionConfig {
+                agent: Some(valid_name.to_string()),
+                ..SessionConfig::default()
+            };
+            config.sanitize();
+            assert_eq!(config.agent, Some(valid_name.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_sanitize_handles_no_agent() {
+        let mut config = SessionConfig::default();
+        config.sanitize();
+        assert!(config.agent.is_none());
     }
 }

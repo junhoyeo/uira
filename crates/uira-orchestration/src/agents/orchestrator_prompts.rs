@@ -21,6 +21,13 @@ pub enum OrchestratorPersonality {
 }
 
 impl OrchestratorPersonality {
+    /// All available personality variants.
+    ///
+    /// Useful for validation, documentation, and iteration.
+    pub fn all() -> &'static [Self] {
+        &[Self::Balanced, Self::Autonomous, Self::Orchestrator]
+    }
+
     /// Parse a personality name from string.
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -46,6 +53,12 @@ impl OrchestratorPersonality {
             Self::Autonomous => AUTONOMOUS_PROMPT,
             Self::Orchestrator => ORCHESTRATOR_PROMPT,
         }
+    }
+}
+
+impl std::fmt::Display for OrchestratorPersonality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -220,6 +233,30 @@ mod tests {
         ] {
             let s = personality.as_str();
             assert_eq!(OrchestratorPersonality::parse(s), Some(personality));
+        }
+    }
+
+    #[test]
+    fn test_display_matches_as_str() {
+        for personality in OrchestratorPersonality::all() {
+            assert_eq!(format!("{personality}"), personality.as_str());
+        }
+    }
+
+    #[test]
+    fn test_all_returns_every_variant() {
+        let all = OrchestratorPersonality::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&OrchestratorPersonality::Balanced));
+        assert!(all.contains(&OrchestratorPersonality::Autonomous));
+        assert!(all.contains(&OrchestratorPersonality::Orchestrator));
+    }
+
+    #[test]
+    fn test_all_roundtrips_through_parse() {
+        for personality in OrchestratorPersonality::all() {
+            let parsed = OrchestratorPersonality::parse(personality.as_str());
+            assert_eq!(parsed, Some(*personality));
         }
     }
 }
