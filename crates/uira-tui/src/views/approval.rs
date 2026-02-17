@@ -18,8 +18,7 @@ use uira_core::ReviewDecision;
 
 use crate::Theme;
 
-/// Height of the inline approval prompt (2 border lines + 5 content lines)
-pub const INLINE_APPROVAL_HEIGHT: u16 = 7;
+pub const INLINE_APPROVAL_HEIGHT: u16 = 11;
 
 /// Approval request with response channel
 pub struct ApprovalRequest {
@@ -31,6 +30,7 @@ pub struct ApprovalRequest {
     pub input: serde_json::Value,
     /// Reason for requiring approval
     pub reason: String,
+    pub diff_preview: Option<String>,
     /// Channel to send the decision
     pub response_tx: oneshot::Sender<ReviewDecision>,
 }
@@ -42,6 +42,7 @@ impl std::fmt::Debug for ApprovalRequest {
             .field("tool_name", &self.tool_name)
             .field("input", &self.input)
             .field("reason", &self.reason)
+            .field("diff_preview", &self.diff_preview)
             .field("response_tx", &"<oneshot::Sender>")
             .finish()
     }
@@ -202,6 +203,7 @@ impl ApprovalOverlay {
                 InlineApprovalPrompt {
                     request,
                     selected: self.selected,
+                    scroll: self.scroll,
                     queue_count: self.queue.len(),
                     theme: &self.theme,
                 },
@@ -280,9 +282,61 @@ fn truncate_first_line(s: &str, max_chars: usize) -> String {
     }
 }
 
+fn build_preview(tool_name: &str, input: &serde_json::Value) -> String {
+    let tool = tool_name.to_ascii_lowercase();
+    if tool.contains("bash")
+        || tool.contains("shell")
+        || tool.contains("command")
+        || tool.contains("exec")
+    {
+        let command = input
+            .get("command")
+            .or_else(|| input.get("cmd"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("(no command)");
+        return format!("$ {}", command);
+    }
+
+    if tool.contains("edit") || tool.contains("write") || tool.contains("file") {
+        let before = input
+            .get("old_string")
+            .or_else(|| input.get("oldText"))
+            .or_else(|| input.get("before"))
+            .and_then(|value| value.as_str());
+        let after = input
+            .get("new_string")
+            .or_else(|| input.get("newText"))
+            .or_else(|| input.get("after"))
+            .or_else(|| input.get("content"))
+            .and_then(|value| value.as_str());
+
+        if let (Some(before), Some(after)) = (before, after) {
+            return unified_diff_preview(before, after);
+        }
+    }
+
+    serde_json::to_string_pretty(input).unwrap_or_else(|_| "(preview unavailable)".to_string())
+}
+
+fn unified_diff_preview(before: &str, after: &str) -> String {
+    let mut preview = String::from("--- before\n+++ after\n@@\n");
+    for line in before.lines().take(8) {
+        preview.push('-');
+        preview.push_str(line);
+        preview.push('\n');
+    }
+    for line in after.lines().take(8) {
+        preview.push('+');
+        preview.push_str(line);
+        preview.push('\n');
+    }
+    preview.trim_end().to_string()
+}
+
 struct InlineApprovalPrompt<'a> {
     request: &'a ApprovalRequest,
     selected: usize,
+    scroll: u16,
     queue_count: usize,
     theme: &'a Theme,
 }
@@ -310,12 +364,18 @@ impl Widget for InlineApprovalPrompt<'_> {
             return;
         }
 
+        let preview = self
+            .request
+            .diff_preview
+            .clone()
+            .unwrap_or_else(|| build_preview(&self.request.tool_name, &self.request.input));
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Context (filepath/command)
                 Constraint::Length(1), // Reason
-                Constraint::Min(0),    // Spacer
+                Constraint::Min(3),
                 Constraint::Length(1), // Buttons
                 Constraint::Length(1), // Help text
             ])
@@ -333,10 +393,23 @@ impl Widget for InlineApprovalPrompt<'_> {
             .style(Style::default().fg(self.theme.fg));
         reason.render(chunks[1], buf);
 
+        let preview_lines: Vec<&str> = preview.lines().collect();
+        let preview_height = chunks[2].height as usize;
+        let start = (self.scroll as usize).min(preview_lines.len().saturating_sub(1));
+        let body = if preview_lines.is_empty() || preview_height == 0 {
+            String::new()
+        } else {
+            preview_lines[start..(start + preview_height).min(preview_lines.len())].join("\n")
+        };
+        let preview_para = Paragraph::new(body)
+            .style(Style::default().fg(self.theme.text_muted))
+            .wrap(Wrap { trim: false });
+        preview_para.render(chunks[2], buf);
+
         self.render_buttons(chunks[3], buf);
 
         let help = Paragraph::new(
-            "y: approve | a: always | n/Esc: reject | \u{2190}\u{2192}/Tab: select | Enter: confirm",
+            "y: yes | a: always allow | n/Esc: no | \u{2190}\u{2192}/Tab: select | Enter: confirm",
         )
         .style(Style::default().fg(self.theme.borders))
         .alignment(Alignment::Center);
@@ -346,7 +419,7 @@ impl Widget for InlineApprovalPrompt<'_> {
 
 impl InlineApprovalPrompt<'_> {
     fn render_buttons(&self, area: Rect, buf: &mut Buffer) {
-        let buttons = [("[Y]es", 0), ("[A]lways", 1), ("[N]o", 2)];
+        let buttons = [("[Y]es", 0), ("[A]lways Allow", 1), ("[N]o", 2)];
 
         let button_width = 14;
         let total_width = buttons.len() as u16 * button_width;
@@ -470,6 +543,7 @@ mod tests {
             tool_name: "write_file".to_string(),
             input: serde_json::json!({"path": "/tmp/test.txt"}),
             reason: "Writes to filesystem".to_string(),
+            diff_preview: None,
             response_tx: tx1,
         });
 
@@ -481,6 +555,7 @@ mod tests {
             tool_name: "bash".to_string(),
             input: serde_json::json!({"command": "ls"}),
             reason: "Executes command".to_string(),
+            diff_preview: None,
             response_tx: tx2,
         });
 
@@ -501,6 +576,7 @@ mod tests {
             tool_name: "test".to_string(),
             input: serde_json::Value::Null,
             reason: "Test".to_string(),
+            diff_preview: None,
             response_tx: tx,
         });
 
@@ -536,6 +612,7 @@ mod tests {
             tool_name: "test".to_string(),
             input: serde_json::Value::Null,
             reason: "Test".to_string(),
+            diff_preview: None,
             response_tx: tx1,
         });
 
@@ -551,6 +628,7 @@ mod tests {
             tool_name: "test".to_string(),
             input: serde_json::Value::Null,
             reason: "Test".to_string(),
+            diff_preview: None,
             response_tx: tx2,
         });
 
@@ -565,6 +643,7 @@ mod tests {
             tool_name: "test".to_string(),
             input: serde_json::Value::Null,
             reason: "Test".to_string(),
+            diff_preview: None,
             response_tx: tx3,
         });
 
@@ -585,6 +664,7 @@ mod tests {
             tool_name: "first".to_string(),
             input: serde_json::Value::Null,
             reason: "First".to_string(),
+            diff_preview: None,
             response_tx: tx1,
         });
 
@@ -593,6 +673,7 @@ mod tests {
             tool_name: "second".to_string(),
             input: serde_json::Value::Null,
             reason: "Second".to_string(),
+            diff_preview: None,
             response_tx: tx2,
         });
 
