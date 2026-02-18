@@ -4,6 +4,8 @@
 //! Handles agent lookup, model routing, and task delegation.
 
 use crate::agents::{get_agent_definitions, ModelType};
+use crate::features::builtin_skills;
+use crate::features::delegation_categories;
 use crate::features::model_routing::{
     route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
 };
@@ -27,6 +29,15 @@ struct DelegateTaskParams {
     /// Whether to run in background
     #[serde(default)]
     run_in_background: bool,
+    /// Optional delegation category (e.g., "visual-engineering", "ultrabrain")
+    /// Overrides auto-detected category for model/temperature selection.
+    #[serde(default)]
+    category: Option<String>,
+    /// Skills to inject into the delegated agent's prompt.
+    /// Skill content is prepended to the task prompt, giving the agent
+    /// domain-specific expertise at delegation time.
+    #[serde(default)]
+    load_skills: Vec<String>,
 }
 
 /// Response from delegate_task
@@ -55,6 +66,15 @@ struct DelegateTaskResponse {
     /// Agent description
     #[serde(skip_serializing_if = "Option::is_none")]
     agent_description: Option<String>,
+    /// Category used for this delegation (auto-detected or explicit)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    /// Skills that were injected into the agent's prompt
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    loaded_skills: Vec<String>,
+    /// The final prompt with injected skills and category guidance
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_prompt: Option<String>,
 }
 
 /// Parse model string to ModelType
@@ -73,6 +93,18 @@ fn tier_to_model_type(tier: ModelTier) -> ModelType {
         ModelTier::Low => ModelType::Haiku,
         ModelTier::Medium => ModelType::Sonnet,
         ModelTier::High => ModelType::Opus,
+    }
+}
+
+fn parse_explicit_category_tier(category: &str) -> Option<ModelTier> {
+    match category.to_lowercase().as_str() {
+        "quick" | "unspecified-low" | "unspecifiedlow" => Some(ModelTier::Low),
+        "visual-engineering" | "visualengineering" | "ultrabrain" | "unspecified-high"
+        | "unspecifiedhigh" | "deep" => Some(ModelTier::High),
+        "artistry" | "writing" | "unspecified-medium" | "unspecifiedmedium" => {
+            Some(ModelTier::Medium)
+        }
+        _ => None,
     }
 }
 
@@ -102,9 +134,22 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         None => (None, None),
     };
 
+    // Resolve delegation category FIRST (so it can influence model routing)
+    let explicit_category = params
+        .category
+        .as_deref()
+        .and_then(delegation_categories::types::DelegationCategory::parse);
+
+    let category_context = delegation_categories::types::CategoryContext {
+        task_prompt: params.prompt.clone(),
+        agent_type: Some(agent_name.to_string()),
+        explicit_category,
+        explicit_tier: None,
+    };
+    let resolved_category = delegation_categories::get_category_for_task(&category_context);
+
     // Determine model to use
-    // Priority: explicit model param > routing decision > agent default > Sonnet
-    let (final_model, final_tier, routing_reasons) = if let Some(model_str) = &params.model {
+    let (mut final_model, mut final_tier, mut routing_reasons) = if let Some(model_str) = &params.model {
         // Explicit model override
         if let Some(model_type) = parse_model_type(model_str) {
             let tier = match model_type {
@@ -141,6 +186,52 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         )
     };
 
+    if params.model.is_none() {
+        if let Some(explicit_category_str) = params.category.as_deref() {
+            if let Some(explicit_category_tier) = parse_explicit_category_tier(explicit_category_str) {
+                final_tier = explicit_category_tier;
+                final_model = tier_to_model_type(explicit_category_tier);
+                routing_reasons.push(format!("Category override: {}", explicit_category_str));
+            }
+        }
+    }
+
+    // Build effective prompt: skill content + category guidance + task prompt
+    let mut effective_prompt = params.prompt.clone();
+
+    // Load and inject actual skill content (not just names)
+    let mut loaded_skill_names: Vec<String> = Vec::new();
+    if !params.load_skills.is_empty() {
+        let mut skill_sections = Vec::new();
+        for skill_name in &params.load_skills {
+            if let Some(skill) = builtin_skills::get_builtin_skill(skill_name) {
+                skill_sections.push(format!(
+                    "<skill name=\"{}\">\n{}\n</skill>",
+                    skill.name,
+                    skill.template
+                ));
+                loaded_skill_names.push(skill.name.clone());
+            } else {
+                // Skill not found — still note it was requested
+                loaded_skill_names.push(format!("{}(not found)", skill_name));
+            }
+        }
+        if !skill_sections.is_empty() {
+            let skill_block = format!(
+                "<injected-skills>\n{}\n</injected-skills>\n\n",
+                skill_sections.join("\n\n")
+            );
+            effective_prompt = format!("{}{}", skill_block, effective_prompt);
+        }
+    }
+
+    // Apply category-specific prompt enhancement
+    let effective_prompt = delegation_categories::enhance_prompt_with_category(
+        &effective_prompt,
+        resolved_category.category,
+    );
+    // effective_prompt is the final prompt that would be sent to the delegated agent.
+
     // Generate task/session IDs
     let session_id = Uuid::new_v4().to_string();
     let task_id = if params.run_in_background {
@@ -173,6 +264,9 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         },
         routing_reasons,
         agent_description,
+        category: Some(resolved_category.category.as_str().to_string()),
+        loaded_skills: loaded_skill_names,
+        effective_prompt: Some(effective_prompt),
     };
 
     let json_response =
@@ -186,7 +280,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
 pub fn tool_definition() -> ToolDefinition {
     ToolDefinition::new(
         "delegate_task",
-        "Delegate a task to a specialized agent. Supports model routing and background execution.",
+        "Delegate a task to a specialized agent. Supports model routing, background execution, category-based configuration, and skill injection.",
         json!({
             "type": "object",
             "properties": {
@@ -207,6 +301,16 @@ pub fn tool_definition() -> ToolDefinition {
                     "type": "boolean",
                     "default": false,
                     "description": "Whether to run the task in the background"
+                },
+                "category": {
+                    "type": "string",
+                    "enum": ["visual-engineering", "ultrabrain", "artistry", "quick", "writing"],
+                    "description": "Optional delegation category. Controls model tier, temperature, and prompt enhancement. Auto-detected from prompt if not specified."
+                },
+                "loadSkills": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Skills to inject into the delegated agent's prompt. Skill content is prepended, giving the agent domain-specific expertise (e.g., ['frontend-ui-ux', 'git-master'])."
                 }
             },
             "required": ["agent", "prompt"]
@@ -235,6 +339,17 @@ mod tests {
         assert_eq!(parse_model_type("medium"), Some(ModelType::Sonnet));
         assert_eq!(parse_model_type("high"), Some(ModelType::Opus));
         assert_eq!(parse_model_type("invalid"), None);
+    }
+
+    #[test]
+    fn test_parse_explicit_category_tier() {
+        assert_eq!(parse_explicit_category_tier("quick"), Some(ModelTier::Low));
+        assert_eq!(parse_explicit_category_tier("visual-engineering"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("unspecified-high"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("unspecified-low"), Some(ModelTier::Low));
+        assert_eq!(parse_explicit_category_tier("deep"), Some(ModelTier::High));
+        assert_eq!(parse_explicit_category_tier("writing"), Some(ModelTier::Medium));
+        assert_eq!(parse_explicit_category_tier("invalid"), None);
     }
 
     #[tokio::test]
@@ -316,6 +431,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delegate_task_with_category() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Build a beautiful dashboard",
+            "category": "visual-engineering"
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            response.category,
+            Some("visual-engineering".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_with_skills() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Implement the login form",
+            "loadSkills": ["frontend-ui-ux"]
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        assert_eq!(response.loaded_skills, vec!["frontend-ui-ux".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_category_auto_detect() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Debug the complex race condition in the concurrent system architecture"
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        // Should auto-detect as ultrabrain due to keywords
+        assert_eq!(response.category, Some("ultrabrain".to_string()));
+    }
+
+    #[tokio::test]
     async fn test_delegate_task_unknown_agent_still_works() {
         // Unknown agents should still work, just without agent-specific metadata
         let input = json!({
@@ -334,5 +512,53 @@ mod tests {
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
         assert!(response.success);
         assert!(response.agent_description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_explicit_category_overrides_routing_model() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Debug this complex race condition in the concurrent architecture",
+            "category": "quick"
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        assert_eq!(response.model_type, "haiku");
+        assert!(response
+            .routing_reasons
+            .iter()
+            .any(|r| r.contains("Category override")));
+    }
+
+    #[tokio::test]
+    async fn test_delegate_task_effective_prompt_includes_skill_and_category_guidance() {
+        let input = json!({
+            "agent": "executor",
+            "prompt": "Implement the login form",
+            "category": "writing",
+            "loadSkills": ["frontend-ui-ux"]
+        });
+
+        let result = handle_delegate_task(input).await;
+        assert!(result.is_ok());
+
+        let output = result.unwrap();
+        let text = match &output.content[0] {
+            crate::tools::types::ToolContent::Text { text } => text,
+        };
+
+        let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
+        let effective_prompt = response.effective_prompt.unwrap_or_default();
+        assert!(effective_prompt.contains("<injected-skills>"));
+        assert!(effective_prompt.contains("<skill name=\"frontend-ui-ux\">"));
+        assert!(effective_prompt.contains("Focus on clarity, completeness, and proper structure."));
     }
 }
