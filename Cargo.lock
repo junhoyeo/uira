@@ -6136,6 +6136,7 @@ dependencies = [
  "uira-agent",
  "uira-core",
  "uira-providers",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ use ratatui::{
     Terminal,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
+use unicode_width::UnicodeWidthChar;
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1798,35 +1799,47 @@ impl App {
         let inner_width = inner.width as usize;
         let mut lines = Vec::new();
         let mut current_line = String::new();
+        let mut current_line_width: usize = 0;
         let mut char_index = 0;
         let mut cursor_line: u16 = 0;
         let mut cursor_col: u16 = 0;
 
         for ch in self.input.chars() {
-            if char_index == self.cursor_pos {
-                cursor_line = lines.len() as u16;
-                cursor_col = current_line.chars().count() as u16;
-            }
-
             if ch == '\n' {
+                if char_index == self.cursor_pos {
+                    cursor_line = lines.len() as u16;
+                    cursor_col = current_line_width as u16;
+                }
                 lines.push(current_line.clone());
                 current_line.clear();
+                current_line_width = 0;
                 char_index += 1;
                 continue;
             }
 
-            if inner_width > 0 && current_line.chars().count() >= inner_width {
+            let char_width = ch.width().unwrap_or(1);
+
+            if inner_width > 0 && current_line_width + char_width > inner_width {
+                if char_index == self.cursor_pos {
+                    cursor_line = (lines.len() + 1) as u16;
+                    cursor_col = 0;
+                }
                 lines.push(current_line.clone());
                 current_line.clear();
+                current_line_width = 0;
+            } else if char_index == self.cursor_pos {
+                cursor_line = lines.len() as u16;
+                cursor_col = current_line_width as u16;
             }
 
             current_line.push(ch);
+            current_line_width += char_width;
             char_index += 1;
         }
 
-        if char_index == self.cursor_pos || self.cursor_pos >= self.input.chars().count() {
+        if self.cursor_pos >= self.input.chars().count() {
             cursor_line = lines.len() as u16;
-            cursor_col = current_line.chars().count() as u16;
+            cursor_col = current_line_width as u16;
         }
 
         if !current_line.is_empty() || lines.is_empty() {
