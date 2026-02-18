@@ -1,7 +1,7 @@
 //! Main TUI application
 
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use arboard::Clipboard;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use futures::StreamExt;
 use ratatui::{
@@ -13,7 +13,6 @@ use ratatui::{
     Terminal,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
-use unicode_width::UnicodeWidthChar;
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,21 +37,21 @@ use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
 };
+use unicode_width::UnicodeWidthChar;
 
 use crate::keybinds::KeybindConfig;
 use crate::kv_store::KvStore;
-use crate::widgets::autocomplete::{AutocompleteMode, AutocompleteState, SlashCommand};
-use crate::widgets::dialog::DialogStack;
-use crate::widgets::diff::WrapMode;
 use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::views::{
     dialog_agent, dialog_export, dialog_fork_timeline, dialog_mcp, dialog_message_actions,
     dialog_provider, dialog_session_list, dialog_session_rename, dialog_status, dialog_subagent,
-    dialog_tag, dialog_theme_list, dialog_timeline,
-    ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
-    QuestionPrompt, QuestionPromptAction, ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT,
-    MODEL_GROUPS,
+    dialog_tag, dialog_theme_list, dialog_timeline, ApprovalOverlay, ApprovalRequest, ChatView,
+    CommandPalette, ModelSelector, PaletteAction, QuestionPrompt, QuestionPromptAction,
+    ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
 };
+use crate::widgets::autocomplete::{AutocompleteMode, AutocompleteState, SlashCommand};
+use crate::widgets::dialog::DialogStack;
+use crate::widgets::diff::WrapMode;
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
 use crate::{AppEvent, FrecencyStore, Theme, ThemeOverrides};
@@ -1260,10 +1259,7 @@ impl App {
         let tool_details_visible = kv_store.get("tool_details_visible", true);
         let scrollbar_visible = kv_store.get("scrollbar_visible", true);
         let animations_enabled = kv_store.get("animations_enabled", true);
-        let diff_wrap_mode = match kv_store
-            .get("diff_wrap_mode", "word".to_string())
-            .as_str()
-        {
+        let diff_wrap_mode = match kv_store.get("diff_wrap_mode", "word".to_string()).as_str() {
             "none" => WrapMode::None,
             _ => WrapMode::Word,
         };
@@ -1640,11 +1636,8 @@ impl App {
         if let Some(ref question) = self.question_prompt {
             let prompt_width = ((area.width as u32 * 70) / 100).max(40) as u16;
             let prompt_height = ((area.height as u32 * 60) / 100).max(10) as u16;
-            let prompt_area = crate::widgets::dialog::overlay::centered_rect(
-                area,
-                prompt_width,
-                prompt_height,
-            );
+            let prompt_area =
+                crate::widgets::dialog::overlay::centered_rect(area, prompt_width, prompt_height);
             question.render(frame, prompt_area, &self.theme);
         }
     }
@@ -2067,7 +2060,7 @@ impl App {
     }
 
     fn format_context_limit(tokens: usize) -> String {
-        if tokens % 1_000 == 0 {
+        if tokens.is_multiple_of(1_000) {
             format!("{}k", tokens / 1_000)
         } else {
             Self::format_token_count(tokens)
@@ -2902,7 +2895,11 @@ impl App {
                     if self.autocomplete_state.is_active()
                         && self.autocomplete_state.mode == AutocompleteMode::Slash
                         && self.input.starts_with('/')
-                        && !self.input.chars().take(self.cursor_pos).any(|c| c.is_whitespace())
+                        && !self
+                            .input
+                            .chars()
+                            .take(self.cursor_pos)
+                            .any(|c| c.is_whitespace())
                     {
                         if let Some(command) = self.autocomplete_state.selected_value() {
                             self.input.clear();
@@ -3379,7 +3376,11 @@ impl App {
                 }
                 let code = result.status.code().unwrap_or(-1);
                 self.chat_view.push_tool_message(
-                    if result.status.success() { "tool" } else { "error" },
+                    if result.status.success() {
+                        "tool"
+                    } else {
+                        "error"
+                    },
                     format!("shell (exit {})", code),
                     rendered,
                     true,
@@ -3735,10 +3736,7 @@ impl App {
         self.chat_view.invalidate_render_cache();
         self.chat_view.scroll_to_bottom();
         self.redo_stack.push(removed);
-        self.status = format!(
-            "Undid message pair ({} to redo)",
-            self.redo_stack.len()
-        );
+        self.status = format!("Undid message pair ({} to redo)", self.redo_stack.len());
     }
 
     fn redo_last_message_pair(&mut self) {
@@ -3765,12 +3763,16 @@ impl App {
             .find(|message| message.role == "assistant")
         else {
             self.status = "No assistant message to copy".to_string();
-            self.toast_manager
-                .show("No assistant message".to_string(), ToastVariant::Warning, 1800);
+            self.toast_manager.show(
+                "No assistant message".to_string(),
+                ToastVariant::Warning,
+                1800,
+            );
             return;
         };
 
-        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(message.content.clone())) {
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(message.content.clone()))
+        {
             Ok(()) => {
                 self.status = "Copied last assistant message".to_string();
                 self.toast_manager.show(
@@ -3781,8 +3783,11 @@ impl App {
             }
             Err(error) => {
                 self.status = format!("Clipboard error: {}", error);
-                self.toast_manager
-                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+                self.toast_manager.show(
+                    format!("Clipboard error: {}", error),
+                    ToastVariant::Error,
+                    2800,
+                );
             }
         }
     }
@@ -3812,8 +3817,11 @@ impl App {
             }
             Err(error) => {
                 self.status = format!("Clipboard error: {}", error);
-                self.toast_manager
-                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+                self.toast_manager.show(
+                    format!("Clipboard error: {}", error),
+                    ToastVariant::Error,
+                    2800,
+                );
             }
         }
     }
@@ -3846,7 +3854,10 @@ impl App {
                     ("/fork-timeline".into(), "Open fork confirmation".into()),
                     ("/rename".into(), "Rename current session".into()),
                     ("/tag".into(), "Open file tag dialog".into()),
-                    ("/image <path>".into(), "Attach image for next prompt".into()),
+                    (
+                        "/image <path>".into(),
+                        "Attach image for next prompt".into(),
+                    ),
                     ("/screenshot".into(), "Capture and attach screenshot".into()),
                     ("/undo / /redo".into(), "Undo or redo last pair".into()),
                     ("/copy".into(), "Copy transcript to clipboard".into()),
@@ -3859,7 +3870,8 @@ impl App {
                     ("/wrap".into(), "Toggle diff wrap mode".into()),
                     ("/share".into(), "Share session to GitHub Gist".into()),
                     ("/clear".into(), "Clear chat history".into()),
-                ]).with_title("Commands");
+                ])
+                .with_title("Commands");
                 self.dialog_stack.show(Box::new(help));
             }
             "/auth" | "/status" => {
@@ -3918,12 +3930,13 @@ impl App {
             }
             "/sessions" => {
                 let event_tx = self.event_tx.clone();
-                let dialog = dialog_session_list::dialog_session_list(Vec::new(), move |selected| {
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                let dialog =
+                    dialog_session_list::dialog_session_list(Vec::new(), move |selected| {
+                        let _ = event_tx.try_send(AppEvent::Info(format!(
                         "Session picker selected '{}' (backend session switching not wired yet)",
                         selected
                     )));
-                });
+                    });
                 self.dialog_stack.show(Box::new(dialog));
             }
             "/mcps" => {
@@ -3955,8 +3968,8 @@ impl App {
                     &theme_refs,
                     Some(current.as_str()),
                     move |selected| {
-                        let _ = event_tx
-                            .try_send(AppEvent::ThemeChangeRequested(selected.to_string()));
+                        let _ =
+                            event_tx.try_send(AppEvent::ThemeChangeRequested(selected.to_string()));
                     },
                 );
                 self.dialog_stack.show(Box::new(dialog));
@@ -4008,8 +4021,8 @@ impl App {
             "/message" => {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_message_actions::dialog_message_actions(move |action| {
-                    let _ = event_tx
-                        .try_send(AppEvent::Info(format!("Message action: {:?}", action)));
+                    let _ =
+                        event_tx.try_send(AppEvent::Info(format!("Message action: {:?}", action)));
                 });
                 self.dialog_stack.show(Box::new(dialog));
             }
@@ -4617,7 +4630,8 @@ impl App {
             },
             ThreadEvent::ThreadCompleted { usage } => {
                 self.set_agent_state(AgentState::Complete);
-                self.context_tokens = (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
+                self.context_tokens =
+                    (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
                 self.status = format!(
                     "Complete (total: {} in / {} out tokens)",
                     usage.input_tokens, usage.output_tokens
@@ -4907,19 +4921,14 @@ impl App {
 
         if let Some(next_model) = window.get(next_idx).cloned() {
             self.switch_model(&next_model);
-            self.toast_manager.show(
-                format!("Model: {}", next_model),
-                ToastVariant::Info,
-                2000,
-            );
+            self.toast_manager
+                .show(format!("Model: {}", next_model), ToastVariant::Info, 2000);
         }
     }
 
     fn infer_max_context_tokens(model: &str) -> usize {
         let lower = model.to_ascii_lowercase();
-        if lower.contains("haiku") {
-            200_000
-        } else if lower.contains("sonnet") || lower.contains("opus") {
+        if lower.contains("haiku") || lower.contains("sonnet") || lower.contains("opus") {
             200_000
         } else if lower.contains("gpt-4o") {
             128_000

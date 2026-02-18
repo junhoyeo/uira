@@ -262,9 +262,7 @@ fn render_split_side(
         .map(|n| format!("{n:>width$}", width = number_width))
         .unwrap_or_else(|| " ".repeat(number_width));
 
-    let kind = if left && line.kind == '+' {
-        ' '
-    } else if !left && line.kind == '-' {
+    let kind = if (left && line.kind == '+') || (!left && line.kind == '-') {
         ' '
     } else {
         line.kind

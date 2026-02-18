@@ -425,7 +425,7 @@ fn render_task(
         .unwrap_or(0);
 
     let mut out = block_tool(
-        &format!("# {} task", title_case(agent)),
+        format!("# {} task", title_case(agent)),
         vec![],
         width,
         theme,

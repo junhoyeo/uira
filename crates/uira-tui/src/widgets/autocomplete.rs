@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use crate::frecency::FrecencyStore;
 use crate::Theme;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AutocompleteMode {
+    #[default]
     None,
     File,
     Slash,
@@ -55,12 +56,6 @@ impl Default for AutocompleteState {
             cache_directory: String::new(),
             cache_time: std::time::Instant::now(),
         }
-    }
-}
-
-impl Default for AutocompleteMode {
-    fn default() -> Self {
-        Self::None
     }
 }
 
@@ -180,7 +175,7 @@ impl AutocompleteState {
         let candidates = &self.file_cache;
         let query_lower = file_query.to_lowercase();
         let mut ranked: Vec<Suggestion> = candidates
-            .into_iter()
+            .iter()
             .filter_map(|path| {
                 let path_lower = path.to_lowercase();
                 let mut score = fuzzy_score(&query_lower, &path_lower)?;
