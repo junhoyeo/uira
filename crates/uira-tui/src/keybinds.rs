@@ -32,7 +32,11 @@ pub fn parse_keybind(input: &str) -> Option<KeyBinding> {
             "ctrl" | "control" => modifiers |= KeyModifiers::CONTROL,
             "alt" => modifiers |= KeyModifiers::ALT,
             "shift" => modifiers |= KeyModifiers::SHIFT,
+            "cmd" | "meta" => modifiers |= KeyModifiers::SUPER,
             _ => {
+                if key_part.is_some() {
+                    return None;
+                }
                 key_part = Some(part);
             }
         }
@@ -75,6 +79,7 @@ pub struct KeybindConfig {
     pub page_down: Vec<KeyBinding>,
     pub command_palette: Vec<KeyBinding>,
     pub toggle_sidebar: Vec<KeyBinding>,
+    pub toggle_todos: Vec<KeyBinding>,
     pub collapse_tools: Vec<KeyBinding>,
     pub expand_tools: Vec<KeyBinding>,
 }
@@ -90,7 +95,8 @@ impl Default for KeybindConfig {
                 KeyBinding::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
                 KeyBinding::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
             ],
-            toggle_sidebar: vec![KeyBinding::new(KeyCode::Char('t'), KeyModifiers::CONTROL)],
+            toggle_sidebar: vec![KeyBinding::new(KeyCode::Char('b'), KeyModifiers::CONTROL)],
+            toggle_todos: vec![KeyBinding::new(KeyCode::Char('t'), KeyModifiers::CONTROL)],
             collapse_tools: vec![KeyBinding::new(KeyCode::Char('o'), KeyModifiers::CONTROL)],
             expand_tools: vec![KeyBinding::new(
                 KeyCode::Char('O'),
@@ -101,62 +107,101 @@ impl Default for KeybindConfig {
 }
 
 impl KeybindConfig {
-    pub fn from_config(config: &uira_core::config::schema::KeybindsConfig) -> Self {
+    pub fn from_config_with_warnings(
+        config: &uira_core::config::schema::KeybindsConfig,
+    ) -> (Self, Vec<String>) {
         let mut keybinds = Self::default();
+        let mut warnings = Vec::new();
 
-        if let Some(s) = &config.scroll_up {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.scroll_up = vec![kb];
-            }
-        }
+        keybinds.scroll_up = parse_bindings(
+            &config.scroll_up,
+            keybinds.scroll_up,
+            "scroll_up",
+            &mut warnings,
+        );
+        keybinds.scroll_down = parse_bindings(
+            &config.scroll_down,
+            keybinds.scroll_down,
+            "scroll_down",
+            &mut warnings,
+        );
+        keybinds.page_up =
+            parse_bindings(&config.page_up, keybinds.page_up, "page_up", &mut warnings);
+        keybinds.page_down = parse_bindings(
+            &config.page_down,
+            keybinds.page_down,
+            "page_down",
+            &mut warnings,
+        );
+        keybinds.command_palette = parse_bindings(
+            &config.command_palette,
+            keybinds.command_palette,
+            "command_palette",
+            &mut warnings,
+        );
+        keybinds.toggle_sidebar = parse_bindings(
+            &config.toggle_sidebar,
+            keybinds.toggle_sidebar,
+            "toggle_sidebar",
+            &mut warnings,
+        );
+        keybinds.toggle_todos = parse_bindings(
+            &config.toggle_todos,
+            keybinds.toggle_todos,
+            "toggle_todos",
+            &mut warnings,
+        );
+        keybinds.collapse_tools = parse_bindings(
+            &config.collapse_tools,
+            keybinds.collapse_tools,
+            "collapse_tools",
+            &mut warnings,
+        );
+        keybinds.expand_tools = parse_bindings(
+            &config.expand_tools,
+            keybinds.expand_tools,
+            "expand_tools",
+            &mut warnings,
+        );
 
-        if let Some(s) = &config.scroll_down {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.scroll_down = vec![kb];
-            }
-        }
+        (keybinds, warnings)
+    }
 
-        if let Some(s) = &config.page_up {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.page_up = vec![kb];
-            }
-        }
-
-        if let Some(s) = &config.page_down {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.page_down = vec![kb];
-            }
-        }
-
-        if let Some(s) = &config.command_palette {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.command_palette = vec![kb];
-            }
-        }
-
-        if let Some(s) = &config.toggle_sidebar {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.toggle_sidebar = vec![kb];
-            }
-        }
-
-        if let Some(s) = &config.collapse_tools {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.collapse_tools = vec![kb];
-            }
-        }
-
-        if let Some(s) = &config.expand_tools {
-            if let Some(kb) = parse_keybind(s) {
-                keybinds.expand_tools = vec![kb];
-            }
-        }
-
-        keybinds
+    pub fn from_config(config: &uira_core::config::schema::KeybindsConfig) -> Self {
+        Self::from_config_with_warnings(config).0
     }
 
     pub fn matches_any(bindings: &[KeyBinding], code: KeyCode, modifiers: KeyModifiers) -> bool {
         bindings.iter().any(|kb| kb.matches(code, modifiers))
+    }
+}
+
+fn parse_bindings(
+    source: &Option<Vec<String>>,
+    fallback: Vec<KeyBinding>,
+    action_name: &str,
+    warnings: &mut Vec<String>,
+) -> Vec<KeyBinding> {
+    let Some(raw_bindings) = source else {
+        return fallback;
+    };
+
+    let mut parsed = Vec::new();
+    for raw in raw_bindings {
+        if let Some(binding) = parse_keybind(raw) {
+            parsed.push(binding);
+        } else {
+            warnings.push(format!(
+                "Invalid keybind '{}' for action '{}'; keeping defaults",
+                raw, action_name
+            ));
+        }
+    }
+
+    if parsed.is_empty() {
+        fallback
+    } else {
+        parsed
     }
 }
 
@@ -219,8 +264,12 @@ mod tests {
         let keybinds = KeybindConfig::default();
 
         assert_eq!(keybinds.toggle_sidebar.len(), 1);
-        assert_eq!(keybinds.toggle_sidebar[0].code, KeyCode::Char('t'));
+        assert_eq!(keybinds.toggle_sidebar[0].code, KeyCode::Char('b'));
         assert_eq!(keybinds.toggle_sidebar[0].modifiers, KeyModifiers::CONTROL);
+
+        assert_eq!(keybinds.toggle_todos.len(), 1);
+        assert_eq!(keybinds.toggle_todos[0].code, KeyCode::Char('t'));
+        assert_eq!(keybinds.toggle_todos[0].modifiers, KeyModifiers::CONTROL);
     }
 
     #[test]

@@ -92,6 +92,17 @@ When updating AGENTS.md files, follow these principles:
 5. Run clippy: `cargo clippy -- -D warnings`
 6. **Always use merge commits** when merging PRs (`gh pr merge --merge`). Never squash or rebase merge.
 
+### Branch Completion Workflow (MANDATORY)
+
+When work on a feature branch is complete:
+
+1. **Verify** - Run `cargo build` and `cargo test --workspace`
+2. **Push** - Push the branch to origin: `git push -u origin <branch>`
+3. **Create PR** - Always create a PR using `gh pr create`
+4. **Report** - Return the PR URL to the user
+
+**Never ask whether to create a PR** — always create it automatically when branch work is done.
+
 ## Coding Conventions
 
 ## Runtime Defaults

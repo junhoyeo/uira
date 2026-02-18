@@ -1,9 +1,8 @@
 //! Main TUI application
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
-use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
-};
+use arboard::Clipboard;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
@@ -25,29 +24,31 @@ use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
 };
+use uira_core::Provider;
 use uira_core::{
     schema::SidebarConfig, ENV_ANTHROPIC_API_KEY, ENV_GEMINI_API_KEY, ENV_GOOGLE_API_KEY,
     ENV_OPENAI_API_KEY, UIRA_DIR,
+};
+use uira_core::{
+    AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
+    TodoItem, TodoPriority, TodoStatus,
 };
 use uira_providers::{
     AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
     ProviderConfig, SecretString,
 };
-use uira_core::Provider;
-use uira_core::{
-    AgentState, ContentBlock, ImageSource, Item, Message, MessageContent, Role, ThreadEvent,
-    TodoItem, TodoPriority, TodoStatus,
-};
 
 use crate::keybinds::KeybindConfig;
+use crate::kv_store::KvStore;
+use crate::widgets::autocomplete::{AutocompleteMode, AutocompleteState, SlashCommand};
+use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::views::{
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
     ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
 };
-use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
-use crate::{AppEvent, Theme, ThemeOverrides};
+use crate::{AppEvent, FrecencyStore, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
 const MAX_STREAMING_BUFFER_SIZE: usize = 1024 * 1024;
@@ -770,8 +771,7 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 api_key: None,
                 model: model.to_string(),
                 base_url: Some(
-                    std::env::var("OLLAMA_HOST")
-                        .unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
+                    std::env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string()),
                 ),
                 ..Default::default()
             };
@@ -810,6 +810,7 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
                 tool_name: pending.tool_name,
                 input: pending.input,
                 reason: pending.reason,
+                diff_preview: None,
                 response_tx: pending.response_tx,
             };
 
@@ -880,30 +881,44 @@ pub struct App {
     #[allow(dead_code)]
     toast_manager: ToastManager,
     keybinds: KeybindConfig,
+    kv_store: KvStore,
+    recent_models: Vec<String>,
+    frecency_store: FrecencyStore,
+    autocomplete_state: AutocompleteState,
+    slash_commands: Vec<SlashCommand>,
     /// Prompt history for Up/Down navigation
     prompt_history: Vec<String>,
     /// Current position in history (None = not browsing, Some(idx) = browsing)
     history_index: Option<usize>,
     /// Saved input when entering history mode
     history_stash: String,
+    pending_g: bool,
+    redo_stack: Vec<Vec<ChatMessage>>,
+    session_cost: f64,
+    context_tokens: usize,
+    max_context_tokens: usize,
+    connected_lsps: Vec<String>,
+    external_theme_fingerprint: u64,
+    cached_git_summary: (usize, usize, usize),
+    git_summary_last_update: std::time::Instant,
 }
 
 impl App {
     pub fn new() -> Self {
         Self::new_with_sidebar(SidebarConfig::default())
     }
-    
+
     /// Calculate the required height for input based on content and available width
     fn calculate_input_height(&self, available_width: u16) -> u16 {
         if self.input.is_empty() {
             return 3; // Minimum height: border + 1 line content + border
         }
-        
+
         let inner_width = available_width.saturating_sub(2) as usize; // Account for borders
         if inner_width == 0 {
             return 3;
         }
-        
+
         // Count the number of lines needed
         let mut lines = 0;
         for paragraph in self.input.split('\n') {
@@ -916,7 +931,7 @@ impl App {
                 lines += chars_per_line + if remainder > 0 { 1 } else { 0 };
             }
         }
-        
+
         // Add borders (top + bottom) and ensure minimum height
         let total_height = lines + 2;
         total_height.clamp(3, 8) as u16
@@ -927,88 +942,41 @@ impl App {
         if self.cursor_pos == 0 {
             return;
         }
-        
+
         let chars: Vec<char> = self.input.chars().collect();
         let mut lines = Vec::new();
         let mut current_line = Vec::new();
         let mut char_positions = Vec::new(); // Maps char index to (line, column)
-        
+
         for &ch in &chars {
             char_positions.push((lines.len(), current_line.len()));
-            
+
             if ch == '\n' {
                 lines.push(current_line.clone());
                 current_line.clear();
                 continue;
             }
-            
+
             if current_line.len() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
-            
+
             current_line.push(ch);
         }
-        
+
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
-        
-        if let Some(&(current_line, current_col)) = char_positions.get(self.cursor_pos.saturating_sub(1)) {
+
+        if let Some(&(current_line, current_col)) =
+            char_positions.get(self.cursor_pos.saturating_sub(1))
+        {
             if current_line > 0 {
                 // Find position in previous line
                 let target_line = current_line - 1;
                 let target_col = current_col.min(lines[target_line].len());
-                
-                // Find the character index for this position
-                for (i, &(line, col)) in char_positions.iter().enumerate() {
-                    if line == target_line && col == target_col {
-                        self.cursor_pos = i;
-                        return;
-                    }
-                }
-            }
-        }
-    }
-    
-    /// Move cursor down one line in multi-line input  
-    fn move_cursor_down(&mut self, inner_width: usize) {
-        let chars: Vec<char> = self.input.chars().collect();
-        if self.cursor_pos >= chars.len() {
-            return;
-        }
-        
-        let mut lines = Vec::new();
-        let mut current_line = Vec::new();
-        let mut char_positions = Vec::new(); // Maps char index to (line, column)
-        
-        for &ch in &chars {
-            char_positions.push((lines.len(), current_line.len()));
-            
-            if ch == '\n' {
-                lines.push(current_line.clone());
-                current_line.clear();
-                continue;
-            }
-            
-            if current_line.len() >= inner_width {
-                lines.push(current_line.clone());
-                current_line.clear();
-            }
-            
-            current_line.push(ch);
-        }
-        
-        if !current_line.is_empty() || lines.is_empty() {
-            lines.push(current_line);
-        }
-        
-        if let Some(&(current_line, current_col)) = char_positions.get(self.cursor_pos) {
-            if current_line < lines.len() - 1 {
-                // Find position in next line
-                let target_line = current_line + 1;
-                let target_col = current_col.min(lines[target_line].len());
-                
+
                 // Find the character index for this position
                 for (i, &(line, col)) in char_positions.iter().enumerate() {
                     if line == target_line && col == target_col {
@@ -1020,8 +988,180 @@ impl App {
         }
     }
 
+    /// Move cursor down one line in multi-line input
+    fn move_cursor_down(&mut self, inner_width: usize) {
+        let chars: Vec<char> = self.input.chars().collect();
+        if self.cursor_pos >= chars.len() {
+            return;
+        }
+
+        let mut lines = Vec::new();
+        let mut current_line = Vec::new();
+        let mut char_positions = Vec::new(); // Maps char index to (line, column)
+
+        for &ch in &chars {
+            char_positions.push((lines.len(), current_line.len()));
+
+            if ch == '\n' {
+                lines.push(current_line.clone());
+                current_line.clear();
+                continue;
+            }
+
+            if current_line.len() >= inner_width {
+                lines.push(current_line.clone());
+                current_line.clear();
+            }
+
+            current_line.push(ch);
+        }
+
+        if !current_line.is_empty() || lines.is_empty() {
+            lines.push(current_line);
+        }
+
+        if let Some(&(current_line, current_col)) = char_positions.get(self.cursor_pos) {
+            if current_line < lines.len() - 1 {
+                // Find position in next line
+                let target_line = current_line + 1;
+                let target_col = current_col.min(lines[target_line].len());
+
+                // Find the character index for this position
+                for (i, &(line, col)) in char_positions.iter().enumerate() {
+                    if line == target_line && col == target_col {
+                        self.cursor_pos = i;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn available_slash_commands() -> Vec<SlashCommand> {
+        vec![
+            SlashCommand {
+                command: "help",
+                description: "Show help",
+            },
+            SlashCommand {
+                command: "status",
+                description: "Show status",
+            },
+            SlashCommand {
+                command: "models",
+                description: "Open model selector",
+            },
+            SlashCommand {
+                command: "model",
+                description: "Switch model",
+            },
+            SlashCommand {
+                command: "theme",
+                description: "Theme management",
+            },
+            SlashCommand {
+                command: "image",
+                description: "Attach image",
+            },
+            SlashCommand {
+                command: "screenshot",
+                description: "Attach screenshot",
+            },
+            SlashCommand {
+                command: "review",
+                description: "Review diffs",
+            },
+            SlashCommand {
+                command: "share",
+                description: "Share session gist",
+            },
+            SlashCommand {
+                command: "clear",
+                description: "Clear chat",
+            },
+            SlashCommand {
+                command: "undo",
+                description: "Undo last message",
+            },
+            SlashCommand {
+                command: "redo",
+                description: "Redo last message",
+            },
+            SlashCommand {
+                command: "copy",
+                description: "Copy transcript",
+            },
+            SlashCommand {
+                command: "copy-last",
+                description: "Copy last assistant message",
+            },
+            SlashCommand {
+                command: "export",
+                description: "Export session markdown",
+            },
+            SlashCommand {
+                command: "fork",
+                description: "Fork session",
+            },
+            SlashCommand {
+                command: "switch",
+                description: "Switch branch",
+            },
+            SlashCommand {
+                command: "branches",
+                description: "List branches",
+            },
+            SlashCommand {
+                command: "tree",
+                description: "Show branch tree",
+            },
+            SlashCommand {
+                command: "exit",
+                description: "Exit app",
+            },
+        ]
+    }
+
+    fn char_index_to_byte_index(input: &str, index: usize) -> usize {
+        input
+            .char_indices()
+            .nth(index)
+            .map(|(i, _)| i)
+            .unwrap_or(input.len())
+    }
+
+    fn refresh_autocomplete(&mut self) {
+        self.autocomplete_state.update(
+            &self.input,
+            self.cursor_pos,
+            &self.working_directory,
+            &self.frecency_store,
+            &self.slash_commands,
+        );
+    }
+
+    fn apply_autocomplete_selection(&mut self) -> bool {
+        let Some(mut selected) = self.autocomplete_state.selected_value() else {
+            return false;
+        };
+
+        if self.autocomplete_state.mode == AutocompleteMode::Slash && !selected.ends_with(' ') {
+            selected.push(' ');
+        }
+
+        let start = self.autocomplete_state.token_start;
+        let end = self.autocomplete_state.token_end;
+        let start_b = Self::char_index_to_byte_index(&self.input, start);
+        let end_b = Self::char_index_to_byte_index(&self.input, end);
+        self.input.replace_range(start_b..end_b, &selected);
+        self.cursor_pos = start + selected.chars().count();
+        self.refresh_autocomplete();
+        true
+    }
+
     pub fn new_with_sidebar(sidebar: SidebarConfig) -> Self {
         let (event_tx, event_rx) = mpsc::channel(100);
+        let mut kv_store = KvStore::new();
         let theme = Theme::default();
         let mut approval_overlay = ApprovalOverlay::new();
         approval_overlay.set_theme(theme.clone());
@@ -1035,6 +1175,33 @@ impl App {
             sidebar.show_todos,
             sidebar.show_files,
         ];
+        let sidebar_collapsed = kv_store.get("sidebar_collapsed", false);
+        let show_todo_sidebar = !sidebar_collapsed;
+        let recent_models = kv_store.get("recent_models", Vec::<String>::new());
+        let frecency_store = kv_store.get("frecency_store", FrecencyStore::default());
+        let connected_lsps = if Self::command_exists("rust-analyzer") {
+            vec!["rust-analyzer ✓".to_string()]
+        } else {
+            vec!["rust-analyzer ✗".to_string()]
+        };
+
+        let thinking_visible = kv_store.get("thinking_visible", true);
+        let timestamps_visible = kv_store.get("timestamps_visible", true);
+        let tool_details_visible = kv_store.get("tool_details_visible", true);
+        let scrollbar_visible = kv_store.get("scrollbar_visible", true);
+        let animations_enabled = kv_store.get("animations_enabled", true);
+        let diff_wrap_mode = kv_store.get("diff_wrap_mode", "word".to_string());
+
+        kv_store.set("sidebar_collapsed", sidebar_collapsed);
+        kv_store.set("thinking_visible", thinking_visible);
+        kv_store.set("timestamps_visible", timestamps_visible);
+        kv_store.set("tool_details_visible", tool_details_visible);
+        kv_store.set("scrollbar_visible", scrollbar_visible);
+        kv_store.set("animations_enabled", animations_enabled);
+        kv_store.set("diff_wrap_mode", diff_wrap_mode);
+        kv_store.set("recent_models", recent_models.clone());
+        kv_store.set("frecency_store", frecency_store.clone());
+
         Self {
             should_quit: false,
             event_tx,
@@ -1063,7 +1230,7 @@ impl App {
             session_stack: SessionStack::new(),
             task_registry: BackgroundTaskRegistry::new(),
             todos: Vec::new(),
-            show_todo_sidebar: true,
+            show_todo_sidebar,
             todo_list_state: ListState::default(),
             sidebar_sections,
             modified_files: HashSet::new(),
@@ -1075,9 +1242,23 @@ impl App {
             message_queue: MessageQueue::default(),
             toast_manager: ToastManager::new(),
             keybinds: KeybindConfig::default(),
+            kv_store,
+            recent_models,
+            frecency_store,
+            autocomplete_state: AutocompleteState::default(),
+            slash_commands: Self::available_slash_commands(),
             prompt_history: Self::load_prompt_history().unwrap_or_default(),
             history_index: None,
             history_stash: String::new(),
+            pending_g: false,
+            redo_stack: Vec::new(),
+            session_cost: 0.0,
+            context_tokens: 0,
+            max_context_tokens: 128_000,
+            connected_lsps,
+            external_theme_fingerprint: Theme::external_theme_fingerprint(),
+            cached_git_summary: (0, 0, 0),
+            git_summary_last_update: std::time::Instant::now(),
         }
     }
 
@@ -1117,6 +1298,8 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> std::io::Result<()> {
         loop {
+            self.refresh_external_theme_if_changed();
+
             // Draw UI
             terminal.draw(|frame| {
                 self.render(frame);
@@ -1155,6 +1338,30 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn refresh_external_theme_if_changed(&mut self) {
+        let current_fingerprint = Theme::external_theme_fingerprint();
+        if current_fingerprint == self.external_theme_fingerprint {
+            return;
+        }
+        self.external_theme_fingerprint = current_fingerprint;
+
+        let current_theme_name = self.theme.name.clone();
+        if let Ok(theme) =
+            Theme::from_name_with_overrides(&current_theme_name, &self.theme_overrides)
+        {
+            self.theme = theme;
+            self.approval_overlay.set_theme(self.theme.clone());
+            self.model_selector.set_theme(self.theme.clone());
+            self.command_palette.set_theme(self.theme.clone());
+            self.chat_view.set_theme(self.theme.clone());
+        }
+
+        let (_, warnings) = Theme::load_external_themes();
+        for warning in warnings {
+            tracing::warn!("{}", warning);
+        }
     }
 
     pub async fn run_with_agent(
@@ -1217,20 +1424,28 @@ impl App {
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
+        self.update_terminal_title();
         let area = frame.area();
         let hud_height = if self.task_registry.has_running_tasks() {
             1
         } else {
             0
         };
-        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
-        
+        let session_header_height = if self.session_stack.is_in_child() {
+            1
+        } else {
+            0
+        };
+
         // Calculate dynamic input height
         self.input_height = self.calculate_input_height(area.width);
 
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
-            || self.current_model.is_some();
+            || self.current_model.is_some()
+            || self.session_cost > 0.0
+            || self.context_tokens > 0
+            || !self.connected_lsps.is_empty();
 
         // Responsive sidebar logic based on terminal width
         let show_sidebar = match area.width {
@@ -1277,6 +1492,8 @@ impl App {
             self.render_hud(frame, chunks[3]);
             self.render_status(frame, chunks[4]);
             self.render_input(frame, chunks[5]);
+            self.autocomplete_state
+                .render(frame, chunks[5], &self.theme);
         } else {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -1294,6 +1511,8 @@ impl App {
             self.render_hud(frame, chunks[2]);
             self.render_status(frame, chunks[3]);
             self.render_input(frame, chunks[4]);
+            self.autocomplete_state
+                .render(frame, chunks[4], &self.theme);
         }
 
         self.toast_manager.tick();
@@ -1306,6 +1525,12 @@ impl App {
         if self.command_palette.is_active() {
             self.command_palette.render(frame, area);
         }
+    }
+
+    fn update_terminal_title(&self) {
+        let model = self.current_model.as_deref().unwrap_or("no-model");
+        print!("\x1b]0;Uira - {}\x07", model);
+        let _ = std::io::stdout().flush();
     }
 
     fn render_status(&self, frame: &mut ratatui::Frame, area: Rect) {
@@ -1455,45 +1680,42 @@ impl App {
         let mut current_line = String::new();
         let mut char_index = 0;
         let mut cursor_rendered = false;
-        
+
         for ch in self.input.chars() {
             if char_index == self.cursor_pos && !cursor_rendered {
                 current_line.push('|');
                 cursor_rendered = true;
             }
-            
+
             if ch == '\n' {
                 lines.push(current_line.clone());
                 current_line.clear();
                 char_index += 1;
                 continue;
             }
-            
+
             if current_line.chars().count() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
-            
+
             current_line.push(ch);
             char_index += 1;
         }
-        
+
         // Handle cursor at end or in current line
         if char_index == self.cursor_pos && !cursor_rendered {
             current_line.push('|');
         } else if self.cursor_pos >= self.input.chars().count() && !cursor_rendered {
             current_line.push('_');
         }
-        
+
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
-        
+
         // Convert to ratatui Lines
-        let text_lines: Vec<Line> = lines
-            .into_iter()
-            .map(Line::from)
-            .collect();
+        let text_lines: Vec<Line> = lines.into_iter().map(Line::from).collect();
 
         let input_paragraph = Paragraph::new(text_lines).wrap(Wrap { trim: false });
 
@@ -1501,7 +1723,7 @@ impl App {
         frame.render_widget(input_paragraph, inner);
     }
 
-    fn render_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         let outer_block = Block::default()
             .title(" Info ")
             .borders(Borders::ALL)
@@ -1542,13 +1764,33 @@ impl App {
                     Style::default().fg(self.theme.fg),
                 )));
             }
-            let token_info = self.status.clone();
-            if token_info.contains("tokens") {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", token_info),
-                    Style::default().fg(self.theme.text_muted),
-                )));
-            }
+            let context_pct = if self.max_context_tokens == 0 {
+                0.0
+            } else {
+                (self.context_tokens as f64 / self.max_context_tokens as f64) * 100.0
+            };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  Context: {} / {} ({:.0}%)",
+                    Self::format_token_count(self.context_tokens),
+                    Self::format_context_limit(self.max_context_tokens),
+                    context_pct
+                ),
+                Style::default().fg(self.theme.text_muted),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Cost: ${:.2}", self.session_cost),
+                Style::default().fg(self.theme.text_muted),
+            )));
+            let lsp_text = if self.connected_lsps.is_empty() {
+                "none".to_string()
+            } else {
+                self.connected_lsps.join(", ")
+            };
+            lines.push(Line::from(Span::styled(
+                format!("  LSP: {}", lsp_text),
+                Style::default().fg(self.theme.text_muted),
+            )));
             lines.push(Line::from(""));
         }
 
@@ -1633,6 +1875,14 @@ impl App {
             Style::default().fg(self.theme.accent),
         )));
         if self.sidebar_sections[3] {
+            let file_summary = self.git_file_summary();
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "  Files: +{} -{} ~{}",
+                    file_summary.0, file_summary.1, file_summary.2
+                ),
+                Style::default().fg(self.theme.text_muted),
+            )));
             if self.modified_files.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "  No modified files",
@@ -1662,6 +1912,82 @@ impl App {
         frame.render_widget(paragraph, inner);
     }
 
+    fn format_token_count(tokens: usize) -> String {
+        let text = tokens.to_string();
+        let mut out = String::with_capacity(text.len() + text.len() / 3);
+        for (idx, ch) in text.chars().rev().enumerate() {
+            if idx != 0 && idx % 3 == 0 {
+                out.push(',');
+            }
+            out.push(ch);
+        }
+        out.chars().rev().collect()
+    }
+
+    fn format_context_limit(tokens: usize) -> String {
+        if tokens % 1_000 == 0 {
+            format!("{}k", tokens / 1_000)
+        } else {
+            Self::format_token_count(tokens)
+        }
+    }
+
+    fn git_file_summary(&mut self) -> (usize, usize, usize) {
+        const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+        if self.git_summary_last_update.elapsed() < CACHE_TTL {
+            return self.cached_git_summary;
+        }
+
+        let output = run_git_command(&["status", "--porcelain"], &self.working_directory)
+            .unwrap_or_default();
+        let mut added = 0usize;
+        let mut deleted = 0usize;
+        let mut modified = 0usize;
+
+        for line in output.lines() {
+            if line.len() < 2 {
+                continue;
+            }
+            let x = line.chars().nth(0).unwrap_or(' ');
+            let y = line.chars().nth(1).unwrap_or(' ');
+
+            if x == '?' && y == '?' {
+                added += 1;
+                continue;
+            }
+            if x == 'A' || y == 'A' {
+                added += 1;
+            } else if x == 'D' || y == 'D' {
+                deleted += 1;
+            } else if x != ' ' || y != ' ' {
+                modified += 1;
+            }
+        }
+
+        self.cached_git_summary = (added, deleted, modified);
+        self.git_summary_last_update = std::time::Instant::now();
+        self.cached_git_summary
+    }
+
+    fn estimate_turn_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
+        let model_lower = model.to_ascii_lowercase();
+        let (input_per_million, output_per_million) = if model_lower.contains("opus") {
+            (15.0, 75.0)
+        } else if model_lower.contains("sonnet") {
+            (3.0, 15.0)
+        } else if model_lower.contains("haiku") {
+            (0.25, 1.25)
+        } else if model_lower.contains("gpt-5") {
+            (1.25, 10.0)
+        } else {
+            (1.0, 5.0)
+        };
+
+        (input_tokens as f64 / 1_000_000.0) * input_per_million
+            + (output_tokens as f64 / 1_000_000.0) * output_per_million
+    }
+
     fn ensure_todo_selection(&mut self) {
         if self.todos.is_empty() {
             self.todo_list_state.select(None);
@@ -1689,6 +2015,8 @@ impl App {
 
     fn toggle_todo_sidebar(&mut self) {
         self.show_todo_sidebar = !self.show_todo_sidebar;
+        self.kv_store
+            .set("sidebar_collapsed", !self.show_todo_sidebar);
         if self.show_todo_sidebar {
             self.ensure_todo_selection();
             self.status = "TODO sidebar shown".to_string();
@@ -1882,11 +2210,18 @@ impl App {
         } else {
             0
         };
-        let session_header_height = if self.session_stack.is_in_child() { 1 } else { 0 };
-        
+        let session_header_height = if self.session_stack.is_in_child() {
+            1
+        } else {
+            0
+        };
+
         let has_sidebar_content = !self.todos.is_empty()
             || !self.modified_files.is_empty()
-            || self.current_model.is_some();
+            || self.current_model.is_some()
+            || self.session_cost > 0.0
+            || self.context_tokens > 0
+            || !self.connected_lsps.is_empty();
         let show_sidebar = if area.width > 120 {
             self.show_todo_sidebar
         } else {
@@ -1933,11 +2268,19 @@ impl App {
         self.handle_mouse_click(column, row, chat_area, sidebar_area);
     }
 
-    fn handle_mouse_click(&mut self, column: u16, row: u16, main_area: Rect, sidebar_area: Option<Rect>) {
+    fn handle_mouse_click(
+        &mut self,
+        column: u16,
+        row: u16,
+        main_area: Rect,
+        sidebar_area: Option<Rect>,
+    ) {
         // Check if click is in sidebar
         if let Some(sidebar) = sidebar_area {
-            if column >= sidebar.x && column < sidebar.x + sidebar.width
-                && row >= sidebar.y && row < sidebar.y + sidebar.height
+            if column >= sidebar.x
+                && column < sidebar.x + sidebar.width
+                && row >= sidebar.y
+                && row < sidebar.y + sidebar.height
             {
                 self.handle_sidebar_click(row, sidebar);
                 return;
@@ -1945,8 +2288,10 @@ impl App {
         }
 
         // Check if click is in chat area
-        if column >= main_area.x && column < main_area.x + main_area.width
-            && row >= main_area.y && row < main_area.y + main_area.height
+        if column >= main_area.x
+            && column < main_area.x + main_area.width
+            && row >= main_area.y
+            && row < main_area.y + main_area.height
         {
             self.handle_chat_click(row, main_area);
         }
@@ -1956,27 +2301,34 @@ impl App {
         // Chat area has borders, so inner area starts at y+1
         let inner_y = chat_area.y + 1;
         let inner_height = chat_area.height.saturating_sub(2);
-        
+
         if row < inner_y || row >= inner_y + inner_height {
             return;
         }
 
         // Calculate relative row within the chat viewport
         let relative_row = (row - inner_y) as usize;
-        
+
         // Calculate absolute line in the rendered content
         let absolute_line = self.chat_view.scroll_offset + relative_row;
-        
+
         if let Some(message_index) = self.chat_view.get_message_index_at_line(absolute_line) {
-            let has_tool_output = self.chat_view.messages.get(message_index)
+            let has_tool_output = self
+                .chat_view
+                .messages
+                .get(message_index)
                 .map(|msg| msg.tool_output.is_some())
                 .unwrap_or(false);
-            
+
             if has_tool_output {
                 if let Some(msg) = self.chat_view.messages.get_mut(message_index) {
                     if let Some(tool_output) = msg.tool_output.as_mut() {
                         tool_output.collapsed = !tool_output.collapsed;
-                        let action = if tool_output.collapsed { "Collapsed" } else { "Expanded" };
+                        let action = if tool_output.collapsed {
+                            "Collapsed"
+                        } else {
+                            "Expanded"
+                        };
                         let tool_name = tool_output.tool_name.clone();
                         self.chat_view.invalidate_render_cache();
                         self.status = format!("{} {} output", action, tool_name);
@@ -1989,67 +2341,86 @@ impl App {
     fn handle_sidebar_click(&mut self, row: u16, sidebar_area: Rect) {
         // Sidebar has borders, inner area starts at y+1
         let inner_y = sidebar_area.y + 1;
-        
+
         if row < inner_y {
             return;
         }
 
         let relative_row = (row - inner_y) as usize;
-        
+
         // Calculate which section header was clicked based on row position
         // We need to track the current line as we build the sidebar
         let mut current_line = 0;
-        
+
         // Section 1: Context header at line 0
         if relative_row == current_line {
             self.sidebar_sections[0] = !self.sidebar_sections[0];
-            let state = if self.sidebar_sections[0] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[0] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Context section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip Context content if expanded
         if self.sidebar_sections[0] {
-            let context_lines = 3;
+            let context_lines = 6;
             let session_lines = usize::from(self.session_id.is_some());
-            let token_lines = usize::from(self.status.contains("tokens"));
-            current_line += context_lines + session_lines + token_lines + 1; // +1 for blank line
+            current_line += context_lines + session_lines + 1; // +1 for blank line
         }
-        
+
         // Section 2: MCP header
         if relative_row == current_line {
             self.sidebar_sections[1] = !self.sidebar_sections[1];
-            let state = if self.sidebar_sections[1] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[1] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("MCP section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip MCP content if expanded
         if self.sidebar_sections[1] {
             current_line += 2; // "No MCP servers" + blank line
         }
-        
+
         // Section 3: Todos header
         if relative_row == current_line {
             self.sidebar_sections[2] = !self.sidebar_sections[2];
-            let state = if self.sidebar_sections[2] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[2] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Todos section {}", state);
             return;
         }
         current_line += 1;
-        
+
         // Skip Todos content if expanded
         if self.sidebar_sections[2] {
-            let todo_lines = if self.todos.is_empty() { 1 } else { self.todos.len() };
+            let todo_lines = if self.todos.is_empty() {
+                1
+            } else {
+                self.todos.len()
+            };
             current_line += todo_lines + 1; // +1 for blank line
         }
-        
+
         // Section 4: Files header
         if relative_row == current_line {
             self.sidebar_sections[3] = !self.sidebar_sections[3];
-            let state = if self.sidebar_sections[3] { "expanded" } else { "collapsed" };
+            let state = if self.sidebar_sections[3] {
+                "expanded"
+            } else {
+                "collapsed"
+            };
             self.status = format!("Files section {}", state);
         }
     }
@@ -2132,6 +2503,21 @@ impl App {
                     self.toggle_todo_sidebar();
                     return KeyAction::None;
                 }
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.toggle_todos,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
+                    self.sidebar_sections[2] = !self.sidebar_sections[2];
+                    let state = if self.sidebar_sections[2] {
+                        "expanded"
+                    } else {
+                        "collapsed"
+                    };
+                    self.status = format!("Todos section {}", state);
+                    return KeyAction::None;
+                }
                 KeyCode::Char('g') => {
                     if self.approval_overlay.is_active() {
                         self.status = "Finish approval first before opening editor".to_string();
@@ -2166,6 +2552,48 @@ impl App {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        if key.code == KeyCode::F(2) {
+            self.cycle_recent_model();
+            self.pending_g = false;
+            return KeyAction::None;
+        }
+
+        if !self.input_focused {
+            match key.code {
+                KeyCode::Char('g') if key.modifiers.is_empty() => {
+                    if self.pending_g {
+                        self.chat_view.scroll_to_top();
+                        self.status = "Jumped to first message".to_string();
+                        self.pending_g = false;
+                    } else {
+                        self.pending_g = true;
+                    }
+                    return KeyAction::None;
+                }
+                KeyCode::Char('G') => {
+                    self.chat_view.scroll_to_bottom();
+                    self.status = "Jumped to last message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                KeyCode::Char('n') => {
+                    self.chat_view.scroll_to_next_user_message();
+                    self.status = "Moved to next message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                KeyCode::Char('p') | KeyCode::Char('N') => {
+                    self.chat_view.scroll_to_prev_user_message();
+                    self.status = "Moved to previous message".to_string();
+                    self.pending_g = false;
+                    return KeyAction::None;
+                }
+                _ => {
+                    self.pending_g = false;
+                }
             }
         }
 
@@ -2220,6 +2648,7 @@ impl App {
                         .unwrap_or(self.input.len());
                     self.input.insert(byte_pos, c);
                     self.cursor_pos += 1;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {
                     if self.cursor_pos > 0 {
@@ -2246,6 +2675,7 @@ impl App {
                             .unwrap_or(self.input.len());
                         self.input.replace_range(start_byte..end_byte, "");
                         self.cursor_pos = start;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Backspace => {
@@ -2258,6 +2688,7 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(0);
                         self.input.remove(byte_pos);
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Delete => {
@@ -2269,6 +2700,7 @@ impl App {
                             .map(|(i, _)| i)
                             .unwrap_or(self.input.len());
                         self.input.remove(byte_pos);
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -2282,11 +2714,13 @@ impl App {
                             pos -= 1;
                         }
                         self.cursor_pos = pos;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Left => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
@@ -2300,20 +2734,38 @@ impl App {
                             pos += 1;
                         }
                         self.cursor_pos = pos;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Right => {
                     if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
+                        self.refresh_autocomplete();
                     }
                 }
                 KeyCode::Home => {
                     self.cursor_pos = 0;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::End => {
                     self.cursor_pos = char_count;
+                    self.refresh_autocomplete();
                 }
                 KeyCode::Enter => {
+                    if self.autocomplete_state.is_active()
+                        && self.autocomplete_state.mode == AutocompleteMode::Slash
+                        && self.input.starts_with('/')
+                        && !self.input.chars().take(self.cursor_pos).any(|c| c.is_whitespace())
+                    {
+                        if let Some(command) = self.autocomplete_state.selected_value() {
+                            self.input.clear();
+                            self.cursor_pos = 0;
+                            self.autocomplete_state.clear();
+                            self.submit_input(command);
+                            return KeyAction::None;
+                        }
+                    }
+
                     if self.input.is_empty() && self.pending_images.is_empty() {
                         let selected_task_id = self
                             .chat_view
@@ -2330,9 +2782,11 @@ impl App {
                         if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                             self.status = status;
                             if let Some(task_id) = selected_task_id {
-                                if let Some(session_id) = self.subagent_task_sessions.get(&task_id) {
+                                if let Some(session_id) = self.subagent_task_sessions.get(&task_id)
+                                {
                                     if self.session_stack.push_session(session_id) {
-                                        self.status = format!("Entered subagent session {}", session_id);
+                                        self.status =
+                                            format!("Entered subagent session {}", session_id);
                                     }
                                 }
                             }
@@ -2343,6 +2797,7 @@ impl App {
                     if !self.input.trim().is_empty() || !self.pending_images.is_empty() {
                         let input = std::mem::take(&mut self.input);
                         self.cursor_pos = 0;
+                        self.autocomplete_state.clear();
 
                         if self.is_agent_busy() {
                             if key.modifiers.contains(KeyModifiers::ALT) {
@@ -2358,22 +2813,31 @@ impl App {
                     }
                 }
                 KeyCode::Tab => {
-                    if let Some(status) = self.chat_view.toggle_selected_tool_output() {
+                    if self.autocomplete_state.is_active() {
+                        let _ = self.apply_autocomplete_selection();
+                    } else if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                         self.status = status;
                     }
                 }
                 KeyCode::Esc => {
                     if self.session_stack.is_in_child() {
                         self.session_stack.pop_session();
+                    } else if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.clear();
                     } else if self.history_index.is_some() {
                         self.history_index = None;
                         self.input = self.history_stash.clone();
                         self.cursor_pos = self.input.chars().count();
+                        self.refresh_autocomplete();
                     } else {
                         self.should_quit = true;
                     }
                 }
                 KeyCode::Up => {
+                    if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.prev();
+                        return KeyAction::None;
+                    }
                     if !self.input.is_empty() && self.history_index.is_none() {
                         let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
@@ -2388,16 +2852,22 @@ impl App {
                             self.history_index = Some(idx);
                             self.input = self.prompt_history[idx].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     } else if let Some(idx) = self.history_index {
                         if idx > 0 {
                             self.history_index = Some(idx - 1);
                             self.input = self.prompt_history[idx - 1].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     }
                 }
                 KeyCode::Down => {
+                    if self.autocomplete_state.is_active() {
+                        self.autocomplete_state.next();
+                        return KeyAction::None;
+                    }
                     if !self.input.is_empty() && self.history_index.is_none() {
                         let inner_width = 80;
                         if self.input.contains('\n') || self.input.chars().count() > inner_width {
@@ -2410,10 +2880,12 @@ impl App {
                             self.history_index = Some(idx + 1);
                             self.input = self.prompt_history[idx + 1].clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         } else {
                             self.history_index = None;
                             self.input = self.history_stash.clone();
                             self.cursor_pos = self.input.chars().count();
+                            self.refresh_autocomplete();
                         }
                     }
                 }
@@ -2433,7 +2905,12 @@ impl App {
                 {
                     self.chat_view.scroll_down();
                 }
-                _ if KeybindConfig::matches_any(&self.keybinds.page_up, key.code, key.modifiers) => {
+                _ if KeybindConfig::matches_any(
+                    &self.keybinds.page_up,
+                    key.code,
+                    key.modifiers,
+                ) =>
+                {
                     self.chat_view.page_up();
                 }
                 _ if KeybindConfig::matches_any(
@@ -2638,6 +3115,12 @@ impl App {
     }
 
     fn submit_input(&mut self, input: String) {
+        if input.starts_with('!') {
+            let command = input.trim_start_matches('!').trim().to_string();
+            self.run_shell_escape(command);
+            return;
+        }
+
         if input.starts_with('/') {
             self.handle_slash_command(&input);
             return;
@@ -2653,6 +3136,7 @@ impl App {
 
         let pending_images = std::mem::take(&mut self.pending_images);
         let has_images = !pending_images.is_empty();
+        self.redo_stack.clear();
 
         let display_message = Self::format_user_display(&input, &pending_images);
         self.chat_view.push_message("user", display_message, None);
@@ -2698,6 +3182,62 @@ impl App {
             self.set_agent_state(AgentState::Thinking);
         } else {
             self.status = "No agent connected".to_string();
+        }
+    }
+
+    fn run_shell_escape(&mut self, command: String) {
+        if command.is_empty() {
+            self.chat_view
+                .push_message("system", "Usage: !<shell command>".to_string(), None);
+            return;
+        }
+
+        self.frecency_store
+            .touch(format!("command:!{}", command.clone()));
+        self.kv_store
+            .set("frecency_store", self.frecency_store.clone());
+
+        self.chat_view
+            .push_message("user", format!("!{}", command), None);
+        let output = Command::new("bash").args(["-lc", &command]).output();
+        match output {
+            Ok(result) => {
+                let mut rendered = String::new();
+                let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&result.stderr).trim().to_string();
+                if !stdout.is_empty() {
+                    rendered.push_str(&stdout);
+                }
+                if !stderr.is_empty() {
+                    if !rendered.is_empty() {
+                        rendered.push_str("\n\n");
+                    }
+                    rendered.push_str(&format!("stderr:\n{}", stderr));
+                }
+                if rendered.is_empty() {
+                    rendered = "(no output)".to_string();
+                }
+                let code = result.status.code().unwrap_or(-1);
+                self.chat_view.push_tool_message(
+                    if result.status.success() { "tool" } else { "error" },
+                    format!("shell (exit {})", code),
+                    rendered,
+                    true,
+                    None,
+                );
+                self.status = if result.status.success() {
+                    format!("Shell command finished: {}", code)
+                } else {
+                    format!("Shell command failed: {}", code)
+                };
+            }
+            Err(err) => {
+                self.chat_view.push_message(
+                    "error",
+                    format!("Failed to execute shell command: {}", err),
+                    None,
+                );
+            }
         }
     }
 
@@ -2950,14 +3490,18 @@ impl App {
         };
         let target_description = target.description();
 
-        let (content, skipped_binary) = match collect_review_content(&target, &self.working_directory) {
-            Ok(content) => content,
-            Err(err) => {
-                self.chat_view
-                    .push_message("error", format!("Failed to gather review input: {}", err), None);
-                return;
-            }
-        };
+        let (content, skipped_binary) =
+            match collect_review_content(&target, &self.working_directory) {
+                Ok(content) => content,
+                Err(err) => {
+                    self.chat_view.push_message(
+                        "error",
+                        format!("Failed to gather review input: {}", err),
+                        None,
+                    );
+                    return;
+                }
+            };
 
         if content.is_empty() {
             let suffix = if skipped_binary.is_empty() {
@@ -2965,11 +3509,11 @@ impl App {
             } else {
                 format!(" Skipped binary files: {}.", skipped_binary.join(", "))
             };
-                self.chat_view.push_message(
-                    "system",
-                    format!("No diff found for {}.{}", target_description, suffix),
-                    None,
-                );
+            self.chat_view.push_message(
+                "system",
+                format!("No diff found for {}.{}", target_description, suffix),
+                None,
+            );
             return;
         }
 
@@ -3004,6 +3548,148 @@ impl App {
         }
     }
 
+    fn undo_last_message_pair(&mut self) {
+        let assistant_index = self
+            .chat_view
+            .messages
+            .iter()
+            .rposition(|message| message.role == "assistant");
+        let Some(assistant_index) = assistant_index else {
+            self.status = "Nothing to undo".to_string();
+            return;
+        };
+
+        let user_index = self.chat_view.messages[..assistant_index]
+            .iter()
+            .rposition(|message| message.role == "user");
+        let Some(user_index) = user_index else {
+            self.status = "Nothing to undo".to_string();
+            return;
+        };
+
+        let removed: Vec<ChatMessage> = self
+            .chat_view
+            .messages
+            .drain(user_index..=assistant_index)
+            .collect();
+        self.chat_view.invalidate_render_cache();
+        self.chat_view.scroll_to_bottom();
+        self.redo_stack.push(removed);
+        self.status = format!(
+            "Undid message pair ({} to redo)",
+            self.redo_stack.len()
+        );
+    }
+
+    fn redo_last_message_pair(&mut self) {
+        let Some(restored) = self.redo_stack.pop() else {
+            self.status = "Nothing to redo".to_string();
+            return;
+        };
+
+        self.chat_view.messages.extend(restored);
+        self.chat_view.invalidate_render_cache();
+        self.chat_view.scroll_to_bottom();
+        self.status = format!(
+            "Restored message pair ({} remaining to redo)",
+            self.redo_stack.len()
+        );
+    }
+
+    fn copy_last_assistant_message(&mut self) {
+        let Some(message) = self
+            .chat_view
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == "assistant")
+        else {
+            self.status = "No assistant message to copy".to_string();
+            self.toast_manager
+                .show("No assistant message".to_string(), ToastVariant::Warning, 1800);
+            return;
+        };
+
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(message.content.clone())) {
+            Ok(()) => {
+                self.status = "Copied last assistant message".to_string();
+                self.toast_manager.show(
+                    "Copied last assistant message".to_string(),
+                    ToastVariant::Success,
+                    1800,
+                );
+            }
+            Err(error) => {
+                self.status = format!("Clipboard error: {}", error);
+                self.toast_manager
+                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+            }
+        }
+    }
+
+    fn copy_session_transcript(&mut self) {
+        if self.chat_view.messages.is_empty() {
+            self.status = "No messages to copy".to_string();
+            return;
+        }
+
+        let transcript = self
+            .chat_view
+            .messages
+            .iter()
+            .map(|message| format!("{}: {}", message.role, message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(transcript)) {
+            Ok(()) => {
+                self.status = "Copied session transcript".to_string();
+                self.toast_manager.show(
+                    "Copied transcript".to_string(),
+                    ToastVariant::Success,
+                    1800,
+                );
+            }
+            Err(error) => {
+                self.status = format!("Clipboard error: {}", error);
+                self.toast_manager
+                    .show(format!("Clipboard error: {}", error), ToastVariant::Error, 2800);
+            }
+        }
+    }
+
+    fn export_session_markdown(&mut self) {
+        if self.chat_view.messages.is_empty() {
+            self.status = "No messages to export".to_string();
+            return;
+        }
+
+        let markdown = render_session_markdown(
+            &self.chat_view.messages,
+            self.session_id.as_deref(),
+            self.current_model.as_deref(),
+        );
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        let filename = format!("session-{}.md", timestamp);
+        let path = PathBuf::from(&self.working_directory).join(&filename);
+
+        match std::fs::write(&path, markdown) {
+            Ok(()) => {
+                self.status = format!("Exported {}", filename);
+                self.toast_manager
+                    .show(format!("Exported {}", filename), ToastVariant::Success, 2200);
+            }
+            Err(error) => {
+                self.status = format!("Export failed: {}", error);
+                self.toast_manager
+                    .show(format!("Export failed: {}", error), ToastVariant::Error, 3200);
+            }
+        }
+    }
+
     fn handle_slash_command(&mut self, input: &str) {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let command = parts.first().copied().unwrap_or("");
@@ -3015,7 +3701,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.chat_view.messages.push(ChatMessage::new(
                     "system",
-                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
+                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /undo               - Undo last user+assistant pair\n  /redo               - Restore last undone pair\n  /copy               - Copy full transcript to clipboard\n  /copy-last          - Copy last assistant message\n  /export             - Export session as markdown\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
                 ));
             }
             "/auth" | "/status" => {
@@ -3034,7 +3720,23 @@ impl App {
                 self.chat_view.messages.clear();
                 self.pending_images.clear();
                 self.message_queue.clear();
+                self.redo_stack.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/undo" => {
+                self.undo_last_message_pair();
+            }
+            "/redo" => {
+                self.redo_last_message_pair();
+            }
+            "/copy-last" => {
+                self.copy_last_assistant_message();
+            }
+            "/copy" => {
+                self.copy_session_transcript();
+            }
+            "/export" => {
+                self.export_session_markdown();
             }
             "/image" => {
                 let path_arg = input[command.len()..].trim();
@@ -3123,10 +3825,7 @@ impl App {
                 Err(err) => {
                     self.chat_view.messages.push(ChatMessage::new(
                         "error",
-                        format!(
-                            "{}\nUsage: /share [--public] [--description <text>]",
-                            err
-                        ),
+                        format!("{}\nUsage: /share [--public] [--description <text>]", err),
                     ));
                 }
             },
@@ -3184,10 +3883,13 @@ impl App {
                             ));
                         }
                         Err(err) => {
-                            self.chat_view.messages.push(ChatMessage::new("system", err));
+                            self.chat_view
+                                .messages
+                                .push(ChatMessage::new("system", err));
                         }
                     }
                 } else {
+                    let (_, warnings) = Theme::load_external_themes();
                     self.chat_view.messages.push(ChatMessage::new(
                         "system",
                         format!(
@@ -3196,6 +3898,12 @@ impl App {
                             Theme::available_names().join(", ")
                         ),
                     ));
+                    for warning in warnings {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Theme warning: {}", warning),
+                        ));
+                    }
                 }
             }
             _ => {
@@ -3331,6 +4039,13 @@ impl App {
                 self.status = format!("Turn {}", turn_number);
             }
             ThreadEvent::TurnCompleted { turn_number, usage } => {
+                self.context_tokens =
+                    (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
+                if let Some(model) = self.current_model.clone() {
+                    self.max_context_tokens = Self::infer_max_context_tokens(&model);
+                    self.session_cost +=
+                        Self::estimate_turn_cost(&model, usage.input_tokens, usage.output_tokens);
+                }
                 self.status = format!(
                     "Turn {} complete ({} in / {} out tokens)",
                     turn_number, usage.input_tokens, usage.output_tokens
@@ -3410,7 +4125,8 @@ impl App {
                         .tool_call_names
                         .remove(&tool_call_id)
                         .unwrap_or_else(|| "tool".to_string());
-                    let subagent_task_id = if matches!(tool_name.as_str(), "delegate_task" | "Task") {
+                    let subagent_task_id = if matches!(tool_name.as_str(), "delegate_task" | "Task")
+                    {
                         extract_task_id(&output)
                     } else {
                         None
@@ -3453,6 +4169,7 @@ impl App {
             },
             ThreadEvent::ThreadCompleted { usage } => {
                 self.set_agent_state(AgentState::Complete);
+                self.context_tokens = (usage.input_tokens.saturating_add(usage.output_tokens)) as usize;
                 self.status = format!(
                     "Complete (total: {} in / {} out tokens)",
                     usage.input_tokens, usage.output_tokens
@@ -3541,8 +4258,11 @@ impl App {
                 description,
                 agent: ref agent_name,
             } => {
-                self.task_registry
-                    .on_spawned(task_id.clone(), description.clone(), agent_name.clone());
+                self.task_registry.on_spawned(
+                    task_id.clone(),
+                    description.clone(),
+                    agent_name.clone(),
+                );
                 self.chat_view.push_message(
                     "system",
                     format!("Background task started: {} ({})", description, task_id),
@@ -3567,8 +4287,11 @@ impl App {
             } => {
                 self.task_registry.on_completed(&task_id, success);
                 let status = if success { "completed" } else { "failed" };
-                self.chat_view
-                    .push_message("system", format!("Background task {}: {}", task_id, status), None);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Background task {}: {}", task_id, status),
+                    None,
+                );
             }
             ThreadEvent::SubagentStarted {
                 task_id,
@@ -3613,9 +4336,16 @@ impl App {
                 );
             }
             ThreadEvent::ModelSwitched { model, provider } => {
+                let full_model = format!("{}/{}", provider, model);
+                self.current_model = Some(full_model.clone());
+                self.record_model_selection(&full_model);
+                self.max_context_tokens = Self::infer_max_context_tokens(&full_model);
                 self.status = format!("Model: {}/{}", provider, model);
-                self.chat_view
-                    .push_message("system", format!("Switched to {}/{}", provider, model), None);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Switched to {}/{}", provider, model),
+                    None,
+                );
             }
             ThreadEvent::TodoUpdated { todos } => {
                 let pending = todos
@@ -3659,6 +4389,8 @@ impl App {
 
     fn switch_model(&mut self, model_str: &str) {
         self.current_model = Some(model_str.to_string());
+        self.record_model_selection(model_str);
+        self.max_context_tokens = Self::infer_max_context_tokens(model_str);
         self.status = format!("Switching to {}...", model_str);
 
         match create_client_for_model(model_str) {
@@ -3705,6 +4437,65 @@ impl App {
                 );
             }
         }
+    }
+
+    fn cycle_recent_model(&mut self) {
+        if self.recent_models.is_empty() {
+            self.status = "No recent models available".to_string();
+            return;
+        }
+
+        let limit = self.recent_models.len().min(5);
+        let window = &self.recent_models[..limit];
+        let current = self.current_model.clone();
+        let next_idx = match current {
+            Some(current_model) => window
+                .iter()
+                .position(|model| model == &current_model)
+                .map(|idx| (idx + 1) % limit)
+                .unwrap_or(0),
+            None => 0,
+        };
+
+        if let Some(next_model) = window.get(next_idx).cloned() {
+            self.switch_model(&next_model);
+            self.toast_manager.show(
+                format!("Model: {}", next_model),
+                ToastVariant::Info,
+                2000,
+            );
+        }
+    }
+
+    fn infer_max_context_tokens(model: &str) -> usize {
+        let lower = model.to_ascii_lowercase();
+        if lower.contains("haiku") {
+            200_000
+        } else if lower.contains("sonnet") || lower.contains("opus") {
+            200_000
+        } else if lower.contains("gpt-4o") {
+            128_000
+        } else if lower.contains("gpt-5") {
+            200_000
+        } else {
+            128_000
+        }
+    }
+
+    fn record_model_selection(&mut self, model_str: &str) {
+        let model = model_str.to_string();
+        self.recent_models.retain(|entry| entry != &model);
+        self.recent_models.insert(0, model.clone());
+        if self.recent_models.len() > 20 {
+            self.recent_models.truncate(20);
+        }
+
+        self.frecency_store.touch(format!("model:{}", model));
+
+        self.kv_store
+            .set("recent_models", self.recent_models.clone());
+        self.kv_store
+            .set("frecency_store", self.frecency_store.clone());
     }
 
     fn share_session(&mut self, options: ShareCommandOptions) {
