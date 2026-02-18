@@ -1,6 +1,7 @@
 pub mod config;
 pub mod definitions;
 pub mod models;
+pub mod planning_pipeline;
 pub mod prompt_loader;
 pub mod prompts;
 pub mod registry;
@@ -12,6 +13,7 @@ pub use self::definitions::{
     get_agent_definitions, get_agent_definitions_with_config, AgentModelConfig,
 };
 pub use self::models::{ModelRegistry, ProviderModels};
+pub use self::planning_pipeline::{PlanningPipeline, PlanningStage};
 pub use self::prompt_loader::{PromptLoader, PromptSource};
 pub use self::prompts::{get_embedded_prompt, EMBEDDED_PROMPTS};
 pub use self::registry::{AgentFactory, AgentRegistry};
