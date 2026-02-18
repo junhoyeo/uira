@@ -148,6 +148,7 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         providers: expand_providers_settings(config.providers),
         keybinds: config.keybinds,
         sidebar: config.sidebar,
+        memory: config.memory,
     }
 }
 
