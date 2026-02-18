@@ -533,9 +533,21 @@ impl SessionManager {
             agent_config = agent_config.with_working_directory(path);
         }
 
+        // Build additional context: environment context + optional skill context.
+        let context_collector =
+            uira_orchestration::features::context_injector::ContextCollector::new();
+        uira_orchestration::features::context_injector::register_environment_context(
+            &context_collector,
+            "gateway-session-startup",
+        );
+        let env_context = context_collector
+            .consume("gateway-session-startup")
+            .merged;
+        let mut additional_context = vec![env_context];
         if let Some(skill_context) = &config.skill_context {
-            agent_config = agent_config.with_additional_context(vec![skill_context.clone()]);
+            additional_context.push(skill_context.clone());
         }
+        agent_config = agent_config.with_additional_context(additional_context);
 
         Ok(agent_config)
     }
