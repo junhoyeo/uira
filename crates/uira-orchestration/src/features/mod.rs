@@ -13,6 +13,7 @@ pub mod background_agent;
 pub mod builtin_skills;
 pub mod context_injector;
 pub mod delegation_categories;
+pub mod dynamic_prompt_builder;
 pub mod keywords;
 pub mod model_routing;
 pub mod notepad_wisdom;
@@ -23,5 +24,9 @@ pub mod uira_state;
 pub mod verification;
 
 pub use context_injector::{build_environment_context, register_environment_context};
+pub use dynamic_prompt_builder::{
+    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt, builtin_agent_metadata,
+    AvailableAgent, AvailableDelegationCategory, AvailableSkill,
+};
 pub use keywords::{KeywordDetector, KeywordPattern};
 pub use state_manager::{SessionState, StateManager};

@@ -16,11 +16,13 @@ pub use agents::{
     ToolRestrictionsRegistry,
     OrchestratorPersonality,
 };
-pub use features::{background_agent, model_routing, uira_state};
+pub use features::{background_agent, dynamic_prompt_builder, model_routing, uira_state};
 pub use features::{
-    build_environment_context, register_environment_context, KeywordDetector, KeywordPattern,
-    StateManager,
+    build_environment_context, register_environment_context,
+    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt, builtin_agent_metadata,
+    AvailableAgent, AvailableDelegationCategory, AvailableSkill,
 };
+pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use hooks::{
     create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
     HookRegistry, VerificationResult,
