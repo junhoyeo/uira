@@ -11,6 +11,7 @@ repository.workspace = true
 uira-core = { workspace = true }
 uira-comment-checker = { workspace = true }
 uira-mcp-client = { workspace = true }
+uira-memory = { workspace = true }
 uira-security = { workspace = true }
 
 # From hooks (now absorbed)

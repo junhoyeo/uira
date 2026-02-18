@@ -10,6 +10,7 @@ pub mod directory_readme_injector;
 pub mod empty_message_sanitizer;
 pub mod keyword_detector;
 pub mod learner;
+pub mod memory;
 pub mod non_interactive_env;
 pub mod notepad;
 pub mod orchestrator_constants;
@@ -78,6 +79,9 @@ pub use learner::{
     DetectionResult, LearnedSkill, LearnerConfig, LearnerHook, PatternType, PromotionCandidate,
     QualityValidation, SkillExtractionRequest, SkillFileCandidate, SkillInjectionResult,
     SkillMetadata, SkillScope, SkillSource, MAX_SKILL_CONTENT_LENGTH,
+};
+pub use memory::{
+    get_memory_system, init_memory_system, MemoryCaptureAdapter, MemoryRecallAdapter,
 };
 pub use non_interactive_env::{
     is_non_interactive, BeforeCommandResult, NonInteractiveEnvConfig, NonInteractiveEnvHook,

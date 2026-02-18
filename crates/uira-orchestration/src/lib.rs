@@ -23,8 +23,9 @@ pub use features::{
 };
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use hooks::{
-    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
-    HookRegistry, VerificationResult,
+    create_hook_event_adapter, default_hooks, get_memory_system, init_memory_system,
+    GoalCheckResult, GoalRunner, Hook, HookEventAdapter, HookRegistry, MemoryCaptureAdapter,
+    MemoryRecallAdapter, VerificationResult,
 };
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,
@@ -38,8 +39,9 @@ pub use tools::{
     register_builtins_without_todos, AgentExecutor, ApprovalCache, ApprovalCacheFile, ApprovalKey,
     AstToolProvider, BashTool, BoxedTool, CacheDecision, CachedApproval, CommentChecker,
     DelegationToolProvider, EditTool, FetchUrlTool, FunctionTool, GlobTool, GrepTool, LspClient,
-    LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider, PendingApproval, ReadTool,
-    RunOptions, TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, Tool, ToolCallRuntime,
-    ToolContent, ToolContext, ToolDefinition, ToolError, ToolFuture, ToolHandler, ToolInput,
-    ToolOrchestrator, ToolOutput, ToolProvider, ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
+    LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider, MemoryForgetTool,
+    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, PendingApproval, ReadTool, RunOptions,
+    TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, Tool, ToolCallRuntime, ToolContent,
+    ToolContext, ToolDefinition, ToolError, ToolFuture, ToolHandler, ToolInput, ToolOrchestrator,
+    ToolOutput, ToolProvider, ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
 };

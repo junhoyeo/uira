@@ -152,6 +152,8 @@ pub fn default_hooks() -> HookRegistry {
     registry.register(Arc::new(UltraworkHook::new()));
     registry.register(Arc::new(CommentCheckerHook::new()));
     registry.register(Arc::new(DelegationEnforcerHook::new()));
+    registry.register(Arc::new(MemoryRecallAdapter::new()));
+    registry.register(Arc::new(MemoryCaptureAdapter::new()));
 
     registry
 }
