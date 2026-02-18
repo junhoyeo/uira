@@ -2,8 +2,11 @@ use crate::agents::planning_pipeline::{PlanningPipeline, PlanningStage};
 use crate::tools::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static PLAN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Deserialize)]
 struct PlanningParams {
@@ -63,6 +66,12 @@ async fn handle_planning(input: ToolInput) -> Result<ToolOutput, ToolError> {
         message: format!("Failed to parse planning parameters: {}", e),
     })?;
 
+    if params.request.trim().is_empty() {
+        return Err(ToolError::InvalidInput {
+            message: "Planning request cannot be empty".to_string(),
+        });
+    }
+
     let mut temp_pipeline = PlanningPipeline::new(&params.request);
 
     let analyst_context = temp_pipeline.build_stage_prompt();
@@ -76,15 +85,17 @@ async fn handle_planning(input: ToolInput) -> Result<ToolOutput, ToolError> {
     let critic_context = temp_pipeline.build_stage_prompt();
     let critic_prompt = critic_stage_prompt(&params.request, &critic_context);
 
-    let plan_id = SystemTime::now()
+    let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| ToolError::ExecutionFailed {
             message: format!("Failed to create plan_id timestamp: {}", e),
         })?
         .as_millis();
+    let seq = PLAN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let plan_id = format!("{}-{}", ts, seq);
 
     let response = json!({
-        "plan_id": format!("{}", plan_id),
+        "plan_id": plan_id,
         "request": params.request,
         "stages": [
             {
@@ -113,7 +124,12 @@ async fn handle_planning(input: ToolInput) -> Result<ToolOutput, ToolError> {
             PlanningStage::Planning.agent_type(),
             PlanningStage::Review.agent_type()
         ],
-        "instructions": "Execute each stage in order. Pass the output of each stage as context to the next. The final plan is the critic-reviewed planner output."
+        "context_variables": {
+            "{{analyst_output}}": "Replace with the analyst stage's actual output before passing to planner/critic",
+            "{{planner_output}}": "Replace with the planner stage's actual output before passing to critic"
+        },
+        "substitution_contract": "Stage prompts contain {{analyst_output}} and {{planner_output}} template variables. Before executing each stage, replace these placeholders with the actual output from the referenced prior stage.",
+        "instructions": "Execute each stage in order. Pass the output of each stage as context to the next by substituting the template variables. The final plan is the critic-reviewed planner output."
     });
 
     let json_response = serde_json::to_string_pretty(&response).map_err(|e| ToolError::ExecutionFailed {

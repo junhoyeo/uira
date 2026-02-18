@@ -103,8 +103,13 @@ impl QuestionPrompt {
         frame.render_widget(List::new(items), sections[1]);
 
         let mut custom_line = self.custom_input.clone();
-        if self.custom_cursor <= custom_line.len() {
-            custom_line.insert(self.custom_cursor, '|');
+        if self.custom_cursor <= custom_line.chars().count() {
+            let byte_pos = custom_line
+                .char_indices()
+                .nth(self.custom_cursor)
+                .map(|(i, _)| i)
+                .unwrap_or(custom_line.len());
+            custom_line.insert(byte_pos, '|');
         }
         let custom_text = if self.custom_input.is_empty() {
             "custom answer...".to_string()
@@ -196,18 +201,31 @@ impl QuestionPrompt {
                 QuestionPromptAction::None
             }
             KeyCode::Right => {
-                self.custom_cursor = (self.custom_cursor + 1).min(self.custom_input.len());
+                self.custom_cursor =
+                    (self.custom_cursor + 1).min(self.custom_input.chars().count());
                 QuestionPromptAction::None
             }
             KeyCode::Backspace => {
                 if self.custom_cursor > 0 {
                     self.custom_cursor -= 1;
-                    self.custom_input.remove(self.custom_cursor);
+                    let byte_pos = self
+                        .custom_input
+                        .char_indices()
+                        .nth(self.custom_cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.custom_input.remove(byte_pos);
                 }
                 QuestionPromptAction::None
             }
             KeyCode::Char(c) => {
-                self.custom_input.insert(self.custom_cursor, c);
+                let byte_pos = self
+                    .custom_input
+                    .char_indices()
+                    .nth(self.custom_cursor)
+                    .map(|(i, _)| i)
+                    .unwrap_or(self.custom_input.len());
+                self.custom_input.insert(byte_pos, c);
                 self.custom_cursor += 1;
                 QuestionPromptAction::None
             }

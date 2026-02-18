@@ -1283,7 +1283,8 @@ impl App {
         kv_store.set("recent_models", recent_models.clone());
         kv_store.set("frecency_store", frecency_store.clone());
 
-        let current_personality = "balanced".to_string();
+        let current_personality = kv_store.get("personality", "balanced".to_string());
+        kv_store.set("personality", current_personality.clone());
         let available_personalities = vec![
             "balanced".to_string(),
             "autonomous".to_string(),
@@ -1864,14 +1865,14 @@ impl App {
             format!("{} Context", ctx_arrow),
             Style::default().fg(self.theme.accent),
         )));
+        lines.push(Line::from(Span::styled(
+            format!("  Agent: {}", self.current_personality),
+            Style::default().fg(self.theme.fg),
+        )));
         if self.sidebar_sections[0] {
             let model = self.current_model.as_deref().unwrap_or("not connected");
             lines.push(Line::from(Span::styled(
                 format!("  Model: {}", model),
-                Style::default().fg(self.theme.fg),
-            )));
-            lines.push(Line::from(Span::styled(
-                format!("  Agent: {}", self.current_personality),
                 Style::default().fg(self.theme.fg),
             )));
             lines.push(Line::from(Span::styled(
@@ -2562,6 +2563,7 @@ impl App {
         let len = self.available_personalities.len() as i32;
         let next_idx = ((current_idx as i32 + direction) % len + len) % len;
         self.current_personality = self.available_personalities[next_idx as usize].clone();
+        self.kv_store.set("personality", &self.current_personality);
         self.status = format!("Agent: {}", self.current_personality);
     }
 
@@ -2572,6 +2574,25 @@ impl App {
                     self.execute_palette_command(&id);
                 }
                 PaletteAction::Close | PaletteAction::None => {}
+            }
+            return KeyAction::None;
+        }
+
+        if let Some(ref mut question) = self.question_prompt {
+            match question.handle_key(key.code) {
+                QuestionPromptAction::Submit(values) => {
+                    if let Some(tx) = self.pending_question_tx.take() {
+                        let _ = tx.send(values);
+                    }
+                    self.question_prompt = None;
+                }
+                QuestionPromptAction::Cancel => {
+                    if let Some(tx) = self.pending_question_tx.take() {
+                        let _ = tx.send(Vec::new());
+                    }
+                    self.question_prompt = None;
+                }
+                QuestionPromptAction::None => {}
             }
             return KeyAction::None;
         }
@@ -2592,25 +2613,6 @@ impl App {
         if self.approval_overlay.handle_key(key.code) {
             if !self.approval_overlay.is_active() {
                 self.set_agent_state(AgentState::Thinking);
-            }
-            return KeyAction::None;
-        }
-
-        if let Some(ref mut question) = self.question_prompt {
-            match question.handle_key(key.code) {
-                QuestionPromptAction::Submit(values) => {
-                    if let Some(tx) = self.pending_question_tx.take() {
-                        let _ = tx.send(values);
-                    }
-                    self.question_prompt = None;
-                }
-                QuestionPromptAction::Cancel => {
-                    if let Some(tx) = self.pending_question_tx.take() {
-                        let _ = tx.send(Vec::new());
-                    }
-                    self.question_prompt = None;
-                }
-                QuestionPromptAction::None => {}
             }
             return KeyAction::None;
         }
@@ -2723,58 +2725,6 @@ impl App {
             self.cycle_recent_model();
             self.pending_g = false;
             return KeyAction::None;
-        }
-
-        if !self.input_focused {
-            match key.code {
-                KeyCode::Tab
-                    if !self.autocomplete_state.is_active()
-                        && !self.approval_overlay.is_active()
-                        && !self.dialog_stack.is_active() =>
-                {
-                    self.cycle_agent(1);
-                    return KeyAction::None;
-                }
-                KeyCode::BackTab
-                    if !self.autocomplete_state.is_active()
-                        && !self.approval_overlay.is_active()
-                        && !self.dialog_stack.is_active() =>
-                {
-                    self.cycle_agent(-1);
-                    return KeyAction::None;
-                }
-                KeyCode::Char('g') if key.modifiers.is_empty() => {
-                    if self.pending_g {
-                        self.chat_view.scroll_to_top();
-                        self.status = "Jumped to first message".to_string();
-                        self.pending_g = false;
-                    } else {
-                        self.pending_g = true;
-                    }
-                    return KeyAction::None;
-                }
-                KeyCode::Char('G') => {
-                    self.chat_view.scroll_to_bottom();
-                    self.status = "Jumped to last message".to_string();
-                    self.pending_g = false;
-                    return KeyAction::None;
-                }
-                KeyCode::Char('n') => {
-                    self.chat_view.scroll_to_next_user_message();
-                    self.status = "Moved to next message".to_string();
-                    self.pending_g = false;
-                    return KeyAction::None;
-                }
-                KeyCode::Char('p') | KeyCode::Char('N') => {
-                    self.chat_view.scroll_to_prev_user_message();
-                    self.status = "Moved to previous message".to_string();
-                    self.pending_g = false;
-                    return KeyAction::None;
-                }
-                _ => {
-                    self.pending_g = false;
-                }
-            }
         }
 
         // Input handling (cursor_pos is char index, not byte index for UTF-8 safety)
@@ -2995,8 +2945,21 @@ impl App {
                 KeyCode::Tab => {
                     if self.autocomplete_state.is_active() {
                         let _ = self.apply_autocomplete_selection();
+                    } else if self.input.is_empty()
+                        && !self.approval_overlay.is_active()
+                        && !self.dialog_stack.is_active()
+                    {
+                        self.cycle_agent(1);
                     } else if let Some(status) = self.chat_view.toggle_selected_tool_output() {
                         self.status = status;
+                    }
+                }
+                KeyCode::BackTab => {
+                    if self.input.is_empty()
+                        && !self.approval_overlay.is_active()
+                        && !self.dialog_stack.is_active()
+                    {
+                        self.cycle_agent(-1);
                     }
                 }
                 KeyCode::Esc => {
@@ -3985,7 +3948,18 @@ impl App {
             }
             "/timeline" => {
                 let event_tx = self.event_tx.clone();
-                let dialog = dialog_timeline::dialog_timeline(Vec::new(), move |index| {
+                let entries: Vec<crate::views::dialog_timeline::TimelineEntry> = self
+                    .chat_view
+                    .messages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| m.role == "user")
+                    .map(|(i, m)| {
+                        let summary = m.content.chars().take(60).collect::<String>();
+                        crate::views::dialog_timeline::TimelineEntry { index: i, summary }
+                    })
+                    .collect();
+                let dialog = dialog_timeline::dialog_timeline(entries, move |index| {
                     let _ = event_tx.try_send(AppEvent::ScrollToMessage(index));
                 });
                 self.dialog_stack.show(Box::new(dialog));
@@ -4370,18 +4344,26 @@ impl App {
                 multi_select,
                 response_tx,
             } => {
+                if let Some(old_tx) = self.pending_question_tx.take() {
+                    let _ = old_tx.send(Vec::new());
+                }
                 let prompt = QuestionPrompt::new(question, options, multi_select);
                 self.pending_question_tx = Some(response_tx);
                 self.question_prompt = Some(prompt);
             }
             AppEvent::AgentChanged(personality) => {
-                self.current_personality = personality.clone();
-                self.status = format!("Agent: {}", personality);
-                self.chat_view.push_message(
-                    "system",
-                    format!("Switched to {} agent", personality),
-                    None,
-                );
+                if self.available_personalities.contains(&personality) {
+                    self.current_personality = personality.clone();
+                    self.kv_store.set("personality", &personality);
+                    self.status = format!("Agent: {}", personality);
+                    self.chat_view.push_message(
+                        "system",
+                        format!("Switched to {} agent", personality),
+                        None,
+                    );
+                } else {
+                    self.status = format!("Unknown agent: {}", personality);
+                }
             }
             AppEvent::ThemeChangeRequested(theme_name) => match self.set_theme_by_name(&theme_name)
             {
@@ -4424,13 +4406,10 @@ impl App {
                         .join("\n\n"),
                     _ => markdown,
                 };
+                let preview: String = export_text.chars().take(500).collect();
                 self.chat_view.push_message(
                     "system",
-                    format!(
-                        "Export ({}):\n{}",
-                        format,
-                        &export_text[..export_text.len().min(500)]
-                    ),
+                    format!("Export ({}):\n{}", format, &preview),
                     None,
                 );
                 self.status = format!("Exported as {}", format);
@@ -4448,6 +4427,7 @@ impl App {
                 if let Some(&offset) = offsets.get(index) {
                     self.chat_view.scroll_offset = offset;
                     self.chat_view.user_scrolled = true;
+                    self.chat_view.auto_follow = false;
                     self.status = format!("Jumped to message #{}", index);
                 }
             }
