@@ -21,6 +21,7 @@ pub use stack::DialogStack;
 pub enum DialogResult {
     None,
     Close,
+    #[allow(dead_code)]
     Replace(Box<dyn DialogContent>),
 }
 

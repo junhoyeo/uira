@@ -40,6 +40,7 @@ impl DialogStack {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.stack.clear();
         self.top_rect = None;
@@ -49,6 +50,7 @@ impl DialogStack {
         !self.stack.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.stack.len()
     }

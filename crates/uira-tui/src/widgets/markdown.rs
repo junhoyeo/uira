@@ -95,6 +95,7 @@ struct CodeBlockState {
     content: String,
 }
 
+#[cfg(test)]
 pub fn render_markdown(text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
     render_markdown_with_options(text, width, theme, MarkdownRenderOptions::default())
 }
