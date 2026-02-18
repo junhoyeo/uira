@@ -16,6 +16,7 @@ pub fn centered_rect(viewport: Rect, width: u16, height: u16) -> Rect {
 }
 
 pub fn render_backdrop(frame: &mut Frame, viewport: Rect) {
+    frame.render_widget(Clear, viewport);
     let backdrop = Block::default().style(Style::default().bg(Color::Rgb(0, 0, 0)));
     frame.render_widget(backdrop, viewport);
 }
