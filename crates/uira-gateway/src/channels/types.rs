@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum ChannelType {
     Telegram,
     Slack,
+    Discord,
 }
 
 impl std::fmt::Display for ChannelType {
@@ -16,6 +17,7 @@ impl std::fmt::Display for ChannelType {
         match self {
             ChannelType::Telegram => write!(f, "telegram"),
             ChannelType::Slack => write!(f, "slack"),
+            ChannelType::Discord => write!(f, "discord"),
         }
     }
 }
