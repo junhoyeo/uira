@@ -420,6 +420,7 @@ impl ChatView {
                             .add_modifier(Modifier::SLOW_BLINK),
                     ));
                 }
+                let lines = self.add_streaming_border(lines);
                 self.line_message_index
                     .extend(std::iter::repeat_n(None, lines.len()));
                 self.rendered_lines.push(lines);
@@ -716,26 +717,49 @@ impl ChatView {
         } else {
             Style::default()
         };
+        let target_width = self.last_render_width as usize;
 
         lines
             .into_iter()
             .map(|line| {
-                let mut spans = Vec::with_capacity(line.spans.len() + 1);
+                let mut spans = Vec::with_capacity(line.spans.len() + 2);
                 let border_span = if is_user {
                     Span::styled("┃ ", border_style.bg(self.theme.bg_element))
                 } else {
                     Span::styled("┃ ", border_style)
                 };
                 spans.push(border_span);
+
+                let content_len: usize = line.spans.iter().map(|s| s.content.len()).sum();
+                let border_len = 2;
+
                 if is_user {
                     spans.extend(
                         line.spans
                             .into_iter()
                             .map(|span| Span::styled(span.content, span.style.patch(bg_style))),
                     );
+                    if target_width > border_len + content_len {
+                        let padding = " ".repeat(target_width - border_len - content_len);
+                        spans.push(Span::styled(padding, bg_style));
+                    }
                 } else {
                     spans.extend(line.spans);
                 }
+                Line::from(spans)
+            })
+            .collect()
+    }
+
+    fn add_streaming_border(&self, lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+        let border_style = Style::default().fg(self.theme.accent);
+
+        lines
+            .into_iter()
+            .map(|line| {
+                let mut spans = Vec::with_capacity(line.spans.len() + 1);
+                spans.push(Span::styled("┃ ", border_style));
+                spans.extend(line.spans);
                 Line::from(spans)
             })
             .collect()
