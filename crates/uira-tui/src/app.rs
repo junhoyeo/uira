@@ -3801,38 +3801,6 @@ impl App {
         }
     }
 
-    fn export_session_markdown(&mut self) {
-        if self.chat_view.messages.is_empty() {
-            self.status = "No messages to export".to_string();
-            return;
-        }
-
-        let markdown = render_session_markdown(
-            &self.chat_view.messages,
-            self.session_id.as_deref(),
-            self.current_model.as_deref(),
-        );
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let filename = format!("session-{}.md", timestamp);
-        let path = PathBuf::from(&self.working_directory).join(&filename);
-
-        match std::fs::write(&path, markdown) {
-            Ok(()) => {
-                self.status = format!("Exported {}", filename);
-                self.toast_manager
-                    .show(format!("Exported {}", filename), ToastVariant::Success, 2200);
-            }
-            Err(error) => {
-                self.status = format!("Export failed: {}", error);
-                self.toast_manager
-                    .show(format!("Export failed: {}", error), ToastVariant::Error, 3200);
-            }
-        }
-    }
-
     fn handle_slash_command(&mut self, input: &str) {
         let parts: Vec<&str> = input.split_whitespace().collect();
         let command = parts.first().copied().unwrap_or("");
@@ -3842,10 +3810,40 @@ impl App {
                 self.should_quit = true;
             }
             "/help" | "/h" | "/?" => {
-                self.chat_view.messages.push(ChatMessage::new(
-                    "system",
-                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /agents             - Open agent dialog\n  /sessions           - Open sessions dialog\n  /mcps               - Open MCP dialog\n  /theme              - Open themes dialog\n  /themes             - Open themes dialog\n  /theme <name>       - Switch theme\n  /provider           - Open provider dialog\n  /export             - Open export dialog\n  /subagent           - Open subagent dialog\n  /timeline           - Open timeline dialog\n  /fork-timeline      - Open fork confirmation dialog\n  /rename             - Open session rename dialog\n  /tag                - Open file tag dialog\n  /message            - Open message actions dialog\n  /status-dialog      - Open status dialog\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /undo               - Undo last user+assistant pair\n  /redo               - Restore last undone pair\n  /copy               - Copy full transcript to clipboard\n  /copy-last          - Copy last assistant message\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /wrap               - Toggle diff wrap mode\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
-                ));
+                use crate::widgets::dialog::DialogHelp;
+                let help = DialogHelp::new(vec![
+                    ("/help, /h, /?".into(), "Show this help".into()),
+                    ("/exit, /quit, /q".into(), "Exit the application".into()),
+                    ("/auth, /status".into(), "Show current status".into()),
+                    ("/models".into(), "List available models".into()),
+                    ("/model <name>".into(), "Switch to a different model".into()),
+                    ("/agents".into(), "Open agent dialog".into()),
+                    ("/sessions".into(), "Open sessions dialog".into()),
+                    ("/mcps".into(), "Open MCP dialog".into()),
+                    ("/themes".into(), "Open themes dialog".into()),
+                    ("/theme <name>".into(), "Switch theme".into()),
+                    ("/provider".into(), "Open provider dialog".into()),
+                    ("/export".into(), "Open export dialog".into()),
+                    ("/subagent".into(), "Open subagent dialog".into()),
+                    ("/timeline".into(), "Open timeline dialog".into()),
+                    ("/fork-timeline".into(), "Open fork confirmation".into()),
+                    ("/rename".into(), "Rename current session".into()),
+                    ("/tag".into(), "Open file tag dialog".into()),
+                    ("/image <path>".into(), "Attach image for next prompt".into()),
+                    ("/screenshot".into(), "Capture and attach screenshot".into()),
+                    ("/undo / /redo".into(), "Undo or redo last pair".into()),
+                    ("/copy".into(), "Copy transcript to clipboard".into()),
+                    ("/copy-last".into(), "Copy last assistant message".into()),
+                    ("/fork [name]".into(), "Fork session".into()),
+                    ("/switch <branch>".into(), "Switch to branch".into()),
+                    ("/branches".into(), "List branches".into()),
+                    ("/tree".into(), "Show branch tree".into()),
+                    ("/review [file]".into(), "Review staged changes".into()),
+                    ("/wrap".into(), "Toggle diff wrap mode".into()),
+                    ("/share".into(), "Share session to GitHub Gist".into()),
+                    ("/clear".into(), "Clear chat history".into()),
+                ]).with_title("Commands");
+                self.dialog_stack.show(Box::new(help));
             }
             "/auth" | "/status" => {
                 let status_msg = if self.agent_input_tx.is_some() {

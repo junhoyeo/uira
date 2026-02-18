@@ -39,6 +39,7 @@ pub struct DiffProps {
 }
 
 impl DiffProps {
+    #[cfg(test)]
     pub fn themed(theme: &Theme, width: usize) -> Self {
         Self {
             added_bg: theme.diff_added_bg,

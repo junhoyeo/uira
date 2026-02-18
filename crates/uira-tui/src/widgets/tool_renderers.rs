@@ -11,7 +11,6 @@ use crate::{
 
 const BASH_MAX_LINES: usize = 15;
 const BASH_PREVIEW_LINES: usize = 10;
-const LIST_MAX_ITEMS: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolState {
