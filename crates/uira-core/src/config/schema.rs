@@ -969,6 +969,12 @@ pub struct ChannelSettings {
 
     #[serde(default)]
     pub slack_accounts: Vec<SlackChannelConfig>,
+
+    #[serde(default)]
+    pub discord: Option<DiscordChannelConfig>,
+
+    #[serde(default)]
+    pub discord_accounts: Vec<DiscordChannelConfig>,
 }
 
 fn default_account_id() -> String {
@@ -1021,6 +1027,250 @@ pub struct SlackChannelConfig {
 
     #[serde(default)]
     pub active_skills: Vec<String>,
+}
+
+fn default_discord_max_message_length() -> usize {
+    2000
+}
+
+fn default_discord_max_lines_per_message() -> usize {
+    17
+}
+
+fn default_group_policy() -> String {
+    "open".to_string()
+}
+
+fn default_dm_policy() -> String {
+    "pairing".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordDmConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default = "default_dm_policy")]
+    pub policy: String,
+
+    #[serde(default)]
+    pub allow_from: Vec<String>,
+
+    #[serde(default)]
+    pub group_enabled: bool,
+
+    #[serde(default)]
+    pub group_channels: Vec<String>,
+}
+
+impl Default for DiscordDmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            policy: default_dm_policy(),
+            allow_from: Vec::new(),
+            group_enabled: false,
+            group_channels: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordGuildChannelConfig {
+    #[serde(default = "default_true")]
+    pub allow: bool,
+
+    #[serde(default)]
+    pub require_mention: bool,
+
+    #[serde(default)]
+    pub skills: Option<Vec<String>>,
+
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub users: Vec<String>,
+
+    #[serde(default)]
+    pub roles: Vec<String>,
+
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordGuildEntry {
+    #[serde(default)]
+    pub slug: Option<String>,
+
+    #[serde(default)]
+    pub require_mention: bool,
+
+    #[serde(default)]
+    pub reaction_notifications: Option<String>,
+
+    #[serde(default)]
+    pub users: Vec<String>,
+
+    #[serde(default)]
+    pub roles: Vec<String>,
+
+    #[serde(default)]
+    pub channels: HashMap<String, DiscordGuildChannelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordActionConfig {
+    #[serde(default = "default_true")]
+    pub reactions: bool,
+    #[serde(default = "default_true")]
+    pub stickers: bool,
+    #[serde(default = "default_true")]
+    pub polls: bool,
+    #[serde(default = "default_true")]
+    pub permissions: bool,
+    #[serde(default = "default_true")]
+    pub messages: bool,
+    #[serde(default = "default_true")]
+    pub threads: bool,
+    #[serde(default = "default_true")]
+    pub pins: bool,
+    #[serde(default = "default_true")]
+    pub search: bool,
+    #[serde(default = "default_true")]
+    pub member_info: bool,
+    #[serde(default = "default_true")]
+    pub role_info: bool,
+    #[serde(default = "default_true")]
+    pub roles: bool,
+    #[serde(default = "default_true")]
+    pub channel_info: bool,
+    #[serde(default = "default_true")]
+    pub events: bool,
+    #[serde(default = "default_true")]
+    pub moderation: bool,
+    #[serde(default = "default_true")]
+    pub emoji_uploads: bool,
+    #[serde(default = "default_true")]
+    pub sticker_uploads: bool,
+    #[serde(default = "default_true")]
+    pub channels: bool,
+    #[serde(default)]
+    pub presence: bool,
+}
+
+impl Default for DiscordActionConfig {
+    fn default() -> Self {
+        Self {
+            reactions: true,
+            stickers: true,
+            polls: true,
+            permissions: true,
+            messages: true,
+            threads: true,
+            pins: true,
+            search: true,
+            member_info: true,
+            role_info: true,
+            roles: true,
+            channel_info: true,
+            events: true,
+            moderation: true,
+            emoji_uploads: true,
+            sticker_uploads: true,
+            channels: true,
+            presence: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordIntentsConfig {
+    #[serde(default)]
+    pub presence: bool,
+    #[serde(default)]
+    pub guild_members: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordComponentsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscordChannelConfig {
+    #[serde(default = "default_account_id")]
+    pub account_id: String,
+
+    pub bot_token: String,
+
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    #[serde(default)]
+    pub name: Option<String>,
+
+    #[serde(default)]
+    pub proxy: Option<String>,
+
+    #[serde(default)]
+    pub allow_bots: bool,
+
+    #[serde(default = "default_group_policy")]
+    pub group_policy: String,
+
+    #[serde(default = "default_discord_max_message_length")]
+    pub text_chunk_limit: usize,
+
+    #[serde(default = "default_discord_max_lines_per_message")]
+    pub max_lines_per_message: usize,
+
+    #[serde(default = "default_stream_mode")]
+    pub stream_mode: String,
+
+    #[serde(default = "default_stream_throttle_ms")]
+    pub stream_throttle_ms: u64,
+
+    #[serde(default)]
+    pub history_limit: Option<usize>,
+
+    #[serde(default)]
+    pub dm_history_limit: Option<usize>,
+
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+
+    #[serde(default)]
+    pub active_skills: Vec<String>,
+
+    #[serde(default)]
+    pub dm: Option<DiscordDmConfig>,
+
+    #[serde(default)]
+    pub guilds: HashMap<String, DiscordGuildEntry>,
+
+    #[serde(default)]
+    pub actions: Option<DiscordActionConfig>,
+
+    #[serde(default)]
+    pub intents: Option<DiscordIntentsConfig>,
+
+    #[serde(default)]
+    pub components: Option<DiscordComponentsConfig>,
+
+    #[serde(default)]
+    pub activity: Option<String>,
+
+    #[serde(default)]
+    pub status: Option<String>,
+
+    #[serde(default)]
+    pub activity_type: Option<u8>,
+
+    #[serde(default)]
+    pub activity_url: Option<String>,
 }
 
 // ============================================================================

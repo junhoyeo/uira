@@ -22,6 +22,7 @@ reqwest = { workspace = true }
 futures-util = "0.3"
 dirs = { workspace = true }
 teloxide = { workspace = true }
+serenity = { workspace = true }
 
 # Internal dependencies
 uira-agent = { workspace = true }
