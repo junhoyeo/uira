@@ -4,6 +4,7 @@ use crate::features::background_agent::{
     get_background_manager, BackgroundManager, BackgroundTaskConfig, BackgroundTaskStatus,
     LaunchInput,
 };
+use crate::tools::planning;
 use crate::tools::provider::ToolProvider;
 use crate::tools::{ToolContext, ToolError};
 use async_trait::async_trait;
@@ -379,6 +380,16 @@ impl DelegationToolProvider {
             })
         }
     }
+
+    async fn planning_pipeline(&self, args: Value) -> Result<ToolOutput, ToolError> {
+        let tool = planning::tool_definition();
+        let output = tool.handler.call(args).await?;
+        let text = match output.content.first() {
+            Some(crate::tools::types::ToolContent::Text { text }) => text.clone(),
+            None => String::new(),
+        };
+        Ok(ToolOutput::text(text))
+    }
 }
 
 impl Default for DelegationToolProvider {
@@ -390,6 +401,10 @@ impl Default for DelegationToolProvider {
 #[async_trait]
 impl ToolProvider for DelegationToolProvider {
     fn specs(&self) -> Vec<ToolSpec> {
+        let planning_tool = planning::tool_definition();
+        let planning_schema = serde_json::from_value::<JsonSchema>(planning_tool.input_schema)
+            .unwrap_or_else(|_| JsonSchema::object());
+
         vec![
             ToolSpec::new(
                 "delegate_task",
@@ -419,13 +434,18 @@ impl ToolProvider for DelegationToolProvider {
                     .property("taskId", JsonSchema::string().description("Task ID to cancel"))
                     .property("all", JsonSchema::boolean().description("If true, cancels ALL running tasks")),
             ),
+            ToolSpec::new(
+                planning_tool.name,
+                planning_tool.description,
+                planning_schema,
+            ),
         ]
     }
 
     fn handles(&self, name: &str) -> bool {
         matches!(
             name,
-            "delegate_task" | "background_output" | "background_cancel"
+            "delegate_task" | "background_output" | "background_cancel" | "planning_pipeline"
         )
     }
 
@@ -439,6 +459,7 @@ impl ToolProvider for DelegationToolProvider {
             "delegate_task" => self.delegate_task(input, ctx).await,
             "background_output" => self.background_output(input).await,
             "background_cancel" => self.background_cancel(input).await,
+            "planning_pipeline" => self.planning_pipeline(input).await,
             _ => Err(ToolError::NotFound {
                 name: name.to_string(),
             }),
@@ -456,6 +477,7 @@ mod tests {
         assert!(provider.handles("delegate_task"));
         assert!(provider.handles("background_output"));
         assert!(provider.handles("background_cancel"));
+        assert!(provider.handles("planning_pipeline"));
         assert!(!provider.handles("lsp_goto_definition"));
         assert!(!provider.handles("read_file"));
     }
@@ -464,9 +486,10 @@ mod tests {
     fn test_delegation_provider_specs() {
         let provider = DelegationToolProvider::new();
         let specs = provider.specs();
-        assert_eq!(specs.len(), 3);
+        assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "delegate_task"));
         assert!(specs.iter().any(|s| s.name == "background_output"));
         assert!(specs.iter().any(|s| s.name == "background_cancel"));
+        assert!(specs.iter().any(|s| s.name == "planning_pipeline"));
     }
 }

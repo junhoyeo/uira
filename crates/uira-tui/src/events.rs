@@ -12,6 +12,12 @@ pub enum AppEvent {
     Info(String),
     BranchChanged(String),
     SessionChanged(String),
+    QuestionRequest {
+        question: String,
+        options: Vec<crate::views::QuestionOption>,
+        multi_select: bool,
+        response_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+    },
     Redraw,
     Quit,
     Error(String),

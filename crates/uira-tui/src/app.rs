@@ -19,7 +19,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use uira_agent::{
     Agent, AgentCommand, AgentConfig, ApprovalReceiver, BranchInfo, CommandSender,
     RecursiveAgentExecutor,
@@ -41,10 +41,16 @@ use uira_providers::{
 use crate::keybinds::KeybindConfig;
 use crate::kv_store::KvStore;
 use crate::widgets::autocomplete::{AutocompleteMode, AutocompleteState, SlashCommand};
+use crate::widgets::dialog::DialogStack;
+use crate::widgets::diff::WrapMode;
 use crate::views::session_nav::{self, SessionStack, SessionView};
 use crate::views::{
+    dialog_agent, dialog_export, dialog_fork_timeline, dialog_mcp, dialog_message_actions,
+    dialog_provider, dialog_session_list, dialog_session_rename, dialog_status, dialog_subagent,
+    dialog_tag, dialog_theme_list, dialog_timeline,
     ApprovalOverlay, ApprovalRequest, ChatView, CommandPalette, ModelSelector, PaletteAction,
-    ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT, MODEL_GROUPS,
+    QuestionPrompt, QuestionPromptAction, ToastManager, ToastVariant, INLINE_APPROVAL_HEIGHT,
+    MODEL_GROUPS,
 };
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
@@ -856,6 +862,9 @@ pub struct App {
     approval_overlay: ApprovalOverlay,
     model_selector: ModelSelector,
     command_palette: CommandPalette,
+    dialog_stack: DialogStack,
+    question_prompt: Option<QuestionPrompt>,
+    pending_question_tx: Option<oneshot::Sender<Vec<String>>>,
     agent_input_tx: Option<mpsc::Sender<Message>>,
     agent_command_tx: Option<CommandSender>,
     current_model: Option<String>,
@@ -882,7 +891,10 @@ pub struct App {
     toast_manager: ToastManager,
     keybinds: KeybindConfig,
     kv_store: KvStore,
+    diff_wrap_mode: WrapMode,
     recent_models: Vec<String>,
+    current_personality: String,
+    available_personalities: Vec<String>,
     frecency_store: FrecencyStore,
     autocomplete_state: AutocompleteState,
     slash_commands: Vec<SlashCommand>,
@@ -1060,6 +1072,54 @@ impl App {
                 description: "Theme management",
             },
             SlashCommand {
+                command: "themes",
+                description: "Open theme dialog",
+            },
+            SlashCommand {
+                command: "agents",
+                description: "Open agent dialog",
+            },
+            SlashCommand {
+                command: "sessions",
+                description: "Open sessions dialog",
+            },
+            SlashCommand {
+                command: "mcps",
+                description: "Open MCP dialog",
+            },
+            SlashCommand {
+                command: "subagent",
+                description: "Open subagent dialog",
+            },
+            SlashCommand {
+                command: "timeline",
+                description: "Open timeline dialog",
+            },
+            SlashCommand {
+                command: "rename",
+                description: "Open rename dialog",
+            },
+            SlashCommand {
+                command: "tag",
+                description: "Open file tag dialog",
+            },
+            SlashCommand {
+                command: "message",
+                description: "Open message actions dialog",
+            },
+            SlashCommand {
+                command: "provider",
+                description: "Open provider dialog",
+            },
+            SlashCommand {
+                command: "fork-timeline",
+                description: "Open fork confirmation dialog",
+            },
+            SlashCommand {
+                command: "status-dialog",
+                description: "Open status dialog",
+            },
+            SlashCommand {
                 command: "image",
                 description: "Attach image",
             },
@@ -1070,6 +1130,10 @@ impl App {
             SlashCommand {
                 command: "review",
                 description: "Review diffs",
+            },
+            SlashCommand {
+                command: "wrap",
+                description: "Toggle diff wrap mode",
             },
             SlashCommand {
                 command: "share",
@@ -1169,6 +1233,7 @@ impl App {
         model_selector.set_theme(theme.clone());
         let mut command_palette = CommandPalette::new();
         command_palette.set_theme(theme.clone());
+        let dialog_stack = DialogStack::new(theme.clone());
         let sidebar_sections = [
             sidebar.show_context,
             sidebar.show_mcp,
@@ -1190,7 +1255,13 @@ impl App {
         let tool_details_visible = kv_store.get("tool_details_visible", true);
         let scrollbar_visible = kv_store.get("scrollbar_visible", true);
         let animations_enabled = kv_store.get("animations_enabled", true);
-        let diff_wrap_mode = kv_store.get("diff_wrap_mode", "word".to_string());
+        let diff_wrap_mode = match kv_store
+            .get("diff_wrap_mode", "word".to_string())
+            .as_str()
+        {
+            "none" => WrapMode::None,
+            _ => WrapMode::Word,
+        };
 
         kv_store.set("sidebar_collapsed", sidebar_collapsed);
         kv_store.set("thinking_visible", thinking_visible);
@@ -1198,15 +1269,31 @@ impl App {
         kv_store.set("tool_details_visible", tool_details_visible);
         kv_store.set("scrollbar_visible", scrollbar_visible);
         kv_store.set("animations_enabled", animations_enabled);
-        kv_store.set("diff_wrap_mode", diff_wrap_mode);
+        kv_store.set(
+            "diff_wrap_mode",
+            match diff_wrap_mode {
+                WrapMode::None => "none",
+                WrapMode::Word => "word",
+            },
+        );
         kv_store.set("recent_models", recent_models.clone());
         kv_store.set("frecency_store", frecency_store.clone());
+
+        let current_personality = "balanced".to_string();
+        let available_personalities = vec![
+            "balanced".to_string(),
+            "autonomous".to_string(),
+            "orchestrator".to_string(),
+        ];
+
+        let mut chat_view = ChatView::new(theme.clone());
+        chat_view.set_diff_wrap_mode(diff_wrap_mode);
 
         Self {
             should_quit: false,
             event_tx,
             event_rx,
-            chat_view: ChatView::new(theme.clone()),
+            chat_view,
             #[cfg(test)]
             messages: Vec::new(),
             input: String::new(),
@@ -1218,6 +1305,9 @@ impl App {
             approval_overlay,
             model_selector,
             command_palette,
+            dialog_stack,
+            question_prompt: None,
+            pending_question_tx: None,
             agent_input_tx: None,
             agent_command_tx: None,
             current_model: None,
@@ -1243,7 +1333,10 @@ impl App {
             toast_manager: ToastManager::new(),
             keybinds: KeybindConfig::default(),
             kv_store,
+            diff_wrap_mode,
             recent_models,
+            current_personality,
+            available_personalities,
             frecency_store,
             autocomplete_state: AutocompleteState::default(),
             slash_commands: Self::available_slash_commands(),
@@ -1277,6 +1370,7 @@ impl App {
         self.approval_overlay.set_theme(self.theme.clone());
         self.model_selector.set_theme(self.theme.clone());
         self.command_palette.set_theme(self.theme.clone());
+        self.dialog_stack.set_theme(self.theme.clone());
         self.chat_view.set_theme(self.theme.clone());
         self.toast_manager
             .show(format!("Theme: {}", theme_name), ToastVariant::Info, 2000);
@@ -1313,14 +1407,20 @@ impl App {
                             self.open_external_editor();
                         }
                     }
-                    Event::Mouse(mouse) => match mouse.kind {
-                        MouseEventKind::ScrollUp => self.chat_view.scroll_up(),
-                        MouseEventKind::ScrollDown => self.chat_view.scroll_down(),
-                        MouseEventKind::Down(MouseButton::Left) => {
-                            self.handle_mouse_click_event(mouse.column, mouse.row);
+                    Event::Mouse(mouse) => {
+                        if self.dialog_stack.handle_mouse(mouse) {
+                            continue;
                         }
-                        _ => {}
-                    },
+
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => self.chat_view.scroll_up(),
+                            MouseEventKind::ScrollDown => self.chat_view.scroll_down(),
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                self.handle_mouse_click_event(mouse.column, mouse.row);
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1355,6 +1455,7 @@ impl App {
             self.approval_overlay.set_theme(self.theme.clone());
             self.model_selector.set_theme(self.theme.clone());
             self.command_palette.set_theme(self.theme.clone());
+            self.dialog_stack.set_theme(self.theme.clone());
             self.chat_view.set_theme(self.theme.clone());
         }
 
@@ -1524,6 +1625,21 @@ impl App {
 
         if self.command_palette.is_active() {
             self.command_palette.render(frame, area);
+        }
+
+        if self.dialog_stack.is_active() {
+            self.dialog_stack.render(frame, area);
+        }
+
+        if let Some(ref question) = self.question_prompt {
+            let prompt_width = ((area.width as u32 * 70) / 100).max(40) as u16;
+            let prompt_height = ((area.height as u32 * 60) / 100).max(10) as u16;
+            let prompt_area = crate::widgets::dialog::overlay::centered_rect(
+                area,
+                prompt_width,
+                prompt_height,
+            );
+            question.render(frame, prompt_area, &self.theme);
         }
     }
 
@@ -1748,6 +1864,10 @@ impl App {
             let model = self.current_model.as_deref().unwrap_or("not connected");
             lines.push(Line::from(Span::styled(
                 format!("  Model: {}", model),
+                Style::default().fg(self.theme.fg),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("  Agent: {}", self.current_personality),
                 Style::default().fg(self.theme.fg),
             )));
             lines.push(Line::from(Span::styled(
@@ -2425,6 +2545,22 @@ impl App {
         }
     }
 
+    fn cycle_agent(&mut self, direction: i32) {
+        if self.available_personalities.is_empty() {
+            return;
+        }
+
+        let current_idx = self
+            .available_personalities
+            .iter()
+            .position(|personality| personality == &self.current_personality)
+            .unwrap_or(0);
+        let len = self.available_personalities.len() as i32;
+        let next_idx = ((current_idx as i32 + direction) % len + len) % len;
+        self.current_personality = self.available_personalities[next_idx as usize].clone();
+        self.status = format!("Agent: {}", self.current_personality);
+    }
+
     fn handle_key_event(&mut self, key: KeyEvent) -> KeyAction {
         if self.command_palette.is_active() {
             match self.command_palette.handle_key(key.code) {
@@ -2433,6 +2569,11 @@ impl App {
                 }
                 PaletteAction::Close | PaletteAction::None => {}
             }
+            return KeyAction::None;
+        }
+
+        if self.dialog_stack.is_active() {
+            self.dialog_stack.handle_key(key.code);
             return KeyAction::None;
         }
 
@@ -2447,6 +2588,25 @@ impl App {
         if self.approval_overlay.handle_key(key.code) {
             if !self.approval_overlay.is_active() {
                 self.set_agent_state(AgentState::Thinking);
+            }
+            return KeyAction::None;
+        }
+
+        if let Some(ref mut question) = self.question_prompt {
+            match question.handle_key(key.code) {
+                QuestionPromptAction::Submit(values) => {
+                    if let Some(tx) = self.pending_question_tx.take() {
+                        let _ = tx.send(values);
+                    }
+                    self.question_prompt = None;
+                }
+                QuestionPromptAction::Cancel => {
+                    if let Some(tx) = self.pending_question_tx.take() {
+                        let _ = tx.send(Vec::new());
+                    }
+                    self.question_prompt = None;
+                }
+                QuestionPromptAction::None => {}
             }
             return KeyAction::None;
         }
@@ -2563,6 +2723,20 @@ impl App {
 
         if !self.input_focused {
             match key.code {
+                KeyCode::Tab
+                    if !self.autocomplete_state.is_active()
+                        && !self.approval_overlay.is_active()
+                        && !self.dialog_stack.is_active() =>
+                {
+                    self.cycle_agent(1);
+                    return KeyAction::None;
+                }
+                KeyCode::BackTab
+                    if !self.approval_overlay.is_active() && !self.dialog_stack.is_active() =>
+                {
+                    self.cycle_agent(-1);
+                    return KeyAction::None;
+                }
                 KeyCode::Char('g') if key.modifiers.is_empty() => {
                     if self.pending_g {
                         self.chat_view.scroll_to_top();
@@ -3701,7 +3875,7 @@ impl App {
             "/help" | "/h" | "/?" => {
                 self.chat_view.messages.push(ChatMessage::new(
                     "system",
-                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /theme              - List available themes\n  /theme <name>       - Switch theme\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /undo               - Undo last user+assistant pair\n  /redo               - Restore last undone pair\n  /copy               - Copy full transcript to clipboard\n  /copy-last          - Copy last assistant message\n  /export             - Export session as markdown\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
+                    "Available commands:\n  /help, /h, /?       - Show this help\n  /exit, /quit, /q    - Exit the application\n  /auth, /status      - Show current status\n  /models             - List available models\n  /model <name>       - Switch to a different model\n  /agents             - Open agent dialog\n  /sessions           - Open sessions dialog\n  /mcps               - Open MCP dialog\n  /theme              - Open themes dialog\n  /themes             - Open themes dialog\n  /theme <name>       - Switch theme\n  /provider           - Open provider dialog\n  /export             - Open export dialog\n  /subagent           - Open subagent dialog\n  /timeline           - Open timeline dialog\n  /fork-timeline      - Open fork confirmation dialog\n  /rename             - Open session rename dialog\n  /tag                - Open file tag dialog\n  /message            - Open message actions dialog\n  /status-dialog      - Open status dialog\n  /image <path>       - Attach image for next prompt\n  /screenshot         - Capture and attach screenshot\n  /undo               - Undo last user+assistant pair\n  /redo               - Restore last undone pair\n  /copy               - Copy full transcript to clipboard\n  /copy-last          - Copy last assistant message\n  /fork [name|count]  - Fork session (optional branch name or keep first N messages)\n  /switch <branch>    - Switch to branch\n  /branches           - List branches\n  /tree               - Show branch tree\n  /review             - Review staged changes\n  /review <file>      - Review changes for a specific file\n  /review HEAD~1      - Review a specific commit\n  /wrap               - Toggle diff wrap mode\n  /share              - Share session to GitHub Gist\n  /clear              - Clear chat history and pending attachments",
                 ));
             }
             "/auth" | "/status" => {
@@ -3736,7 +3910,160 @@ impl App {
                 self.copy_session_transcript();
             }
             "/export" => {
-                self.export_session_markdown();
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_export::dialog_export(move |format| {
+                    let label = match format {
+                        dialog_export::ExportFormat::Markdown => "markdown",
+                        dialog_export::ExportFormat::Json => "json",
+                        dialog_export::ExportFormat::PlainText => "plain text",
+                    };
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Export format selected: {}",
+                        label
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/agents" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_agent::dialog_agent(
+                    &["balanced", "autonomous", "orchestrator"],
+                    move |selected| {
+                        let _ = event_tx.try_send(AppEvent::Info(format!(
+                            "Agent selected: {}",
+                            selected
+                        )));
+                    },
+                );
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/sessions" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_session_list::dialog_session_list(Vec::new(), move |selected| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Session selected: {}",
+                        selected
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/mcps" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_mcp::DialogMcp::new(Vec::new()).on_submit(move |selected| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "MCP selection updated ({} server(s))",
+                        selected.len()
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/subagent" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_subagent::dialog_subagent(move |action| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Subagent action selected: {:?}",
+                        action
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/themes" => {
+                let event_tx = self.event_tx.clone();
+                let themes = Theme::available_names();
+                let theme_refs = themes.iter().map(String::as_str).collect::<Vec<_>>();
+                let current = self.theme.name.clone();
+                let dialog = dialog_theme_list::dialog_theme_list(
+                    &theme_refs,
+                    Some(current.as_str()),
+                    move |selected| {
+                        let _ = event_tx.try_send(AppEvent::Info(format!(
+                            "Theme selected: {}",
+                            selected
+                        )));
+                    },
+                );
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/timeline" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_timeline::dialog_timeline(Vec::new(), move |index| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Timeline target selected: #{}",
+                        index
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/rename" => {
+                let event_tx = self.event_tx.clone();
+                let current_name = self
+                    .session_id
+                    .clone()
+                    .unwrap_or_else(|| "session".to_string());
+                let dialog =
+                    dialog_session_rename::dialog_session_rename(current_name, move |value| {
+                        let text = value.unwrap_or_default();
+                        let _ = event_tx
+                            .try_send(AppEvent::Info(format!("Session renamed to: {}", text)));
+                    });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/tag" => {
+                let event_tx = self.event_tx.clone();
+                let files = self.modified_files.iter().cloned().collect::<Vec<_>>();
+                let dialog = dialog_tag::dialog_tag(&files, move |selected| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Tagged file: {}",
+                        selected
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/message" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_message_actions::dialog_message_actions(move |action| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Message action selected: {:?}",
+                        action
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/status-dialog" => {
+                let dialog = dialog_status::dialog_status("none", "auto", "rustfmt");
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/provider" => {
+                let event_tx = self.event_tx.clone();
+                let providers = vec![
+                    dialog_provider::ProviderOption {
+                        id: "anthropic".to_string(),
+                        title: "Anthropic".to_string(),
+                        configured: true,
+                    },
+                    dialog_provider::ProviderOption {
+                        id: "openai".to_string(),
+                        title: "OpenAI".to_string(),
+                        configured: false,
+                    },
+                ];
+                let dialog = dialog_provider::dialog_provider(providers, move |selected| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Provider selected: {}",
+                        selected
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
+            }
+            "/fork-timeline" => {
+                let event_tx = self.event_tx.clone();
+                let dialog = dialog_fork_timeline::dialog_fork_timeline(0, move |confirmed| {
+                    let _ = event_tx.try_send(AppEvent::Info(format!(
+                        "Fork from timeline: {}",
+                        if confirmed { "confirmed" } else { "cancelled" }
+                    )));
+                });
+                self.dialog_stack.show(Box::new(dialog));
             }
             "/image" => {
                 let path_arg = input[command.len()..].trim();
@@ -3794,6 +4121,19 @@ impl App {
             },
             "/review" => {
                 self.run_review_command(input);
+            }
+            "/wrap" => {
+                self.diff_wrap_mode = match self.diff_wrap_mode {
+                    WrapMode::Word => WrapMode::None,
+                    WrapMode::None => WrapMode::Word,
+                };
+                self.chat_view.set_diff_wrap_mode(self.diff_wrap_mode);
+                let value = match self.diff_wrap_mode {
+                    WrapMode::Word => "word",
+                    WrapMode::None => "none",
+                };
+                self.kv_store.set("diff_wrap_mode", value);
+                self.status = format!("Diff wrap mode: {}", value);
             }
             "/fork" => {
                 let (branch_name, message_count) = match parts.get(1).copied() {
@@ -3889,21 +4229,7 @@ impl App {
                         }
                     }
                 } else {
-                    let (_, warnings) = Theme::load_external_themes();
-                    self.chat_view.messages.push(ChatMessage::new(
-                        "system",
-                        format!(
-                            "Current theme: {}\nAvailable themes: {}\nUsage: /theme <name>",
-                            self.theme.name,
-                            Theme::available_names().join(", ")
-                        ),
-                    ));
-                    for warning in warnings {
-                        self.chat_view.messages.push(ChatMessage::new(
-                            "system",
-                            format!("Theme warning: {}", warning),
-                        ));
-                    }
+                    self.handle_slash_command("/themes");
                 }
             }
             _ => {
@@ -4018,6 +4344,16 @@ impl App {
             }
             AppEvent::SessionChanged(session_id) => {
                 self.session_id = Some(session_id);
+            }
+            AppEvent::QuestionRequest {
+                question,
+                options,
+                multi_select,
+                response_tx,
+            } => {
+                let prompt = QuestionPrompt::new(question, options, multi_select);
+                self.pending_question_tx = Some(response_tx);
+                self.question_prompt = Some(prompt);
             }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {

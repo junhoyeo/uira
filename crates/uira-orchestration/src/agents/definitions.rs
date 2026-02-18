@@ -257,6 +257,10 @@ fn insert(
                     "TodoWrite".to_string(),
                     "WebSearch".to_string(),
                     "WebFetch".to_string(),
+                    "delegate_task".to_string(),
+                    "background_output".to_string(),
+                    "background_cancel".to_string(),
+                    "planning_pipeline".to_string(),
                     "python_repl".to_string(),
                 ];
                 let mut tmp = AgentConfig {

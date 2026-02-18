@@ -26,6 +26,7 @@ pub struct ToolRenderContext {
     pub state: ToolState,
     pub expanded: bool,
     pub wide: bool,
+    pub wrap_mode: WrapMode,
 }
 
 impl Default for ToolRenderContext {
@@ -34,6 +35,7 @@ impl Default for ToolRenderContext {
             state: ToolState::Completed,
             expanded: true,
             wide: false,
+            wrap_mode: WrapMode::Word,
         }
     }
 }
@@ -143,7 +145,7 @@ fn render_edit(
             } else {
                 DiffView::Unified
             },
-            wrap_mode: WrapMode::Word,
+            wrap_mode: context.wrap_mode,
         };
         let title = file_path
             .as_ref()
@@ -339,7 +341,7 @@ fn render_apply_patch(
             } else {
                 DiffView::Unified
             },
-            wrap_mode: WrapMode::Word,
+            wrap_mode: context.wrap_mode,
         };
         out.extend(render_diff(
             diff_text,
@@ -699,6 +701,7 @@ mod tests {
             state: ToolState::Pending,
             expanded: false,
             wide: false,
+            wrap_mode: WrapMode::Word,
         };
         let lines = render_tool_output("bash", "", 80, &test_theme(), ctx);
         assert!(!lines.is_empty());
@@ -711,6 +714,7 @@ mod tests {
             state: ToolState::Completed,
             expanded: true,
             wide: true,
+            wrap_mode: WrapMode::Word,
         };
         let lines = render_tool_output("apply_patch", content, 120, &test_theme(), ctx);
         assert!(lines
@@ -730,6 +734,7 @@ mod tests {
                 state: ToolState::Denied,
                 expanded: false,
                 wide: false,
+                wrap_mode: WrapMode::Word,
             },
         );
         let has_strike = lines
