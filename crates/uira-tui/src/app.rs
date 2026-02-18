@@ -1116,6 +1116,10 @@ impl App {
                 description: "Open fork confirmation dialog",
             },
             SlashCommand {
+                command: "ask",
+                description: "Test question prompt overlay",
+            },
+            SlashCommand {
                 command: "status-dialog",
                 description: "Open status dialog",
             },
@@ -2732,7 +2736,9 @@ impl App {
                     return KeyAction::None;
                 }
                 KeyCode::BackTab
-                    if !self.approval_overlay.is_active() && !self.dialog_stack.is_active() =>
+                    if !self.autocomplete_state.is_active()
+                        && !self.approval_overlay.is_active()
+                        && !self.dialog_stack.is_active() =>
                 {
                     self.cycle_agent(-1);
                     return KeyAction::None;
@@ -3917,22 +3923,17 @@ impl App {
                         dialog_export::ExportFormat::Json => "json",
                         dialog_export::ExportFormat::PlainText => "plain text",
                     };
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Export format selected: {}",
-                        label
-                    )));
+                    let _ = event_tx.try_send(AppEvent::ExportRequested(label.to_string()));
                 });
                 self.dialog_stack.show(Box::new(dialog));
             }
             "/agents" => {
                 let event_tx = self.event_tx.clone();
+                let personalities = self.available_personalities.clone();
                 let dialog = dialog_agent::dialog_agent(
-                    &["balanced", "autonomous", "orchestrator"],
+                    &personalities.iter().map(String::as_str).collect::<Vec<_>>(),
                     move |selected| {
-                        let _ = event_tx.try_send(AppEvent::Info(format!(
-                            "Agent selected: {}",
-                            selected
-                        )));
+                        let _ = event_tx.try_send(AppEvent::AgentChanged(selected.to_string()));
                     },
                 );
                 self.dialog_stack.show(Box::new(dialog));
@@ -3941,7 +3942,7 @@ impl App {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_session_list::dialog_session_list(Vec::new(), move |selected| {
                     let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Session selected: {}",
+                        "Session picker selected '{}' (backend session switching not wired yet)",
                         selected
                     )));
                 });
@@ -3951,7 +3952,7 @@ impl App {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_mcp::DialogMcp::new(Vec::new()).on_submit(move |selected| {
                     let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "MCP selection updated ({} server(s))",
+                        "MCP selection updated ({} server(s)); backend activation is not wired yet",
                         selected.len()
                     )));
                 });
@@ -3961,7 +3962,7 @@ impl App {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_subagent::dialog_subagent(move |action| {
                     let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Subagent action selected: {:?}",
+                        "Subagent action selected ({:?}); backend orchestration is not wired yet",
                         action
                     )));
                 });
@@ -3976,10 +3977,8 @@ impl App {
                     &theme_refs,
                     Some(current.as_str()),
                     move |selected| {
-                        let _ = event_tx.try_send(AppEvent::Info(format!(
-                            "Theme selected: {}",
-                            selected
-                        )));
+                        let _ = event_tx
+                            .try_send(AppEvent::ThemeChangeRequested(selected.to_string()));
                     },
                 );
                 self.dialog_stack.show(Box::new(dialog));
@@ -3987,10 +3986,7 @@ impl App {
             "/timeline" => {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_timeline::dialog_timeline(Vec::new(), move |index| {
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Timeline target selected: #{}",
-                        index
-                    )));
+                    let _ = event_tx.try_send(AppEvent::ScrollToMessage(index));
                 });
                 self.dialog_stack.show(Box::new(dialog));
             }
@@ -4003,8 +3999,9 @@ impl App {
                 let dialog =
                     dialog_session_rename::dialog_session_rename(current_name, move |value| {
                         let text = value.unwrap_or_default();
-                        let _ = event_tx
-                            .try_send(AppEvent::Info(format!("Session renamed to: {}", text)));
+                        if !text.is_empty() {
+                            let _ = event_tx.try_send(AppEvent::SessionRenamed(text));
+                        }
                     });
                 self.dialog_stack.show(Box::new(dialog));
             }
@@ -4013,7 +4010,7 @@ impl App {
                 let files = self.modified_files.iter().cloned().collect::<Vec<_>>();
                 let dialog = dialog_tag::dialog_tag(&files, move |selected| {
                     let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Tagged file: {}",
+                        "Tagged file '{}' for context (tag persistence not wired yet)",
                         selected
                     )));
                 });
@@ -4022,15 +4019,17 @@ impl App {
             "/message" => {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_message_actions::dialog_message_actions(move |action| {
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Message action selected: {:?}",
-                        action
-                    )));
+                    let _ = event_tx
+                        .try_send(AppEvent::Info(format!("Message action: {:?}", action)));
                 });
                 self.dialog_stack.show(Box::new(dialog));
             }
             "/status-dialog" => {
+                let event_tx = self.event_tx.clone();
                 let dialog = dialog_status::dialog_status("none", "auto", "rustfmt");
+                let _ = event_tx.try_send(AppEvent::Info(
+                    "Opened status dialog (read-only status summary)".to_string(),
+                ));
                 self.dialog_stack.show(Box::new(dialog));
             }
             "/provider" => {
@@ -4048,22 +4047,42 @@ impl App {
                     },
                 ];
                 let dialog = dialog_provider::dialog_provider(providers, move |selected| {
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Provider selected: {}",
-                        selected
-                    )));
+                    let _ = event_tx.try_send(AppEvent::ProviderChanged(selected.to_string()));
                 });
                 self.dialog_stack.show(Box::new(dialog));
             }
             "/fork-timeline" => {
                 let event_tx = self.event_tx.clone();
                 let dialog = dialog_fork_timeline::dialog_fork_timeline(0, move |confirmed| {
-                    let _ = event_tx.try_send(AppEvent::Info(format!(
-                        "Fork from timeline: {}",
-                        if confirmed { "confirmed" } else { "cancelled" }
-                    )));
+                    let _ = event_tx.try_send(AppEvent::ForkConfirmed {
+                        from_index: 0,
+                        confirmed,
+                    });
                 });
                 self.dialog_stack.show(Box::new(dialog));
+            }
+            "/ask" => {
+                let event_tx = self.event_tx.clone();
+                let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+                let options = vec![
+                    crate::views::QuestionOption::new("Option A", "a"),
+                    crate::views::QuestionOption::new("Option B", "b"),
+                    crate::views::QuestionOption::new("Option C", "c"),
+                ];
+                let _ = event_tx.try_send(AppEvent::QuestionRequest {
+                    question: "Test question: pick an option".to_string(),
+                    options,
+                    multi_select: false,
+                    response_tx,
+                });
+                let event_tx2 = self.event_tx.clone();
+                tokio::spawn(async move {
+                    if let Ok(values) = response_rx.await {
+                        let _ = event_tx2
+                            .send(AppEvent::Info(format!("Question answered: {:?}", values)))
+                            .await;
+                    }
+                });
             }
             "/image" => {
                 let path_arg = input[command.len()..].trim();
@@ -4354,6 +4373,104 @@ impl App {
                 let prompt = QuestionPrompt::new(question, options, multi_select);
                 self.pending_question_tx = Some(response_tx);
                 self.question_prompt = Some(prompt);
+            }
+            AppEvent::AgentChanged(personality) => {
+                self.current_personality = personality.clone();
+                self.status = format!("Agent: {}", personality);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Switched to {} agent", personality),
+                    None,
+                );
+            }
+            AppEvent::ThemeChangeRequested(theme_name) => match self.set_theme_by_name(&theme_name)
+            {
+                Ok(()) => {
+                    self.status = format!("Theme changed to {}", self.theme.name);
+                    self.chat_view.push_message(
+                        "system",
+                        format!("Theme set to {}", self.theme.name),
+                        None,
+                    );
+                }
+                Err(err) => {
+                    self.chat_view.push_message("system", err, None);
+                }
+            },
+            AppEvent::ExportRequested(format) => {
+                let messages = self.chat_view.messages.clone();
+                let session_id = self.session_id.clone();
+                let model = self.current_model.clone();
+                let markdown =
+                    render_session_markdown(&messages, session_id.as_deref(), model.as_deref());
+                let export_text = match format.as_str() {
+                    "json" => {
+                        let export_messages = messages
+                            .iter()
+                            .map(|message| {
+                                serde_json::json!({
+                                    "role": message.role,
+                                    "content": message.content,
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        serde_json::to_string_pretty(&export_messages)
+                            .unwrap_or_else(|_| markdown.clone())
+                    }
+                    "plain text" => messages
+                        .iter()
+                        .map(|m| format!("[{}] {}", m.role, m.content))
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                    _ => markdown,
+                };
+                self.chat_view.push_message(
+                    "system",
+                    format!(
+                        "Export ({}):\n{}",
+                        format,
+                        &export_text[..export_text.len().min(500)]
+                    ),
+                    None,
+                );
+                self.status = format!("Exported as {}", format);
+            }
+            AppEvent::SessionRenamed(new_name) => {
+                self.status = format!("Session renamed to: {}", new_name);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Session renamed to: {}", new_name),
+                    None,
+                );
+            }
+            AppEvent::ScrollToMessage(index) => {
+                let offsets = self.chat_view.message_line_offsets();
+                if let Some(&offset) = offsets.get(index) {
+                    self.chat_view.scroll_offset = offset;
+                    self.chat_view.user_scrolled = true;
+                    self.status = format!("Jumped to message #{}", index);
+                }
+            }
+            AppEvent::ProviderChanged(provider) => {
+                self.status = format!("Provider: {}", provider);
+                self.chat_view.push_message(
+                    "system",
+                    format!("Provider changed to: {}", provider),
+                    None,
+                );
+            }
+            AppEvent::ForkConfirmed {
+                from_index,
+                confirmed,
+            } => {
+                if confirmed {
+                    self.chat_view.push_message(
+                        "system",
+                        format!("Forking from message #{}...", from_index),
+                        None,
+                    );
+                    self.status = format!("Forked from #{}", from_index);
+                }
             }
             AppEvent::Redraw => {}
             AppEvent::Error(msg) => {

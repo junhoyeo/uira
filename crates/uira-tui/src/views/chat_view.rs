@@ -747,7 +747,7 @@ impl ChatView {
 
     /// Compute the line offset where each message starts.
     /// Returns a vector where index i contains the line offset of message i.
-    fn message_line_offsets(&self) -> Vec<usize> {
+    pub(crate) fn message_line_offsets(&self) -> Vec<usize> {
         let mut offsets = Vec::new();
         let mut current_offset = 0;
 

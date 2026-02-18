@@ -10,6 +10,16 @@ pub enum AppEvent {
     ApprovalRequest(crate::views::ApprovalRequest),
     TodoUpdated(Vec<TodoItem>),
     Info(String),
+    AgentChanged(String),
+    ThemeChangeRequested(String),
+    ExportRequested(String),
+    SessionRenamed(String),
+    ScrollToMessage(usize),
+    ProviderChanged(String),
+    ForkConfirmed {
+        from_index: usize,
+        confirmed: bool,
+    },
     BranchChanged(String),
     SessionChanged(String),
     QuestionRequest {
