@@ -710,12 +710,32 @@ impl ChatView {
         msg: &ChatMessage,
     ) -> Vec<Line<'static>> {
         let border_style = Style::default().fg(self.border_color_for_message(msg));
+        let is_user = msg.role == "user";
+        let bg_style = if is_user {
+            Style::default().bg(self.theme.bg_element)
+        } else {
+            Style::default()
+        };
+
         lines
             .into_iter()
             .map(|line| {
                 let mut spans = Vec::with_capacity(line.spans.len() + 1);
-                spans.push(Span::styled("┃ ", border_style));
-                spans.extend(line.spans);
+                let border_span = if is_user {
+                    Span::styled("┃ ", border_style.bg(self.theme.bg_element))
+                } else {
+                    Span::styled("┃ ", border_style)
+                };
+                spans.push(border_span);
+                if is_user {
+                    spans.extend(
+                        line.spans
+                            .into_iter()
+                            .map(|span| Span::styled(span.content, span.style.patch(bg_style))),
+                    );
+                } else {
+                    spans.extend(line.spans);
+                }
                 Line::from(spans)
             })
             .collect()

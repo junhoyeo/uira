@@ -6,7 +6,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton
 use futures::StreamExt;
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Position, Rect},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, ListState, Paragraph, Wrap},
@@ -1795,17 +1795,17 @@ impl App {
 
         let inner = block.inner(area);
 
-        // Create lines with proper wrapping and cursor display
         let inner_width = inner.width as usize;
         let mut lines = Vec::new();
         let mut current_line = String::new();
         let mut char_index = 0;
-        let mut cursor_rendered = false;
+        let mut cursor_line: u16 = 0;
+        let mut cursor_col: u16 = 0;
 
         for ch in self.input.chars() {
-            if char_index == self.cursor_pos && !cursor_rendered {
-                current_line.push('|');
-                cursor_rendered = true;
+            if char_index == self.cursor_pos {
+                cursor_line = lines.len() as u16;
+                cursor_col = current_line.chars().count() as u16;
             }
 
             if ch == '\n' {
@@ -1815,7 +1815,7 @@ impl App {
                 continue;
             }
 
-            if current_line.chars().count() >= inner_width {
+            if inner_width > 0 && current_line.chars().count() >= inner_width {
                 lines.push(current_line.clone());
                 current_line.clear();
             }
@@ -1824,24 +1824,28 @@ impl App {
             char_index += 1;
         }
 
-        // Handle cursor at end or in current line
-        if char_index == self.cursor_pos && !cursor_rendered {
-            current_line.push('|');
-        } else if self.cursor_pos >= self.input.chars().count() && !cursor_rendered {
-            current_line.push('_');
+        if char_index == self.cursor_pos || self.cursor_pos >= self.input.chars().count() {
+            cursor_line = lines.len() as u16;
+            cursor_col = current_line.chars().count() as u16;
         }
 
         if !current_line.is_empty() || lines.is_empty() {
             lines.push(current_line);
         }
 
-        // Convert to ratatui Lines
         let text_lines: Vec<Line> = lines.into_iter().map(Line::from).collect();
-
         let input_paragraph = Paragraph::new(text_lines).wrap(Wrap { trim: false });
 
         frame.render_widget(block, area);
         frame.render_widget(input_paragraph, inner);
+
+        if self.input_focused && !self.approval_overlay.is_active() {
+            let cursor_x = inner.x.saturating_add(cursor_col);
+            let cursor_y = inner.y.saturating_add(cursor_line);
+            if cursor_x < inner.x + inner.width && cursor_y < inner.y + inner.height {
+                frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+            }
+        }
     }
 
     fn render_sidebar(&mut self, frame: &mut ratatui::Frame, area: Rect) {
