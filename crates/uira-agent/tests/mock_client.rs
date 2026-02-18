@@ -6,10 +6,10 @@
 use async_trait::async_trait;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
 use uira_core::{
     ContentBlock, Message, ModelResponse, StopReason, StreamChunk, TokenUsage, ToolSpec,
 };
+use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
 
 /// Mock model client for testing
 pub struct MockModelClient {

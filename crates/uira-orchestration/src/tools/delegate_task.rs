@@ -194,7 +194,9 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
 
     if params.model.is_none() {
         if let Some(explicit_category_str) = params.category.as_deref() {
-            if let Some(explicit_category_tier) = parse_explicit_category_tier(explicit_category_str) {
+            if let Some(explicit_category_tier) =
+                parse_explicit_category_tier(explicit_category_str)
+            {
                 final_tier = explicit_category_tier;
                 final_model = tier_to_model_type(explicit_category_tier);
                 routing_reasons.push(format!("Category override: {}", explicit_category_str));
@@ -214,8 +216,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
             if let Some(skill) = builtin_skills::get_builtin_skill(skill_name) {
                 skill_sections.push(format!(
                     "<skill name=\"{}\">\n{}\n</skill>",
-                    skill.name,
-                    skill.template
+                    skill.name, skill.template
                 ));
                 loaded_skill_names.push(skill.name.clone());
             } else {
@@ -239,7 +240,8 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     );
 
     // Apply model-aware prompt adaptation after skill/category enhancement.
-    let adapted_prompt = adapt_prompt_for_model(&effective_prompt, final_tier, &resolved_model_name);
+    let adapted_prompt =
+        adapt_prompt_for_model(&effective_prompt, final_tier, &resolved_model_name);
 
     // Generate task/session IDs
     let session_id = Uuid::new_v4().to_string();
@@ -354,11 +356,23 @@ mod tests {
     #[test]
     fn test_parse_explicit_category_tier() {
         assert_eq!(parse_explicit_category_tier("quick"), Some(ModelTier::Low));
-        assert_eq!(parse_explicit_category_tier("visual-engineering"), Some(ModelTier::High));
-        assert_eq!(parse_explicit_category_tier("unspecified-high"), Some(ModelTier::High));
-        assert_eq!(parse_explicit_category_tier("unspecified-low"), Some(ModelTier::Low));
+        assert_eq!(
+            parse_explicit_category_tier("visual-engineering"),
+            Some(ModelTier::High)
+        );
+        assert_eq!(
+            parse_explicit_category_tier("unspecified-high"),
+            Some(ModelTier::High)
+        );
+        assert_eq!(
+            parse_explicit_category_tier("unspecified-low"),
+            Some(ModelTier::Low)
+        );
         assert_eq!(parse_explicit_category_tier("deep"), Some(ModelTier::High));
-        assert_eq!(parse_explicit_category_tier("writing"), Some(ModelTier::Medium));
+        assert_eq!(
+            parse_explicit_category_tier("writing"),
+            Some(ModelTier::Medium)
+        );
         assert_eq!(parse_explicit_category_tier("invalid"), None);
     }
 
@@ -457,10 +471,7 @@ mod tests {
         };
 
         let response: DelegateTaskResponse = serde_json::from_str(text).unwrap();
-        assert_eq!(
-            response.category,
-            Some("visual-engineering".to_string())
-        );
+        assert_eq!(response.category, Some("visual-engineering".to_string()));
     }
 
     #[tokio::test]

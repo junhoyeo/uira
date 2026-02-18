@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
-use super::ralph::RalphHook;
 use super::super::types::{HookEvent, HookInput, HookOutput};
+use super::ralph::RalphHook;
 
 pub const AUTOPILOT_STATE_FILE: &str = "autopilot-state.json";
 

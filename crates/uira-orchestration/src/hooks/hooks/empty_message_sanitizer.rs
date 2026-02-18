@@ -146,10 +146,7 @@ pub fn sanitize_message(
         // Otherwise inject a new text part before first tool part.
         let insert_index = message.parts.iter().position(is_tool_part);
         let new_part = MessagePart {
-            id: Some(format!(
-                "synthetic_{}",
-                super::recovery::generate_part_id()
-            )),
+            id: Some(format!("synthetic_{}", super::recovery::generate_part_id())),
             message_id: Some(message.info.id.clone()),
             session_id: message
                 .info

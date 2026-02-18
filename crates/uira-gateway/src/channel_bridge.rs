@@ -9,8 +9,8 @@ use tracing::{debug, error, info, warn};
 use uira_agent::EventStream;
 use uira_core::ThreadEvent;
 
-use crate::channels::{Channel, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 use crate::channels::types::floor_char_boundary;
+use crate::channels::{Channel, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;
@@ -144,7 +144,10 @@ impl Channel for SharedChannelProxy {
         guard.stop().await
     }
 
-    async fn send_message(&self, response: ChannelResponse) -> Result<(), crate::channels::ChannelError> {
+    async fn send_message(
+        &self,
+        response: ChannelResponse,
+    ) -> Result<(), crate::channels::ChannelError> {
         let guard = self.inner.lock().await;
         guard.send_message(response).await
     }
@@ -396,11 +399,10 @@ impl ChannelBridge {
                             }
 
                             streaming_state.accumulated_text.push_str(&delta);
-                            let adapted_text =
-                                adapt_content_for_capabilities(
-                                    streaming_state.accumulated_text.clone(),
-                                    &capabilities,
-                                );
+                            let adapted_text = adapt_content_for_capabilities(
+                                streaming_state.accumulated_text.clone(),
+                                &capabilities,
+                            );
                             if adapted_text.is_empty() {
                                 continue;
                             }
@@ -454,7 +456,9 @@ impl ChannelBridge {
                                 if let Some(message_id) = streaming_state.message_id.clone() {
                                     let edit_result = {
                                         let guard = channel.lock().await;
-                                        guard.edit_message(&recipient, &message_id, &stream_text).await
+                                        guard
+                                            .edit_message(&recipient, &message_id, &stream_text)
+                                            .await
                                     };
 
                                     if let Err(e) = edit_result {
@@ -489,7 +493,9 @@ impl ChannelBridge {
                                     if let Some(message_id) = streaming_state.message_id.clone() {
                                         let edit_result = {
                                             let guard = channel.lock().await;
-                                            guard.edit_message(&recipient, &message_id, &stream_text).await
+                                            guard
+                                                .edit_message(&recipient, &message_id, &stream_text)
+                                                .await
                                         };
 
                                         if let Err(e) = edit_result {
@@ -1130,7 +1136,10 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -1209,7 +1218,10 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Slack);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message("user_a", "msg1", ChannelType::Slack))
             .await
@@ -1240,7 +1252,10 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message("alice", "hi", ChannelType::Telegram))
             .await
@@ -1281,7 +1296,10 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -1327,7 +1345,10 @@ mod tests {
 
         let tg_channel = MockChannel::new(ChannelType::Telegram);
         let tg_tx = tg_channel.sender();
-        bridge.register_channel(Box::new(tg_channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(tg_channel), "default".to_string())
+            .await
+            .unwrap();
 
         let slack_channel = MockChannel::new(ChannelType::Slack);
         let slack_tx = slack_channel.sender();
@@ -1422,7 +1443,10 @@ mod tests {
         let channel = MockChannel::new(ChannelType::Telegram);
         let tx = channel.sender();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -1468,7 +1492,10 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages_shared();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "user1",
@@ -1496,7 +1523,10 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages_shared();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "user_err",
@@ -1522,7 +1552,10 @@ mod tests {
         let tx = channel.sender();
         let sent_messages = channel.sent_messages_shared();
 
-        bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+        bridge
+            .register_channel(Box::new(channel), "default".to_string())
+            .await
+            .unwrap();
 
         tx.send(make_channel_message(
             "alice",
@@ -1609,14 +1642,22 @@ mod tests {
             .await
             .unwrap();
 
-        tx_a.send(make_channel_message("alice", "msg-a", ChannelType::Telegram))
-            .await
-            .unwrap();
+        tx_a.send(make_channel_message(
+            "alice",
+            "msg-a",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        tx_b.send(make_channel_message("alice", "msg-b", ChannelType::Telegram))
-            .await
-            .unwrap();
+        tx_b.send(make_channel_message(
+            "alice",
+            "msg-b",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let session_a = bridge
@@ -1636,8 +1677,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_account_responses_routed_to_correct_channel() {
-        let sm =
-            test_session_manager_with_mock_client(MockModelClient::new("multi-account reply"));
+        let sm = test_session_manager_with_mock_client(MockModelClient::new("multi-account reply"));
         let mut bridge = ChannelBridge::new(sm.clone());
 
         let chan_a = MockChannel::new(ChannelType::Telegram);
@@ -1656,9 +1696,13 @@ mod tests {
             .await
             .unwrap();
 
-        tx_a.send(make_channel_message("alice", "hello", ChannelType::Telegram))
-            .await
-            .unwrap();
+        tx_a.send(make_channel_message(
+            "alice",
+            "hello",
+            ChannelType::Telegram,
+        ))
+        .await
+        .unwrap();
 
         let messages_a = wait_for_sent_message_count(&sent_a, 1).await;
         assert_eq!(messages_a[0].recipient, "test-channel");
@@ -1707,7 +1751,6 @@ mod tests {
         fn edited_messages_shared(&self) -> Arc<Mutex<Vec<(String, String, String)>>> {
             self.edited_messages.clone()
         }
-
     }
 
     #[async_trait]
@@ -1779,8 +1822,11 @@ mod tests {
     #[tokio::test]
     async fn test_streaming_edits_message_progressively() {
         let sm = test_session_manager_with_mock_client(
-            MockModelClient::new("unused")
-                .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+            MockModelClient::new("unused").with_stream_deltas(vec![
+                "Hello".into(),
+                " world".into(),
+                "!".into(),
+            ]),
         );
         let mut bridge = ChannelBridge::new(sm);
 
@@ -1871,8 +1917,11 @@ mod tests {
     #[tokio::test]
     async fn test_non_streaming_channel_falls_back_to_legacy() {
         let sm = test_session_manager_with_mock_client(
-            MockModelClient::new("unused")
-                .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+            MockModelClient::new("unused").with_stream_deltas(vec![
+                "Hello".into(),
+                " world".into(),
+                "!".into(),
+            ]),
         );
         let mut bridge = ChannelBridge::new(sm);
 
@@ -1894,13 +1943,9 @@ mod tests {
             .await
             .unwrap();
 
-        tx.send(make_channel_message(
-            "user1",
-            "hello",
-            ChannelType::Slack,
-        ))
-        .await
-        .unwrap();
+        tx.send(make_channel_message("user1", "hello", ChannelType::Slack))
+            .await
+            .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
         assert!(!sent.is_empty());
@@ -1934,13 +1979,9 @@ mod tests {
             .await
             .unwrap();
 
-        tx.send(make_channel_message(
-            "user1",
-            "hello",
-            ChannelType::Slack,
-        ))
-        .await
-        .unwrap();
+        tx.send(make_channel_message("user1", "hello", ChannelType::Slack))
+            .await
+            .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
         assert_eq!(sent[0].content.trim_end(), "Hello world\n\ncode value");
@@ -1972,13 +2013,9 @@ mod tests {
             .await
             .unwrap();
 
-        tx.send(make_channel_message(
-            "user1",
-            "hello",
-            ChannelType::Slack,
-        ))
-        .await
-        .unwrap();
+        tx.send(make_channel_message("user1", "hello", ChannelType::Slack))
+            .await
+            .unwrap();
 
         let sent = wait_for_sent_message_count(&sent_messages, 1).await;
         assert_eq!(
@@ -2011,18 +2048,13 @@ mod tests {
             .await
             .unwrap();
 
-        tx.send(make_channel_message(
-            "user1",
-            "hello",
-            ChannelType::Slack,
-        ))
-        .await
-        .unwrap();
+        tx.send(make_channel_message("user1", "hello", ChannelType::Slack))
+            .await
+            .unwrap();
 
         sleep(Duration::from_millis(100)).await;
         assert!(sent_messages.lock().unwrap().is_empty());
 
         bridge.stop().await;
     }
-
 }

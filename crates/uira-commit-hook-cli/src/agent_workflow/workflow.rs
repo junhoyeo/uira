@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use uira_agent::{Agent, AgentConfig, AgentLoopError};
-use uira_providers::{ModelClientBuilder, ProviderConfig};
 use uira_core::Provider;
+use uira_providers::{ModelClientBuilder, ProviderConfig};
 
 use super::{
     detectors::{Detector, RenderBudget, Scope},

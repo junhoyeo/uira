@@ -11,13 +11,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
-use uira_core::{Event, EventBus};
-use uira_orchestration::hooks::hooks::keyword_detector::KeywordDetectorHook;
-use uira_providers::ModelClient;
 use uira_core::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
+use uira_core::{Event, EventBus};
+use uira_orchestration::hooks::hooks::keyword_detector::KeywordDetectorHook;
+use uira_providers::ModelClient;
 
 use crate::{
     approval::{approval_channel, ApprovalReceiver, ApprovalSender},
@@ -582,7 +582,10 @@ impl Agent {
         Ok(SwitchBranchResult {
             branch_name: branch_name.clone(),
             session_id: self.session.id.to_string(),
-            message: format!("Switched to branch '{}' (session {})", branch_name, self.session.id),
+            message: format!(
+                "Switched to branch '{}' (session {})",
+                branch_name, self.session.id
+            ),
         })
     }
 
@@ -1521,14 +1524,12 @@ impl Agent {
                             .await;
 
                             if decision.is_denied() {
-                                let deny_reason = if let uira_core::ReviewDecision::Deny {
-                                    reason,
-                                } = &decision
-                                {
-                                    reason.clone().unwrap_or_default()
-                                } else {
-                                    String::new()
-                                };
+                                let deny_reason =
+                                    if let uira_core::ReviewDecision::Deny { reason } = &decision {
+                                        reason.clone().unwrap_or_default()
+                                    } else {
+                                        String::new()
+                                    };
 
                                 let error_msg = format!("Tool execution denied: {}", deny_reason);
                                 results.push(ContentBlock::tool_error(&call.id, &error_msg));

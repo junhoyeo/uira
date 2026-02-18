@@ -14,13 +14,13 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 
+use uira_core::schema::GatewaySettings;
+use uira_gateway::channel_bridge::ChannelSkillConfig;
 use uira_gateway::channels::{
     Channel, ChannelCapabilities, ChannelError, ChannelMessage, ChannelResponse, ChannelType,
 };
-use uira_gateway::channel_bridge::ChannelSkillConfig;
 use uira_gateway::testing::MockModelClient;
 use uira_gateway::{ChannelBridge, GatewayServer, SessionManager};
-use uira_core::schema::GatewaySettings;
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -364,7 +364,10 @@ async fn test_channel_bridge_routing_and_affinity() {
     // Create a Telegram mock channel and grab sender before registering
     let channel = MockChannel::new(ChannelType::Telegram);
     let tx = channel.sender();
-    bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+    bridge
+        .register_channel(Box::new(channel), "default".to_string())
+        .await
+        .unwrap();
 
     // Send first message from user1
     tx.send(make_channel_message(
@@ -435,7 +438,10 @@ async fn test_multiple_channels_simultaneous_routing() {
     // Create Telegram channel
     let tg_channel = MockChannel::new(ChannelType::Telegram);
     let tg_tx = tg_channel.sender();
-    bridge.register_channel(Box::new(tg_channel), "default".to_string()).await.unwrap();
+    bridge
+        .register_channel(Box::new(tg_channel), "default".to_string())
+        .await
+        .unwrap();
 
     // Create Slack channel
     let slack_channel = MockChannel::new(ChannelType::Slack);
@@ -516,7 +522,10 @@ async fn test_channel_bridge_skill_injection() {
 
     let channel = MockChannel::new(ChannelType::Telegram);
     let tx = channel.sender();
-    bridge.register_channel(Box::new(channel), "default".to_string()).await.unwrap();
+    bridge
+        .register_channel(Box::new(channel), "default".to_string())
+        .await
+        .unwrap();
 
     tx.send(make_channel_message(
         "skill-user",
@@ -551,8 +560,11 @@ async fn test_channel_bridge_skill_injection() {
 #[tokio::test]
 async fn test_streaming_channel_bridge_edits_messages() {
     let sm = test_session_manager_with_mock_client(
-        MockModelClient::new("unused")
-            .with_stream_deltas(vec!["Hello".into(), " world".into(), "!".into()]),
+        MockModelClient::new("unused").with_stream_deltas(vec![
+            "Hello".into(),
+            " world".into(),
+            "!".into(),
+        ]),
     );
     let mut bridge = ChannelBridge::new(sm);
 

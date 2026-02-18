@@ -3,9 +3,9 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Instant;
+use uira_core::{Provider, ThreadEvent};
 use uira_orchestration::AgentExecutor;
 use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
-use uira_core::{Provider, ThreadEvent};
 
 use crate::{Agent, AgentConfig, EventSender};
 
@@ -133,7 +133,10 @@ impl AgentExecutor for RecursiveAgentExecutor {
         let duration_secs = started_at.elapsed().as_secs_f64();
 
         if let Some(ref sender) = self.config.event_sender {
-            let success = run_result.as_ref().map(|result| result.success).unwrap_or(false);
+            let success = run_result
+                .as_ref()
+                .map(|result| result.success)
+                .unwrap_or(false);
             let _ = sender
                 .send(ThreadEvent::SubagentCompleted {
                     task_id,

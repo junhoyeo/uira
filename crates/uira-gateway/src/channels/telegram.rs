@@ -19,7 +19,9 @@ use uira_core::schema::TelegramChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{
+    floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType,
+};
 
 /// Maximum message length for Telegram messages (in characters).
 const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
@@ -170,9 +172,7 @@ impl Channel for TelegramChannel {
             .get_me()
             .await
             .map_err(|e| ChannelError::ConnectionFailed(format!("Failed to get bot info: {e}")))?;
-        let bot_username = me
-            .username()
-            .to_string();
+        let bot_username = me.username().to_string();
 
         info!(
             "Telegram bot @{} started, listening for messages",
@@ -186,47 +186,37 @@ impl Channel for TelegramChannel {
         let allowed_users = self.config.allowed_users.clone();
 
         let handle = tokio::spawn(async move {
-            let handler = Update::filter_message().endpoint(
-                move |_bot: Bot, msg: Message| {
-                    let tx = message_tx.clone();
-                    let allowed = allowed_users.clone();
-                    let bot_uname = bot_username.clone();
+            let handler = Update::filter_message().endpoint(move |_bot: Bot, msg: Message| {
+                let tx = message_tx.clone();
+                let allowed = allowed_users.clone();
+                let bot_uname = bot_username.clone();
 
-                    async move {
-                        if let Some(from) = &msg.from {
-                            if !is_user_allowed(
-                                &allowed,
-                                from.username.as_deref(),
-                                from.id.0,
-                            ) {
-                                debug!(
-                                    "Ignoring message from non-allowed user: {:?} (id: {})",
-                                    from.username, from.id
-                                );
-                                return Ok(());
-                            }
-                        } else {
-                            warn!("Ignoring message with no sender");
+                async move {
+                    if let Some(from) = &msg.from {
+                        if !is_user_allowed(&allowed, from.username.as_deref(), from.id.0) {
+                            debug!(
+                                "Ignoring message from non-allowed user: {:?} (id: {})",
+                                from.username, from.id
+                            );
                             return Ok(());
                         }
-
-                        if let Some(channel_msg) =
-                            telegram_message_to_channel_message(&msg, &bot_uname)
-                        {
-                            if let Err(e) = tx.send(channel_msg).await {
-                                error!("Failed to forward Telegram message: {}", e);
-                            }
-                        }
-
-                        respond(())
+                    } else {
+                        warn!("Ignoring message with no sender");
+                        return Ok(());
                     }
-                },
-            );
 
-            Dispatcher::builder(bot, handler)
-                .build()
-                .dispatch()
-                .await;
+                    if let Some(channel_msg) = telegram_message_to_channel_message(&msg, &bot_uname)
+                    {
+                        if let Err(e) = tx.send(channel_msg).await {
+                            error!("Failed to forward Telegram message: {}", e);
+                        }
+                    }
+
+                    respond(())
+                }
+            });
+
+            Dispatcher::builder(bot, handler).build().dispatch().await;
         });
 
         self.bot_handle = Some(handle);
@@ -247,10 +237,9 @@ impl Channel for TelegramChannel {
     async fn send_message(&self, response: ChannelResponse) -> Result<(), ChannelError> {
         let bot = Bot::new(&self.config.bot_token);
 
-        let chat_id: i64 = response
-            .recipient
-            .parse()
-            .map_err(|e| ChannelError::SendFailed(format!("Invalid chat_id '{}': {e}", response.recipient)))?;
+        let chat_id: i64 = response.recipient.parse().map_err(|e| {
+            ChannelError::SendFailed(format!("Invalid chat_id '{}': {e}", response.recipient))
+        })?;
 
         let chunks = chunk_message(&response.content, TELEGRAM_MAX_MESSAGE_LENGTH);
 
@@ -303,9 +292,9 @@ impl Channel for TelegramChannel {
         let chat_id: i64 = recipient
             .parse()
             .map_err(|e| ChannelError::SendFailed(format!("Invalid chat_id '{recipient}': {e}")))?;
-        let message_id: i32 = message_id
-            .parse()
-            .map_err(|e| ChannelError::SendFailed(format!("Invalid message_id '{message_id}': {e}")))?;
+        let message_id: i32 = message_id.parse().map_err(|e| {
+            ChannelError::SendFailed(format!("Invalid message_id '{message_id}': {e}"))
+        })?;
 
         let result = bot
             .edit_message_text(
@@ -322,7 +311,9 @@ impl Channel for TelegramChannel {
                 if error_text.contains("message is not modified") {
                     return Ok(());
                 }
-                Err(ChannelError::SendFailed(format!("Telegram edit error: {e}")))
+                Err(ChannelError::SendFailed(format!(
+                    "Telegram edit error: {e}"
+                )))
             }
         }
     }
@@ -481,11 +472,7 @@ mod tests {
 
     #[test]
     fn test_is_user_allowed_multiple_entries() {
-        let allowed = vec![
-            "alice".to_string(),
-            "12345".to_string(),
-            "@bob".to_string(),
-        ];
+        let allowed = vec!["alice".to_string(), "12345".to_string(), "@bob".to_string()];
         assert!(is_user_allowed(&allowed, Some("alice"), 99));
         assert!(is_user_allowed(&allowed, Some("unknown"), 12345));
         assert!(is_user_allowed(&allowed, Some("bob"), 99));

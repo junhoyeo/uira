@@ -19,9 +19,7 @@ pub use events::*;
 // Consumers needing protocol-specific versions can use uira_core::protocol::*
 
 // From protocol/events.rs (excluding FileChangeType)
-pub use protocol::{
-    AgentError, AgentState, ExecutionResult, Item, Progress, ThreadEvent,
-};
+pub use protocol::{AgentError, AgentState, ExecutionResult, Item, Progress, ThreadEvent};
 
 // From protocol/messages.rs
 pub use protocol::{

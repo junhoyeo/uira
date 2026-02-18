@@ -69,7 +69,10 @@ pub fn resolve_privileged_intents(flags: u64) -> PrivilegedIntentsSummary {
     };
     PrivilegedIntentsSummary {
         presence: resolve(FLAG_GATEWAY_PRESENCE, FLAG_GATEWAY_PRESENCE_LIMITED),
-        guild_members: resolve(FLAG_GATEWAY_GUILD_MEMBERS, FLAG_GATEWAY_GUILD_MEMBERS_LIMITED),
+        guild_members: resolve(
+            FLAG_GATEWAY_GUILD_MEMBERS,
+            FLAG_GATEWAY_GUILD_MEMBERS_LIMITED,
+        ),
         message_content: resolve(
             FLAG_GATEWAY_MESSAGE_CONTENT,
             FLAG_GATEWAY_MESSAGE_CONTENT_LIMITED,
@@ -197,10 +200,7 @@ async fn fetch_application_summary(
     })
 }
 
-pub async fn fetch_application_id(
-    token: &str,
-    timeout: std::time::Duration,
-) -> Option<String> {
+pub async fn fetch_application_id(token: &str, timeout: std::time::Duration) -> Option<String> {
     let client = Client::builder().timeout(timeout).build().ok()?;
     let auth = format!("Bot {token}");
     let resp = client
@@ -224,7 +224,8 @@ mod tests {
 
     #[test]
     fn test_resolve_privileged_intents_all_enabled() {
-        let flags = FLAG_GATEWAY_PRESENCE | FLAG_GATEWAY_GUILD_MEMBERS | FLAG_GATEWAY_MESSAGE_CONTENT;
+        let flags =
+            FLAG_GATEWAY_PRESENCE | FLAG_GATEWAY_GUILD_MEMBERS | FLAG_GATEWAY_MESSAGE_CONTENT;
         let summary = resolve_privileged_intents(flags);
         assert_eq!(summary.presence, PrivilegedIntentStatus::Enabled);
         assert_eq!(summary.guild_members, PrivilegedIntentStatus::Enabled);

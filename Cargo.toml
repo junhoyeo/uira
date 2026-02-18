@@ -14,6 +14,7 @@ members = [
   "crates/uira-cli",
   "crates/uira-tui",
   "crates/uira-gateway",
+  "crates/uira-memory",
 ]
 [workspace.package]
 version = "0.1.0"
@@ -46,6 +47,9 @@ uira-mcp-server = { path = "crates/uira-mcp-server" }
 
 # Internal crates - Expansion (gateway, channels, skills)
 uira-gateway = { path = "crates/uira-gateway" }
+
+# Internal crates - Memory
+uira-memory = { path = "crates/uira-memory" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

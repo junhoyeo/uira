@@ -17,7 +17,7 @@ mod widgets;
 
 pub use app::App;
 pub use events::AppEvent;
-pub use keybinds::{KeyBinding, KeybindConfig};
 pub use frecency::{FrecencyEntry, FrecencyStore};
+pub use keybinds::{KeyBinding, KeybindConfig};
 pub use theme::{Theme, ThemeOverrides};
 pub use views::{ApprovalOverlay, ApprovalRequest, ApprovalView};

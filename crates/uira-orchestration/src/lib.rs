@@ -11,15 +11,14 @@ pub use agents::{
 pub use agents::{
     get_agent_definitions, get_agent_definitions_with_config, AgentCategory, AgentConfig,
     AgentCost, AgentFactory, AgentOverrideConfig, AgentOverrides, AgentPromptMetadata,
-    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PlanningPipeline,
-    PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder, ToolRestrictions,
-    ToolRestrictionsRegistry,
-    OrchestratorPersonality,
+    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, OrchestratorPersonality,
+    PlanningPipeline, PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder,
+    ToolRestrictions, ToolRestrictionsRegistry,
 };
 pub use features::{background_agent, dynamic_prompt_builder, model_routing, uira_state};
 pub use features::{
-    build_environment_context, register_environment_context,
-    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt, builtin_agent_metadata,
+    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt,
+    build_environment_context, builtin_agent_metadata, register_environment_context,
     AvailableAgent, AvailableDelegationCategory, AvailableSkill,
 };
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
