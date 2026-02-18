@@ -21,6 +21,59 @@ pub struct DiscordHandler {
     pub bot_user_id: Arc<RwLock<Option<u64>>>,
 }
 
+enum AccessResult {
+    Allowed,
+    AllowedRequireMention,
+    Denied,
+}
+
+impl DiscordHandler {
+    async fn check_access(
+        &self,
+        user_id: u64,
+        username: &str,
+        guild_id: Option<u64>,
+        channel_id: u64,
+    ) -> AccessResult {
+        let is_dm = guild_id.is_none();
+
+        if is_dm {
+            if let Some(ref dm_config) = self.config.dm {
+                if !dm_config.enabled {
+                    return AccessResult::Denied;
+                }
+                if !dm_config.allow_from.is_empty() {
+                    let uid = user_id.to_string();
+                    if !config::is_user_allowed(&dm_config.allow_from, &uid, Some(username)) {
+                        return AccessResult::Denied;
+                    }
+                }
+            }
+        } else if let Some(gid) = guild_id {
+            let guild_id_str = gid.to_string();
+            let channel_id_str = channel_id.to_string();
+            let access =
+                config::check_guild_channel_access(&self.config, &guild_id_str, &channel_id_str);
+            if !access.allowed {
+                return AccessResult::Denied;
+            }
+
+            if !self.config.allowed_users.is_empty() {
+                let uid = user_id.to_string();
+                if !config::is_user_allowed(&self.config.allowed_users, &uid, Some(username)) {
+                    return AccessResult::Denied;
+                }
+            }
+
+            if access.require_mention {
+                return AccessResult::AllowedRequireMention;
+            }
+        }
+
+        AccessResult::Allowed
+    }
+}
+
 #[serenity::async_trait]
 impl EventHandler for DiscordHandler {
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -61,57 +114,40 @@ impl EventHandler for DiscordHandler {
             return;
         }
 
-        {
+        let bot_id_val = {
             let bot_id = self.bot_user_id.read().await;
-            if let Some(id) = *bot_id {
-                if msg.author.id.get() == id {
-                    return;
-                }
+            *bot_id
+        };
+        if let Some(id) = bot_id_val {
+            if msg.author.id.get() == id {
+                return;
             }
         }
 
         let is_dm = msg.guild_id.is_none();
 
-        if is_dm {
-            if let Some(ref dm_config) = self.config.dm {
-                if !dm_config.enabled {
-                    return;
-                }
-                if !dm_config.allow_from.is_empty() {
-                    let user_id = msg.author.id.get().to_string();
-                    let username = &msg.author.name;
-                    if !config::is_user_allowed(
-                        &dm_config.allow_from,
-                        &user_id,
-                        Some(username),
-                    ) {
-                        debug!(user = %username, "DM blocked by allow_from");
+        match self
+            .check_access(
+                msg.author.id.get(),
+                &msg.author.name,
+                msg.guild_id.map(|g| g.get()),
+                msg.channel_id.get(),
+            )
+            .await
+        {
+            AccessResult::Denied => return,
+            AccessResult::AllowedRequireMention => {
+                if let Some(id) = bot_id_val {
+                    if !msg.mentions.iter().any(|u| u.id.get() == id) {
+                        debug!(
+                            channel = %msg.channel_id,
+                            "Message ignored: require_mention is set and bot was not mentioned"
+                        );
                         return;
                     }
                 }
             }
-        } else if let Some(guild_id) = msg.guild_id {
-            let guild_id_str = guild_id.get().to_string();
-            let channel_id_str = msg.channel_id.get().to_string();
-            if !config::is_guild_channel_allowed(
-                &self.config,
-                &guild_id_str,
-                &channel_id_str,
-            ) {
-                return;
-            }
-
-            if !self.config.allowed_users.is_empty() {
-                let user_id = msg.author.id.get().to_string();
-                let username = &msg.author.name;
-                if !config::is_user_allowed(
-                    &self.config.allowed_users,
-                    &user_id,
-                    Some(username),
-                ) {
-                    return;
-                }
-            }
+            AccessResult::Allowed => {}
         }
 
         let mut metadata = std::collections::HashMap::new();
@@ -143,6 +179,25 @@ impl EventHandler for DiscordHandler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         match interaction {
             Interaction::Command(cmd) => {
+                if matches!(
+                    self.check_access(
+                        cmd.user.id.get(),
+                        &cmd.user.name,
+                        cmd.guild_id.map(|g| g.get()),
+                        cmd.channel_id.get(),
+                    )
+                    .await,
+                    AccessResult::Denied
+                ) {
+                    debug!(
+                        command = %cmd.data.name,
+                        user = %cmd.user.name,
+                        "Slash command blocked by access controls"
+                    );
+                    let _ = cmd.defer(&ctx.http).await;
+                    return;
+                }
+
                 debug!(
                     command = %cmd.data.name,
                     user = %cmd.user.name,

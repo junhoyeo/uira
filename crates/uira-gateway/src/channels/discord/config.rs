@@ -86,26 +86,54 @@ pub fn is_user_allowed(allowed_users: &[String], user_id: &str, username: Option
     false
 }
 
+#[derive(Debug, Clone)]
+pub struct GuildChannelAccess {
+    pub allowed: bool,
+    pub require_mention: bool,
+}
+
+pub fn check_guild_channel_access(
+    config: &DiscordChannelConfig,
+    guild_id: &str,
+    channel_id: &str,
+) -> GuildChannelAccess {
+    match config.group_policy.as_str() {
+        "disabled" => GuildChannelAccess {
+            allowed: false,
+            require_mention: false,
+        },
+        "allowlist" => {
+            let Some(guild) = resolve_guild_entry(&config.guilds, guild_id) else {
+                return GuildChannelAccess {
+                    allowed: false,
+                    require_mention: false,
+                };
+            };
+            if let Some(ch_config) = guild.channels.get(channel_id) {
+                GuildChannelAccess {
+                    allowed: ch_config.enabled && ch_config.allow,
+                    require_mention: ch_config.require_mention || guild.require_mention,
+                }
+            } else {
+                GuildChannelAccess {
+                    allowed: false,
+                    require_mention: guild.require_mention,
+                }
+            }
+        }
+        _ => GuildChannelAccess {
+            allowed: true,
+            require_mention: false,
+        },
+    }
+}
+
 pub fn is_guild_channel_allowed(
     config: &DiscordChannelConfig,
     guild_id: &str,
     channel_id: &str,
 ) -> bool {
-    match config.group_policy.as_str() {
-        "disabled" => false,
-        "allowlist" => {
-            let Some(guild) = resolve_guild_entry(&config.guilds, guild_id) else {
-                return false;
-            };
-            if let Some(ch_config) = guild.channels.get(channel_id) {
-                ch_config.enabled && ch_config.allow
-            } else {
-                false
-            }
-        }
-        // "open" and any other value
-        _ => true,
-    }
+    check_guild_channel_access(config, guild_id, channel_id).allowed
 }
 
 #[cfg(test)]

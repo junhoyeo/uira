@@ -91,6 +91,19 @@ fn close_fence_if_needed(text: &str, fence: Option<&OpenFence>) -> String {
     }
 }
 
+fn char_safe_limit(s: &str, byte_limit: usize) -> usize {
+    let capped = byte_limit.min(s.len());
+    let mut idx = capped;
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    if idx == 0 && capped > 0 {
+        s.char_indices().nth(1).map(|(i, _)| i).unwrap_or(s.len())
+    } else {
+        idx
+    }
+}
+
 fn split_long_line(line: &str, max_chars: usize, preserve_whitespace: bool) -> Vec<String> {
     let limit = max_chars.max(1);
     if line.len() <= limit {
@@ -99,12 +112,13 @@ fn split_long_line(line: &str, max_chars: usize, preserve_whitespace: bool) -> V
     let mut out = Vec::new();
     let mut remaining = line;
     while remaining.len() > limit {
+        let byte_limit = char_safe_limit(remaining, limit);
         if preserve_whitespace {
-            out.push(remaining[..limit].to_string());
-            remaining = &remaining[limit..];
+            out.push(remaining[..byte_limit].to_string());
+            remaining = &remaining[byte_limit..];
             continue;
         }
-        let window = &remaining[..limit];
+        let window = &remaining[..byte_limit];
         let mut break_idx = None;
         for (i, c) in window.char_indices().rev() {
             if c.is_whitespace() {
@@ -112,8 +126,8 @@ fn split_long_line(line: &str, max_chars: usize, preserve_whitespace: bool) -> V
                 break;
             }
         }
-        let idx = break_idx.unwrap_or(limit);
-        let idx = if idx == 0 { limit } else { idx };
+        let idx = break_idx.unwrap_or(byte_limit);
+        let idx = if idx == 0 { byte_limit } else { idx };
         out.push(remaining[..idx].to_string());
         remaining = &remaining[idx..];
     }
@@ -321,6 +335,36 @@ mod tests {
         assert!(chunks[0].contains("```"));
         for chunk in &chunks[1..] {
             assert!(chunk.starts_with("```rust"));
+        }
+    }
+
+    #[test]
+    fn test_multibyte_utf8_does_not_panic() {
+        let text = "🔥".repeat(1500);
+        let opts = ChunkOpts {
+            max_chars: 2000,
+            max_lines: 100,
+        };
+        let chunks = chunk_discord_text(&text, &opts);
+        assert!(chunks.len() >= 2);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 2000);
+        }
+        let reassembled: String = chunks.concat();
+        assert_eq!(reassembled, text);
+    }
+
+    #[test]
+    fn test_mixed_ascii_and_multibyte() {
+        let text = "Hello 🌍 World 🚀 ".repeat(200);
+        let opts = ChunkOpts {
+            max_chars: 100,
+            max_lines: 100,
+        };
+        let chunks = chunk_discord_text(&text, &opts);
+        assert!(chunks.len() >= 2);
+        for chunk in &chunks {
+            assert!(chunk.len() <= 100);
         }
     }
 
