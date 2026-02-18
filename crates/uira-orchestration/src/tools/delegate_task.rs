@@ -7,7 +7,7 @@ use crate::agents::{get_agent_definitions, ModelType};
 use crate::features::builtin_skills;
 use crate::features::delegation_categories;
 use crate::features::model_routing::{
-    route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
+    adapt_prompt_for_model, route_task, ModelTier, RoutingConfigOverrides, RoutingContext,
 };
 use crate::tools::types::{ToolDefinition, ToolError, ToolInput, ToolOutput};
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,8 @@ struct DelegateTaskResponse {
     /// The final prompt with injected skills and category guidance
     #[serde(skip_serializing_if = "Option::is_none")]
     effective_prompt: Option<String>,
+    /// The model-adapted prompt (with provider-specific framing applied)
+    adapted_prompt: String,
 }
 
 /// Parse model string to ModelType
@@ -149,42 +151,46 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     let resolved_category = delegation_categories::get_category_for_task(&category_context);
 
     // Determine model to use
-    let (mut final_model, mut final_tier, mut routing_reasons) = if let Some(model_str) = &params.model {
-        // Explicit model override
-        if let Some(model_type) = parse_model_type(model_str) {
-            let tier = match model_type {
-                ModelType::Haiku => ModelTier::Low,
-                ModelType::Sonnet => ModelTier::Medium,
-                ModelType::Opus => ModelTier::High,
-                ModelType::Inherit => ModelTier::Medium,
-            };
-            (
-                model_type,
-                tier,
-                vec![format!("Explicit model override: {}", model_str)],
-            )
+    // Priority: explicit model param > routing decision > agent default > Sonnet
+    let (mut final_model, mut final_tier, mut routing_reasons, mut resolved_model_name) =
+        if let Some(model_str) = &params.model {
+            // Explicit model override
+            if let Some(model_type) = parse_model_type(model_str) {
+                let tier = match model_type {
+                    ModelType::Haiku => ModelTier::Low,
+                    ModelType::Sonnet => ModelTier::Medium,
+                    ModelType::Opus => ModelTier::High,
+                    ModelType::Inherit => ModelTier::Medium,
+                };
+                (
+                    model_type,
+                    tier,
+                    vec![format!("Explicit model override: {}", model_str)],
+                    model_str.clone(),
+                )
+            } else {
+                return Err(ToolError::InvalidInput {
+                    message: format!("Invalid model: {}. Use haiku, sonnet, or opus.", model_str),
+                });
+            }
         } else {
-            return Err(ToolError::InvalidInput {
-                message: format!("Invalid model: {}. Use haiku, sonnet, or opus.", model_str),
-            });
-        }
-    } else {
-        // Use model routing to determine best model
-        let routing_context = RoutingContext {
-            task_prompt: params.prompt.clone(),
-            agent_type: Some(agent_name.to_string()),
-            explicit_model: agent_default_model,
-            ..Default::default()
+            // Use model routing to determine best model
+            let routing_context = RoutingContext {
+                task_prompt: params.prompt.clone(),
+                agent_type: Some(agent_name.to_string()),
+                explicit_model: agent_default_model,
+                ..Default::default()
+            };
+
+            let decision = route_task(routing_context, RoutingConfigOverrides::default());
+
+            (
+                tier_to_model_type(decision.tier),
+                decision.tier,
+                decision.reasons,
+                decision.model,
+            )
         };
-
-        let decision = route_task(routing_context, RoutingConfigOverrides::default());
-
-        (
-            tier_to_model_type(decision.tier),
-            decision.tier,
-            decision.reasons,
-        )
-    };
 
     if params.model.is_none() {
         if let Some(explicit_category_str) = params.category.as_deref() {
@@ -192,6 +198,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
                 final_tier = explicit_category_tier;
                 final_model = tier_to_model_type(explicit_category_tier);
                 routing_reasons.push(format!("Category override: {}", explicit_category_str));
+                resolved_model_name = final_model.as_str().to_string();
             }
         }
     }
@@ -226,11 +233,13 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
     }
 
     // Apply category-specific prompt enhancement
-    let effective_prompt = delegation_categories::enhance_prompt_with_category(
+    effective_prompt = delegation_categories::enhance_prompt_with_category(
         &effective_prompt,
         resolved_category.category,
     );
-    // effective_prompt is the final prompt that would be sent to the delegated agent.
+
+    // Apply model-aware prompt adaptation after skill/category enhancement.
+    let adapted_prompt = adapt_prompt_for_model(&effective_prompt, final_tier, &resolved_model_name);
 
     // Generate task/session IDs
     let session_id = Uuid::new_v4().to_string();
@@ -267,6 +276,7 @@ async fn handle_delegate_task(input: ToolInput) -> Result<ToolOutput, ToolError>
         category: Some(resolved_category.category.as_str().to_string()),
         loaded_skills: loaded_skill_names,
         effective_prompt: Some(effective_prompt),
+        adapted_prompt,
     };
 
     let json_response =

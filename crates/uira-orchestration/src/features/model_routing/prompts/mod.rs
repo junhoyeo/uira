@@ -1,3 +1,4 @@
+pub mod gpt;
 mod haiku;
 mod opus;
 mod sonnet;
@@ -127,6 +128,124 @@ pub fn get_task_instructions(tier: ModelTier, task_type: &str) -> &'static str {
     }
 }
 
+/// Adapt a prompt for a specific tier AND model provider.
+///
+/// When the model is a GPT/OpenAI model, uses GPT-optimized prompts that
+/// prefer structured numbered steps and explicit output formatting.
+/// Otherwise falls back to the default Claude-optimized prompts.
+pub fn adapt_prompt_for_model(prompt: &str, tier: ModelTier, model: &str) -> String {
+    if gpt::is_gpt_model(model) {
+        let prefix = get_gpt_prompt_prefix(tier);
+        let suffix = get_gpt_prompt_suffix(tier);
+        format!("{}\n\n{}\n\n{}", prefix, prompt.trim(), suffix)
+    } else {
+        adapt_prompt_for_tier(prompt, tier)
+    }
+}
+
+/// Get GPT-optimized prompt prefix for a tier
+fn get_gpt_prompt_prefix(tier: ModelTier) -> &'static str {
+    match tier {
+        ModelTier::Low => gpt::LOW_PREFIX,
+        ModelTier::Medium => gpt::MEDIUM_PREFIX,
+        ModelTier::High => gpt::HIGH_PREFIX,
+    }
+}
+
+/// Get GPT-optimized prompt suffix for a tier
+fn get_gpt_prompt_suffix(tier: ModelTier) -> &'static str {
+    match tier {
+        ModelTier::Low => gpt::LOW_SUFFIX,
+        ModelTier::Medium => gpt::MEDIUM_SUFFIX,
+        ModelTier::High => gpt::HIGH_SUFFIX,
+    }
+}
+
+/// Get provider-aware task instructions
+pub fn get_task_instructions_for_model(
+    tier: ModelTier,
+    task_type: &str,
+    model: &str,
+) -> &'static str {
+    if gpt::is_gpt_model(model) {
+        gpt::get_task_instructions(task_type)
+    } else {
+        get_task_instructions(tier, task_type)
+    }
+}
+
+/// Create a delegation prompt that is provider-aware
+pub fn create_delegation_prompt_for_model(
+    tier: ModelTier,
+    task: &str,
+    context: &DelegationContext,
+    model: &str,
+) -> String {
+    if gpt::is_gpt_model(model) {
+        // GPT-optimized delegation prompt
+        let prefix = get_gpt_prompt_prefix(tier);
+        let suffix = get_gpt_prompt_suffix(tier);
+
+        let mut parts = vec![prefix.to_string()];
+        parts.push(format!("\n## Task\n{}", task.trim()));
+
+        // GPT models benefit from more explicit structure
+        if let Some(ref task_type) = context.task_type {
+            parts.push(format!("\n**Task Type:** {}", task_type));
+        }
+        if !context.file_paths.is_empty() {
+            parts.push(format!(
+                "\n**Target Files:**\n{}",
+                context
+                    .file_paths
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| format!("{}. {}", i + 1, f))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !context.dependencies.is_empty() {
+            parts.push(format!(
+                "\n**Dependencies:**\n{}",
+                context
+                    .dependencies
+                    .iter()
+                    .enumerate()
+                    .map(|(i, d)| format!("{}. {}", i + 1, d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !context.constraints.is_empty() {
+            parts.push(format!(
+                "\n**Constraints:**\n{}",
+                context
+                    .constraints
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("{}. {}", i + 1, c))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if let Some(attempts) = context.previous_attempts {
+            parts.push(format!(
+                "\n**WARNING:** This task has failed {} time(s). Use a DIFFERENT approach.",
+                attempts
+            ));
+        }
+        if let Some(ref expected) = context.expected_output {
+            parts.push(format!("\n**Expected Output:** {}", expected));
+        }
+
+        parts.push(format!("\n{}", suffix));
+        parts.join("\n")
+    } else {
+        create_delegation_prompt(tier, task, context)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +300,46 @@ mod tests {
         assert!(!prompt.contains("## Task Type"));
         assert!(prompt.contains("Files:"));
         assert!(prompt.contains("Be brief"));
+    }
+
+    #[test]
+    fn test_adapt_prompt_for_gpt_model() {
+        let prompt = "Fix the bug in auth.ts";
+
+        // GPT model should use GPT-optimized prompts
+        let gpt_prompt = adapt_prompt_for_model(prompt, ModelTier::Medium, "gpt-4o");
+        assert!(gpt_prompt.contains("skilled software engineer"));
+
+        // Claude model should use default prompts
+        let claude_prompt = adapt_prompt_for_model(prompt, ModelTier::Medium, "claude-sonnet-4");
+        assert!(claude_prompt.contains("Execute this task efficiently"));
+    }
+
+    #[test]
+    fn test_gpt_delegation_prompt() {
+        let context = DelegationContext {
+            task_type: Some("debugging".to_string()),
+            file_paths: vec!["src/auth.ts".to_string()],
+            dependencies: vec!["src/lib.rs".to_string()],
+            constraints: vec!["No breaking changes".to_string()],
+            previous_attempts: Some(2),
+            ..Default::default()
+        };
+
+        let prompt = create_delegation_prompt_for_model(
+            ModelTier::High,
+            "Debug auth failure",
+            &context,
+            "gpt-4o",
+        );
+
+        // GPT prompt should use numbered lists and bold formatting
+        assert!(prompt.contains("**Task Type:**"));
+        assert!(prompt.contains("1. src/auth.ts"));
+        assert!(prompt.contains("**Dependencies:**"));
+        assert!(prompt.contains("1. src/lib.rs"));
+        assert!(prompt.contains("WARNING"));
+        assert!(prompt.contains("DIFFERENT approach"));
     }
 
     #[test]
