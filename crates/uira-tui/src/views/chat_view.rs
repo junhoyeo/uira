@@ -9,6 +9,7 @@ use uira_core::AgentState;
 
 use crate::widgets::tool_renderers::{ToolRenderContext, ToolState};
 use crate::widgets::{
+    diff::WrapMode,
     markdown::{render_markdown_with_options, MarkdownRenderOptions},
     tool_renderers, ChatMessage,
 };
@@ -35,6 +36,7 @@ pub struct ChatView {
     cache_dirty: bool,
     show_tool_details: bool,
     pub agent_state: AgentState,
+    diff_wrap_mode: WrapMode,
 }
 
 impl ChatView {
@@ -60,7 +62,13 @@ impl ChatView {
             cache_dirty: true,
             show_tool_details: true,
             agent_state: AgentState::Idle,
+            diff_wrap_mode: WrapMode::Word,
         }
+    }
+
+    pub fn set_diff_wrap_mode(&mut self, wrap_mode: WrapMode) {
+        self.diff_wrap_mode = wrap_mode;
+        self.invalidate_render_cache();
     }
 
     pub fn toggle_tool_details(&mut self) -> String {
@@ -536,6 +544,7 @@ impl ChatView {
                     state: tool_state_from_message(&msg),
                     expanded: !tool_output.collapsed,
                     wide: inner_width > 120,
+                    wrap_mode: self.diff_wrap_mode,
                 },
             ));
             return self.add_message_border(lines, &msg);
@@ -738,7 +747,7 @@ impl ChatView {
 
     /// Compute the line offset where each message starts.
     /// Returns a vector where index i contains the line offset of message i.
-    fn message_line_offsets(&self) -> Vec<usize> {
+    pub(crate) fn message_line_offsets(&self) -> Vec<usize> {
         let mut offsets = Vec::new();
         let mut current_offset = 0;
 

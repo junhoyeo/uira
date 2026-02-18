@@ -7,6 +7,7 @@ pub mod delegate_task;
 pub mod lsp;
 pub mod orchestrator;
 pub mod parallel;
+pub mod planning;
 pub mod provider;
 pub mod providers;
 pub mod registry;

@@ -83,7 +83,10 @@ impl ToolRestrictionsRegistry {
         reg.register("vision", allow(&["Read", "Glob", "Grep"]));
         reg.register("critic", allow(&["Read", "Glob", "Grep"]));
         reg.register("analyst", allow(&["Read", "Glob", "Grep"]));
-        reg.register("planner", allow(&["Read", "Glob", "Grep", "Write"]));
+        reg.register(
+            "planner",
+            allow(&["Read", "Glob", "Grep", "Write", "planning_pipeline"]),
+        );
         reg.register(
             "qa-tester",
             allow(&["Bash", "Read", "Grep", "Glob", "TodoWrite"]),
@@ -138,6 +141,39 @@ impl ToolRestrictionsRegistry {
         reg.register(
             "code-reviewer-low",
             allow(&["Read", "Grep", "Glob", "Bash"]),
+        );
+
+        reg.register(
+            "balanced",
+            allow(&[
+                "Read",
+                "Glob",
+                "Grep",
+                "WebSearch",
+                "WebFetch",
+                "Bash",
+                "TodoWrite",
+                "delegate_task",
+                "background_output",
+                "background_cancel",
+                "planning_pipeline",
+            ]),
+        );
+        reg.register(
+            "orchestrator",
+            allow(&[
+                "Read",
+                "Glob",
+                "Grep",
+                "WebSearch",
+                "WebFetch",
+                "Bash",
+                "TodoWrite",
+                "delegate_task",
+                "background_output",
+                "background_cancel",
+                "planning_pipeline",
+            ]),
         );
 
         reg
