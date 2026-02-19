@@ -19,6 +19,7 @@ fn ensure_sqlite_vec_registered() {
     });
 }
 
+#[derive(Debug)]
 pub struct MemoryStore {
     conn: Mutex<Connection>,
     embedding_dimension: usize,
@@ -101,10 +102,43 @@ impl MemoryStore {
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );",
         )?;
 
         let dim = self.embedding_dimension;
+
+        let existing_dim: Option<usize> = conn
+            .query_row(
+                "SELECT value FROM schema_meta WHERE key = 'embedding_dimension'",
+                [],
+                |row| {
+                    let s: String = row.get(0)?;
+                    Ok(s.parse::<usize>().unwrap_or(0))
+                },
+            )
+            .optional()?;
+
+        match existing_dim {
+            Some(d) if d != dim => {
+                anyhow::bail!(
+                    "Embedding dimension mismatch: database was created with dimension {d}, \
+                     but config specifies {dim}. Delete the database or update your config."
+                );
+            }
+            None => {
+                conn.execute(
+                    "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('embedding_dimension', ?1)",
+                    params![dim.to_string()],
+                )?;
+            }
+            _ => {}
+        }
+
         conn.execute_batch(&format!(
             "CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0(
                 id TEXT PRIMARY KEY,
@@ -458,11 +492,23 @@ use rusqlite::OptionalExtension;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn make_embedding(dim: usize, seed: f32) -> Vec<f32> {
         (0..dim)
             .map(|i| ((i as f32 + seed) / dim as f32).sin())
             .collect()
+    }
+
+    fn temp_db_path(name: &str) -> String {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!("uira-memory-{name}-{nonce}.db"))
+            .to_string_lossy()
+            .into_owned()
     }
 
     #[test]
@@ -613,5 +659,45 @@ mod tests {
 
         let facts = store.get_profile_facts(None).unwrap();
         assert!(facts.is_empty());
+    }
+
+    #[test]
+    fn init_schema_persists_dimension_and_detects_mismatch() {
+        let db_path = temp_db_path("dimension-check");
+
+        let mut config = MemoryConfig::default();
+        config.storage_path = db_path.clone();
+        config.embedding_dimension = 64;
+
+        {
+            let store = MemoryStore::new(&config).unwrap();
+            let entry = MemoryEntry::new("dimension test", MemorySource::Manual, "default");
+            store.insert(&entry, &make_embedding(64, 1.0)).unwrap();
+
+            let conn = store.conn.lock().unwrap();
+            let stored_dim: String = conn
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key = 'embedding_dimension'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored_dim, "64");
+        }
+
+        let mut mismatch_config = MemoryConfig::default();
+        mismatch_config.storage_path = db_path.clone();
+        mismatch_config.embedding_dimension = 128;
+
+        let err = match MemoryStore::new(&mismatch_config) {
+            Ok(_) => panic!("expected dimension mismatch error"),
+            Err(err) => err,
+        };
+        let message = err.to_string();
+        assert!(message.contains("Embedding dimension mismatch"));
+        assert!(message.contains("64"));
+        assert!(message.contains("128"));
+
+        let _ = std::fs::remove_file(db_path);
     }
 }

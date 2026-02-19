@@ -36,7 +36,7 @@ impl HybridSearcher {
         &self,
         query: &str,
         limit: usize,
-        _container_tag: Option<&str>,
+        container_tag: Option<&str>,
     ) -> Result<Vec<SearchResult>> {
         let candidate_count = limit * 3;
 
@@ -79,6 +79,12 @@ impl HybridSearcher {
                 Some(e) => e,
                 None => continue,
             };
+
+            if let Some(tag) = container_tag {
+                if entry.container_tag != tag {
+                    continue;
+                }
+            }
 
             let norm_vec = vec_scores
                 .get(id)
@@ -279,6 +285,41 @@ mod tests {
         let searcher = HybridSearcher::new(store, embedder, &config);
         let results = searcher.search("rust programming", 5, None).await.unwrap();
         assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_filters_by_container_tag() {
+        let (store, embedder, config) = setup();
+
+        let work_entry = MemoryEntry::new(
+            "Rust memory internals for work project",
+            MemorySource::Manual,
+            "work",
+        );
+        let work_emb = embedder.embed(&[work_entry.content.clone()]).await.unwrap();
+        store.insert(&work_entry, &work_emb[0]).unwrap();
+
+        let personal_entry = MemoryEntry::new(
+            "Rust hobby game ideas for weekend",
+            MemorySource::Manual,
+            "personal",
+        );
+        let personal_emb = embedder
+            .embed(&[personal_entry.content.clone()])
+            .await
+            .unwrap();
+        store.insert(&personal_entry, &personal_emb[0]).unwrap();
+
+        let searcher = HybridSearcher::new(store, embedder, &config);
+        let results = searcher
+            .search("rust ideas", 10, Some("work"))
+            .await
+            .unwrap();
+
+        assert!(!results.is_empty());
+        assert!(results
+            .iter()
+            .all(|result| result.entry.container_tag == "work"));
     }
 
     #[tokio::test]

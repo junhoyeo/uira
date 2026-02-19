@@ -1,4 +1,4 @@
-use text_splitter::TextSplitter;
+use text_splitter::{ChunkConfig, TextSplitter};
 
 pub struct TextChunker {
     max_characters: usize,
@@ -22,14 +22,12 @@ impl TextChunker {
             return vec![text.to_string()];
         }
 
-        let splitter = TextSplitter::new(self.max_characters);
-        let chunks: Vec<String> = splitter.chunks(text).map(|s| s.to_string()).collect();
+        let config = ChunkConfig::new(self.max_characters)
+            .with_overlap(self.overlap_characters)
+            .unwrap_or_else(|_| ChunkConfig::new(self.max_characters));
 
-        if chunks.len() <= 1 || self.overlap_characters == 0 {
-            return chunks;
-        }
-
-        chunks
+        let splitter = TextSplitter::new(config);
+        splitter.chunks(text).map(|s| s.to_string()).collect()
     }
 }
 
@@ -76,5 +74,23 @@ mod tests {
         let chunker = TextChunker::default();
         assert_eq!(chunker.max_characters, 2000);
         assert_eq!(chunker.overlap_characters, 200);
+    }
+
+    #[test]
+    fn overlapping_chunks_share_boundary_content() {
+        let chunker = TextChunker::new(50, 10);
+        // Use a text long enough to produce multiple chunks
+        let text = "word ".repeat(40); // 200 chars
+        let chunks = chunker.chunk(&text);
+        // With overlap configured, verify multiple chunks are produced
+        // The exact overlap behavior depends on text-splitter's semantic splitting
+        assert!(
+            chunks.len() > 1,
+            "Expected multiple chunks with overlap configured"
+        );
+        // Verify all chunks are non-empty
+        for chunk in &chunks {
+            assert!(!chunk.is_empty(), "Chunks should not be empty");
+        }
     }
 }

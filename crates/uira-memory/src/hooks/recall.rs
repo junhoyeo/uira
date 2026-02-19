@@ -53,7 +53,11 @@ impl MemoryRecallHook {
         let turn = self.turn_counter.fetch_add(1, Ordering::Relaxed);
 
         let results = searcher
-            .search(query, self.config.max_recall_results, None)
+            .search(
+                query,
+                self.config.max_recall_results,
+                Some(&self.config.container_tag),
+            )
             .await?;
 
         let include_profile =
