@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
+use super::super::types::{HookEvent, HookInput, HookOutput};
 use super::ralph::RalphHook;
 use super::todo_continuation::TodoContinuationHook;
-use super::super::types::{HookEvent, HookInput, HookOutput};
 
 /// Ultrawork mode state
 #[derive(Debug, Clone, Serialize, Deserialize)]

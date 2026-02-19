@@ -11,8 +11,8 @@ use tokio::time::{timeout, Duration};
 
 use uira_agent::{Agent, AgentConfig, EventStream};
 use uira_core::schema::GatewaySettings;
-use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
 use uira_core::{Message, Provider, ThreadEvent};
+use uira_providers::{ModelClient, ModelClientBuilder, ProviderConfig};
 
 use crate::config::SessionConfig;
 use crate::error::GatewayError;
@@ -214,9 +214,8 @@ impl SessionManager {
         }
 
         let manager = self.clone();
-        let idle_timeout = chrono::Duration::seconds(
-            i64::try_from(idle_timeout_secs).unwrap_or(i64::MAX),
-        );
+        let idle_timeout =
+            chrono::Duration::seconds(i64::try_from(idle_timeout_secs).unwrap_or(i64::MAX));
 
         let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(manager.reaper_interval);
@@ -229,7 +228,8 @@ impl SessionManager {
                     sessions
                         .iter()
                         .filter_map(|(session_id, session)| {
-                            let idle_duration = now.signed_duration_since(session.info.last_message_at);
+                            let idle_duration =
+                                now.signed_duration_since(session.info.last_message_at);
                             if idle_duration > idle_timeout {
                                 Some(session_id.clone())
                             } else {
@@ -265,10 +265,7 @@ impl SessionManager {
         });
 
         // Store the reaper handle for shutdown
-        *self
-            .reaper_handle
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(handle);
+        *self.reaper_handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
     }
 
     /// Destroy a session by ID.
@@ -372,7 +369,10 @@ impl SessionManager {
 
         let sessions = {
             let mut sessions = self.sessions.write().await;
-            sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
+            sessions
+                .drain()
+                .map(|(_, session)| session)
+                .collect::<Vec<_>>()
         };
 
         let mut shutdown_errors = Vec::new();
@@ -405,7 +405,9 @@ impl SessionManager {
         if shutdown_errors.is_empty() {
             Ok(())
         } else {
-            Err(GatewayError::SessionShutdownFailed(shutdown_errors.join(", ")))
+            Err(GatewayError::SessionShutdownFailed(
+                shutdown_errors.join(", "),
+            ))
         }
     }
 
@@ -548,9 +550,7 @@ impl SessionManager {
             &context_collector,
             "gateway-session-startup",
         );
-        let env_context = context_collector
-            .consume("gateway-session-startup")
-            .merged;
+        let env_context = context_collector.consume("gateway-session-startup").merged;
         let mut additional_context = vec![personality.system_prompt().to_string(), env_context];
         if let Some(skill_context) = &config.skill_context {
             additional_context.push(skill_context.clone());
@@ -707,10 +707,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reaper_destroys_idle_session() {
-        let mut manager = SessionManager::new_with_settings(
-            10,
-            test_settings_with_idle_timeout(Some(1)),
-        );
+        let mut manager =
+            SessionManager::new_with_settings(10, test_settings_with_idle_timeout(Some(1)));
         manager.reaper_interval = Duration::from_millis(20);
         manager.start_reaper();
 
@@ -738,10 +736,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reaper_keeps_active_session() {
-        let mut manager = SessionManager::new_with_settings(
-            10,
-            test_settings_with_idle_timeout(Some(1)),
-        );
+        let mut manager =
+            SessionManager::new_with_settings(10, test_settings_with_idle_timeout(Some(1)));
         manager.reaper_interval = Duration::from_millis(20);
         manager.start_reaper();
 
@@ -768,9 +764,13 @@ mod tests {
         let mut session_ids = Vec::new();
 
         for _ in 0..3 {
-            let client = Arc::new(MockModelClient::new("ok").with_delay(StdDuration::from_millis(50)));
+            let client =
+                Arc::new(MockModelClient::new("ok").with_delay(StdDuration::from_millis(50)));
             let id = manager
-                .create_session_with_client(SessionConfig::default(), client as Arc<dyn ModelClient>)
+                .create_session_with_client(
+                    SessionConfig::default(),
+                    client as Arc<dyn ModelClient>,
+                )
                 .await
                 .unwrap();
             session_ids.push(id);

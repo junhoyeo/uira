@@ -8,6 +8,7 @@ use uira_core::schema::{
     PermissionRuleConfig,
 };
 use uira_core::{SandboxPreference, ToolSpec};
+use uira_memory::MemoryConfig;
 use uira_security::{ConfigAction, ConfigRule, SandboxPolicy};
 
 /// Configuration for the agent
@@ -64,6 +65,10 @@ pub struct AgentConfig {
     /// Context compaction configuration
     #[serde(default)]
     pub compaction: CompactionConfig,
+
+    /// Memory system configuration
+    #[serde(default)]
+    pub memory: Option<MemoryConfig>,
 
     /// Model to use
     #[serde(default)]
@@ -163,6 +168,7 @@ impl Default for AgentConfig {
             task_system: false,
             goals: AgentGoalsConfig::default(),
             compaction: CompactionConfig::default(),
+            memory: None,
             model: None,
             system_prompt: Some(default_system_prompt()),
             permission_rules: Vec::new(),

@@ -1,0 +1,53 @@
+[package]
+name = "uira-memory"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Local semantic memory system for Uira with hybrid search"
+
+[dependencies]
+# SQLite
+rusqlite = { version = "0.32", features = ["bundled"] }
+sqlite-vec = "0.1"
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Text processing
+regex = { workspace = true }
+text-splitter = { version = "0.29", features = ["tiktoken-rs"] }
+tiktoken-rs = "0.9"
+
+# Hashing for embedding cache
+sha2 = "0.10"
+
+# UUID for memory IDs
+uuid = { version = "1.0", features = ["v4"] }
+
+# HTTP for embedding API calls
+reqwest = { workspace = true }
+
+# System info
+hostname = "0.4"
+dirs = { workspace = true }
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
+serde_yaml_ng = { workspace = true }

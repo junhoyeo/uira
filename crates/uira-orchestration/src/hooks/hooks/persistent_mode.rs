@@ -10,9 +10,9 @@
 use async_trait::async_trait;
 
 use super::super::hook::{Hook, HookContext, HookResult};
+use super::super::types::{HookEvent, HookInput, HookOutput};
 use super::todo_continuation::{StopContext, TodoContinuationHook};
 use super::ultrawork::UltraworkHook;
-use super::super::types::{HookEvent, HookInput, HookOutput};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PersistentMode {

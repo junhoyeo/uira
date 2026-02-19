@@ -152,9 +152,7 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     if let Some(expected_token) = &state.auth_token {
-        let auth_header = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok());
+        let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
         match auth_header {
             Some(value) if value.starts_with("Bearer ") => {
                 let token = &value[7..];
@@ -168,8 +166,12 @@ async fn ws_handler(
     let conn_id = state.next_conn_id.fetch_add(1, Ordering::Relaxed);
     ws.on_upgrade(move |socket| {
         let span = tracing::info_span!("ws_conn", conn_id);
-        handle_socket(socket, state.session_manager.clone(), state.channels.clone())
-            .instrument(span)
+        handle_socket(
+            socket,
+            state.session_manager.clone(),
+            state.channels.clone(),
+        )
+        .instrument(span)
     })
     .into_response()
 }
@@ -211,7 +213,10 @@ async fn handle_socket(
 
         match serde_json::from_str::<GatewayMessage>(&text) {
             Ok(GatewayMessage::SubscribeEvents { session_id }) => {
-                if event_tasks.get(&session_id).is_some_and(|t| !t.is_finished()) {
+                if event_tasks
+                    .get(&session_id)
+                    .is_some_and(|t| !t.is_finished())
+                {
                     let err = GatewayResponse::Error {
                         message: format!(
                             "Already subscribed to events for session '{}'",
@@ -383,7 +388,7 @@ async fn handle_message(
                     message: e.to_string(),
                 },
             }
-        },
+        }
         GatewayMessage::SubscribeEvents { session_id } => GatewayResponse::Error {
             message: format!(
                 "subscribe_events must be handled by the WebSocket event stream loop: {}",
@@ -462,7 +467,10 @@ mod tests {
         format!("ws://127.0.0.1:{}", addr.port())
     }
 
-    async fn connect(url: &str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    async fn connect(
+        url: &str,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
         let (ws_stream, _) = tokio_tungstenite::connect_async(format!("{}/ws", url))
             .await
             .unwrap();
@@ -470,7 +478,9 @@ mod tests {
     }
 
     async fn send_and_recv(
-        ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         msg: &str,
     ) -> serde_json::Value {
         ws.send(tungstenite::Message::Text(msg.into()))
@@ -482,7 +492,9 @@ mod tests {
     }
 
     async fn recv_until_type(
-        ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         expected_type: &str,
     ) -> serde_json::Value {
         for _ in 0..40 {
@@ -556,7 +568,10 @@ mod tests {
         );
         let subscribe_resp = send_and_recv(&mut ws, &subscribe_msg).await;
         assert_eq!(subscribe_resp["type"], "events_subscribed");
-        assert_eq!(subscribe_resp["session_id"].as_str(), Some(session_id.as_str()));
+        assert_eq!(
+            subscribe_resp["session_id"].as_str(),
+            Some(session_id.as_str())
+        );
 
         ws.send(tungstenite::Message::Text(
             r#"{"type": "list_sessions"}"#.to_string().into(),
@@ -608,7 +623,10 @@ mod tests {
         }
 
         assert!(got_message_sent, "expected message_sent response");
-        assert!(got_agent_event, "expected at least one agent_event response");
+        assert!(
+            got_agent_event,
+            "expected at least one agent_event response"
+        );
     }
 
     #[tokio::test]
@@ -734,12 +752,15 @@ mod tests {
         tungstenite::Error,
     > {
         let url = format!("ws://{}/ws", addr);
-        let mut request = url.parse::<tungstenite::http::Uri>().unwrap().into_client_request().unwrap();
+        let mut request = url
+            .parse::<tungstenite::http::Uri>()
+            .unwrap()
+            .into_client_request()
+            .unwrap();
         if let Some(t) = token {
-            request.headers_mut().insert(
-                "Authorization",
-                format!("Bearer {}", t).parse().unwrap(),
-            );
+            request
+                .headers_mut()
+                .insert("Authorization", format!("Bearer {}", t).parse().unwrap());
         }
         let (ws_stream, _) = tokio_tungstenite::connect_async(request).await?;
         Ok(ws_stream)
@@ -867,10 +888,9 @@ mod tests {
         });
 
         // Create a session via WebSocket
-        let (mut ws, _) =
-            tokio_tungstenite::connect_async(format!("{}/ws", ws_url))
-                .await
-                .unwrap();
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("{}/ws", ws_url))
+            .await
+            .unwrap();
 
         use futures_util::SinkExt;
         ws.send(tungstenite::Message::Text(
@@ -947,8 +967,7 @@ mod tests {
 
     // -- Outbound messaging tests -------------------------------------------
 
-    async fn start_test_server_with_mock_channel(
-    ) -> (String, Arc<crate::testing::MockChannel>) {
+    async fn start_test_server_with_mock_channel() -> (String, Arc<crate::testing::MockChannel>) {
         unsafe {
             std::env::set_var("ANTHROPIC_API_KEY", "test-key");
         }
@@ -958,12 +977,14 @@ mod tests {
 
         let channels: HashMap<String, Arc<dyn crate::channels::Channel>> = {
             let mut m = HashMap::new();
-            m.insert("telegram".to_string(), mock.clone() as Arc<dyn crate::channels::Channel>);
+            m.insert(
+                "telegram".to_string(),
+                mock.clone() as Arc<dyn crate::channels::Channel>,
+            );
             m
         };
 
-        let server = GatewayServer::new(10)
-            .with_channels(Arc::new(RwLock::new(channels)));
+        let server = GatewayServer::new(10).with_channels(Arc::new(RwLock::new(channels)));
         let app = server.router();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

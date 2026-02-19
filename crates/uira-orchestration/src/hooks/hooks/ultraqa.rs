@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
-use super::ralph::RalphHook;
 use super::super::types::{HookEvent, HookInput, HookOutput};
+use super::ralph::RalphHook;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

@@ -232,7 +232,7 @@ pub enum GatewayCommands {
         /// Host to bind to (default: from config or 127.0.0.1)
         #[arg(long)]
         host: Option<String>,
-        /// Port to bind to (default: from config or 18789)
+        /// Port to bind to (default: from config or 18790)
         #[arg(long)]
         port: Option<u16>,
         /// Authentication token for WebSocket connections

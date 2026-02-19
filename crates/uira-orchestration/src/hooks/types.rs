@@ -43,6 +43,8 @@ pub enum HookType {
     UiraOrchestrator,
     PluginPatterns,
     TodoContinuation,
+    MemoryRecall,
+    MemoryCapture,
 }
 
 impl HookType {
@@ -76,6 +78,8 @@ impl HookType {
             Self::UiraOrchestrator => "uira-orchestrator",
             Self::PluginPatterns => "plugin-patterns",
             Self::TodoContinuation => "todo-continuation",
+            Self::MemoryRecall => "memory-recall",
+            Self::MemoryCapture => "memory-capture",
         }
     }
 }

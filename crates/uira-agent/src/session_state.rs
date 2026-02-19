@@ -4,15 +4,19 @@ use crate::context::ContextManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 use uira_core::UIRA_DIR;
-use uira_orchestration::{
-    register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
-    DelegationToolProvider, LspToolProvider, McpToolProvider, TodoStore, ToolCallRuntime,
-    ToolContext, ToolOrchestrator, ToolRouter,
-};
-use uira_security::build_evaluator_from_rules;
-use uira_providers::ModelClient;
-use uira_security::SandboxManager;
 use uira_core::{MessageId, SessionId, TokenUsage};
+use uira_memory::{
+    EmbeddingProvider, MemorySystem, MockEmbeddingProvider, OpenAIEmbeddingProvider,
+};
+use uira_orchestration::{
+    init_memory_system, register_builtins_with_todos, AgentExecutor, ApprovalCache,
+    AstToolProvider, DelegationToolProvider, LspToolProvider, McpToolProvider, MemoryForgetTool,
+    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, TodoStore, ToolCallRuntime, ToolContext,
+    ToolOrchestrator, ToolRouter,
+};
+use uira_providers::ModelClient;
+use uira_security::build_evaluator_from_rules;
+use uira_security::SandboxManager;
 
 use crate::AgentConfig;
 
@@ -89,6 +93,49 @@ impl Session {
             );
         }
         register_builtins_with_todos(&mut tool_router, todo_store.clone());
+
+        let memory_config = config.memory.clone().unwrap_or_default();
+        if memory_config.enabled {
+            let embedder: Arc<dyn EmbeddingProvider> = {
+                let api_key = std::env::var(&memory_config.embedding_api_key_env).ok();
+                match api_key {
+                    Some(key) if !key.is_empty() => {
+                        Arc::new(OpenAIEmbeddingProvider::new_with_key(key, &memory_config))
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "memory enabled but no embedding API key found, using mock embeddings"
+                        );
+                        Arc::new(MockEmbeddingProvider::new(
+                            memory_config.embedding_dimension,
+                        ))
+                    }
+                }
+            };
+
+            match MemorySystem::new(&memory_config, embedder) {
+                Ok(system) => {
+                    let system = Arc::new(system);
+                    tool_router.register(MemoryStoreTool::new(
+                        system.store.clone(),
+                        system.embedder.clone(),
+                        memory_config.clone(),
+                    ));
+                    tool_router.register(MemorySearchTool::new(system.searcher.clone()));
+                    tool_router.register(MemoryForgetTool::new(system.store.clone()));
+                    tool_router.register(MemoryProfileTool::new(system.profile.clone()));
+                    if init_memory_system(system) {
+                        tracing::info!("memory system initialized with tools and hooks");
+                    } else {
+                        tracing::info!("memory system already initialized, reusing existing");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to initialize memory system");
+                }
+            }
+        }
+
         tool_router.register_provider(Arc::new(LspToolProvider::new()));
         tool_router.register_provider(Arc::new(AstToolProvider::new()));
 

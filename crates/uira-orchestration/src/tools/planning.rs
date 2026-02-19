@@ -62,9 +62,10 @@ Output format: Structured markdown with sections for each point above and a fina
 }
 
 async fn handle_planning(input: ToolInput) -> Result<ToolOutput, ToolError> {
-    let params: PlanningParams = serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
-        message: format!("Failed to parse planning parameters: {}", e),
-    })?;
+    let params: PlanningParams =
+        serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
+            message: format!("Failed to parse planning parameters: {}", e),
+        })?;
 
     if params.request.trim().is_empty() {
         return Err(ToolError::InvalidInput {
@@ -132,9 +133,10 @@ async fn handle_planning(input: ToolInput) -> Result<ToolOutput, ToolError> {
         "instructions": "Execute each stage in order. Pass the output of each stage as context to the next by substituting the template variables. The final plan is the critic-reviewed planner output."
     });
 
-    let json_response = serde_json::to_string_pretty(&response).map_err(|e| ToolError::ExecutionFailed {
-        message: format!("Failed to serialize planning response: {}", e),
-    })?;
+    let json_response =
+        serde_json::to_string_pretty(&response).map_err(|e| ToolError::ExecutionFailed {
+            message: format!("Failed to serialize planning response: {}", e),
+        })?;
 
     Ok(ToolOutput::text(json_response))
 }

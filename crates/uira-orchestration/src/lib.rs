@@ -11,21 +11,21 @@ pub use agents::{
 pub use agents::{
     get_agent_definitions, get_agent_definitions_with_config, AgentCategory, AgentConfig,
     AgentCost, AgentFactory, AgentOverrideConfig, AgentOverrides, AgentPromptMetadata,
-    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, PlanningPipeline,
-    PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder, ToolRestrictions,
-    ToolRestrictionsRegistry,
-    OrchestratorPersonality,
+    AgentRegistry, DelegationTrigger, ModelRegistry, ModelTier, ModelType, OrchestratorPersonality,
+    PlanningPipeline, PlanningStage, PromptLoader, PromptSource, RoutingTier, TierBuilder,
+    ToolRestrictions, ToolRestrictionsRegistry,
 };
 pub use features::{background_agent, dynamic_prompt_builder, model_routing, uira_state};
 pub use features::{
-    build_environment_context, register_environment_context,
-    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt, builtin_agent_metadata,
+    build_default_orchestrator_prompt, build_dynamic_orchestrator_prompt,
+    build_environment_context, builtin_agent_metadata, register_environment_context,
     AvailableAgent, AvailableDelegationCategory, AvailableSkill,
 };
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use hooks::{
-    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
-    HookRegistry, VerificationResult,
+    create_hook_event_adapter, default_hooks, get_memory_system, init_memory_system,
+    GoalCheckResult, GoalRunner, Hook, HookEventAdapter, HookRegistry, MemoryCaptureAdapter,
+    MemoryRecallAdapter, VerificationResult,
 };
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,
@@ -39,8 +39,9 @@ pub use tools::{
     register_builtins_without_todos, AgentExecutor, ApprovalCache, ApprovalCacheFile, ApprovalKey,
     AstToolProvider, BashTool, BoxedTool, CacheDecision, CachedApproval, CommentChecker,
     DelegationToolProvider, EditTool, FetchUrlTool, FunctionTool, GlobTool, GrepTool, LspClient,
-    LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider, PendingApproval, ReadTool,
-    RunOptions, TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, Tool, ToolCallRuntime,
-    ToolContent, ToolContext, ToolDefinition, ToolError, ToolFuture, ToolHandler, ToolInput,
-    ToolOrchestrator, ToolOutput, ToolProvider, ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
+    LspClientImpl, LspServerConfig, LspToolProvider, McpToolProvider, MemoryForgetTool,
+    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, PendingApproval, ReadTool, RunOptions,
+    TodoReadTool, TodoSessionInfo, TodoStore, TodoWriteTool, Tool, ToolCallRuntime, ToolContent,
+    ToolContext, ToolDefinition, ToolError, ToolFuture, ToolHandler, ToolInput, ToolOrchestrator,
+    ToolOutput, ToolProvider, ToolRegistry, ToolRouter, WebSearchTool, WriteTool,
 };

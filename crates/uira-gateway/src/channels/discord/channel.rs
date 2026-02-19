@@ -143,10 +143,9 @@ impl Channel for DiscordChannel {
             .as_ref()
             .ok_or_else(|| ChannelError::SendFailed("Discord not connected".to_string()))?;
 
-        let channel_id: u64 = response
-            .recipient
-            .parse()
-            .map_err(|_| ChannelError::SendFailed(format!("Invalid channel ID: {}", response.recipient)))?;
+        let channel_id: u64 = response.recipient.parse().map_err(|_| {
+            ChannelError::SendFailed(format!("Invalid channel ID: {}", response.recipient))
+        })?;
 
         let chunks = chunk_discord_text(&response.content, &self.chunk_opts());
 
@@ -170,10 +169,9 @@ impl Channel for DiscordChannel {
             .as_ref()
             .ok_or_else(|| ChannelError::SendFailed("Discord not connected".to_string()))?;
 
-        let channel_id: u64 = response
-            .recipient
-            .parse()
-            .map_err(|_| ChannelError::SendFailed(format!("Invalid channel ID: {}", response.recipient)))?;
+        let channel_id: u64 = response.recipient.parse().map_err(|_| {
+            ChannelError::SendFailed(format!("Invalid channel ID: {}", response.recipient))
+        })?;
 
         let chunks = chunk_discord_text(&response.content, &self.chunk_opts());
         let mut last_message_id = None;

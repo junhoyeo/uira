@@ -100,6 +100,7 @@ mod tests {
         bus.publish(Event::SessionEnded {
             session_id: "test".to_string(),
             reason: SessionEndReason::Completed,
+            last_response: None,
         });
 
         let event1 = rx1.recv().await.unwrap();

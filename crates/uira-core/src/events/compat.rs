@@ -107,10 +107,12 @@ impl From<ThreadEvent> for Event {
             ThreadEvent::ThreadCompleted { usage: _ } => Event::SessionEnded {
                 session_id: String::new(),
                 reason: SessionEndReason::Completed,
+                last_response: None,
             },
             ThreadEvent::ThreadCancelled => Event::SessionEnded {
                 session_id: String::new(),
                 reason: SessionEndReason::Cancelled,
+                last_response: None,
             },
             ThreadEvent::GoalVerificationStarted { goals, method } => {
                 Event::GoalVerificationStarted {

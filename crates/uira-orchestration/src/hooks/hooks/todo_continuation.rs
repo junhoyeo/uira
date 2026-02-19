@@ -339,7 +339,9 @@ mod tests {
             .iter()
             .filter(|p| p.to_string_lossy().contains("/.claude/todos/"))
             .collect::<Vec<_>>();
-        assert!(home_todos.iter().all(|p| p.to_string_lossy().contains("sid-123")));
+        assert!(home_todos
+            .iter()
+            .all(|p| p.to_string_lossy().contains("sid-123")));
 
         let home_uira_todos = paths
             .iter()
@@ -383,7 +385,10 @@ mod tests {
             temp.path().to_string_lossy().to_string(),
         );
 
-        let output = hook.execute(HookEvent::Stop, &input, &context).await.unwrap();
+        let output = hook
+            .execute(HookEvent::Stop, &input, &context)
+            .await
+            .unwrap();
         assert!(output.should_continue);
         assert!(output
             .message

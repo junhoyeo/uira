@@ -5,12 +5,12 @@ pub mod scorer;
 pub mod signals;
 pub mod types;
 
+pub use prompts::gpt;
 pub use prompts::{
     adapt_prompt_for_model, adapt_prompt_for_tier, create_delegation_prompt,
     create_delegation_prompt_for_model, get_prompt_prefix, get_prompt_suffix,
     get_task_instructions, get_task_instructions_for_model, DelegationContext,
 };
-pub use prompts::gpt;
 pub use router::{
     analyze_task_complexity, can_escalate, escalate_model, explain_routing, get_model_for_task,
     get_routing_recommendation, is_fixed_tier_agent, quick_tier_for_agent, route_task,

@@ -66,10 +66,10 @@ use std::path::{Path, PathBuf};
 use uira_core::UIRA_DIR;
 
 use super::super::hook::{Hook, HookContext, HookResult};
+use super::super::types::{HookEvent, HookInput, HookOutput};
 use super::circuit_breaker::{CircuitBreakerConfig, CircuitBreakerState};
 use super::todo_continuation::TodoContinuationHook;
 use super::ultrawork::UltraworkHook;
-use super::super::types::{HookEvent, HookInput, HookOutput};
 
 /// Ralph loop state
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -796,7 +796,9 @@ impl RalphHook {
         false
     }
 
-    pub async fn check_goals_from_config(directory: &str) -> Option<super::super::VerificationResult> {
+    pub async fn check_goals_from_config(
+        directory: &str,
+    ) -> Option<super::super::VerificationResult> {
         let config_path = std::path::Path::new(directory).join("uira.yml");
         if !config_path.exists() {
             return None;

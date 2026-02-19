@@ -99,7 +99,13 @@ mod tests {
 
     #[test]
     fn test_sanitize_accepts_valid_agent_names() {
-        for valid_name in ["balanced", "autonomous", "orchestrator", "sisyphus", "atlas"] {
+        for valid_name in [
+            "balanced",
+            "autonomous",
+            "orchestrator",
+            "sisyphus",
+            "atlas",
+        ] {
             let mut config = SessionConfig {
                 agent: Some(valid_name.to_string()),
                 ..SessionConfig::default()

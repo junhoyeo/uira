@@ -7,8 +7,8 @@ use chrono::Utc;
 use futures_util::stream;
 use tokio::sync::mpsc;
 
-use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
 use uira_core::{ContentBlock, ContentDelta, ModelResponse, StreamChunk, TokenUsage};
+use uira_providers::{ModelClient, ModelResult, ProviderError, ResponseStream};
 
 use crate::channels::channel::Channel;
 use crate::channels::error::ChannelError;

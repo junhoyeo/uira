@@ -9,7 +9,9 @@ use uira_core::schema::SlackChannelConfig;
 
 use super::channel::Channel;
 use super::error::ChannelError;
-use super::types::{floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType};
+use super::types::{
+    floor_char_boundary, ChannelCapabilities, ChannelMessage, ChannelResponse, ChannelType,
+};
 
 const SLACK_MAX_MESSAGE_LENGTH: usize = 4000;
 const CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
@@ -216,7 +218,10 @@ async fn run_socket_mode_loop(
         let text = match msg {
             tokio_tungstenite::tungstenite::Message::Text(t) => t,
             tokio_tungstenite::tungstenite::Message::Ping(payload) => {
-                if let Err(e) = ws_sink.send(tokio_tungstenite::tungstenite::Message::Pong(payload)).await {
+                if let Err(e) = ws_sink
+                    .send(tokio_tungstenite::tungstenite::Message::Pong(payload))
+                    .await
+                {
                     warn!("Failed to send Pong: {e}");
                     break;
                 }
@@ -321,12 +326,12 @@ fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
     // Slack timestamps are "EPOCH.SEQUENCE" format (e.g., "1234567890.123456")
     // Parse as two parts to avoid f64 precision loss
     let parts: Vec<&str> = ts.split('.').collect();
-    
+
     let secs_i64 = parts
         .first()
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0);
-    
+
     let nanos = parts
         .get(1)
         .and_then(|s| {
@@ -335,7 +340,7 @@ fn parse_slack_timestamp(ts: &str) -> chrono::DateTime<chrono::Utc> {
             padded[..9].parse::<u32>().ok()
         })
         .unwrap_or(0);
-    
+
     chrono::DateTime::from_timestamp(secs_i64, nanos).unwrap_or_default()
 }
 

@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use serenity::all::{
-    Context, EventHandler, GatewayIntents, Guild, Interaction, Message, Ready,
-};
+use serenity::all::{Context, EventHandler, GatewayIntents, Guild, Interaction, Message, Ready};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 use uira_core::schema::DiscordChannelConfig;
@@ -212,18 +210,9 @@ impl EventHandler for DiscordHandler {
                 if let Some(guild_id) = cmd.guild_id {
                     metadata.insert("guild_id".to_string(), guild_id.get().to_string());
                 }
-                metadata.insert(
-                    "channel_id".to_string(),
-                    cmd.channel_id.get().to_string(),
-                );
-                metadata.insert(
-                    "interaction_id".to_string(),
-                    cmd.id.get().to_string(),
-                );
-                metadata.insert(
-                    "interaction_token".to_string(),
-                    cmd.token.clone(),
-                );
+                metadata.insert("channel_id".to_string(), cmd.channel_id.get().to_string());
+                metadata.insert("interaction_id".to_string(), cmd.id.get().to_string());
+                metadata.insert("interaction_token".to_string(), cmd.token.clone());
 
                 let options_text: Vec<String> = cmd
                     .data
@@ -261,8 +250,9 @@ impl EventHandler for DiscordHandler {
                 debug!(custom_id = %custom_id, "Component interaction received");
 
                 if let Some((component_id, _modal_id)) = parse_component_custom_id(custom_id) {
-                    if let Some(entry) =
-                        self.component_registry.resolve_component(&component_id, true)
+                    if let Some(entry) = self
+                        .component_registry
+                        .resolve_component(&component_id, true)
                     {
                         if !entry.allowed_users.is_empty() {
                             let user_id = component.user.id.get().to_string();
@@ -278,12 +268,12 @@ impl EventHandler for DiscordHandler {
                             serenity::all::ComponentInteractionDataKind::StringSelect {
                                 values,
                             } => values.clone(),
-                            serenity::all::ComponentInteractionDataKind::UserSelect {
-                                values,
-                            } => values.iter().map(|v| v.get().to_string()).collect(),
-                            serenity::all::ComponentInteractionDataKind::RoleSelect {
-                                values,
-                            } => values.iter().map(|v| v.get().to_string()).collect(),
+                            serenity::all::ComponentInteractionDataKind::UserSelect { values } => {
+                                values.iter().map(|v| v.get().to_string()).collect()
+                            }
+                            serenity::all::ComponentInteractionDataKind::RoleSelect { values } => {
+                                values.iter().map(|v| v.get().to_string()).collect()
+                            }
                             serenity::all::ComponentInteractionDataKind::ChannelSelect {
                                 values,
                             } => values.iter().map(|v| v.get().to_string()).collect(),
@@ -300,27 +290,19 @@ impl EventHandler for DiscordHandler {
                         );
 
                         let mut metadata = std::collections::HashMap::new();
-                        metadata
-                            .insert("interaction_type".to_string(), "component".to_string());
+                        metadata.insert("interaction_type".to_string(), "component".to_string());
                         metadata.insert("component_id".to_string(), component_id);
                         metadata.insert("user_id".to_string(), component.user.id.get().to_string());
                         metadata.insert("username".to_string(), component.user.name.clone());
                         if let Some(session_key) = &entry.session_key {
-                            metadata
-                                .insert("session_key".to_string(), session_key.clone());
+                            metadata.insert("session_key".to_string(), session_key.clone());
                         }
                         if !values.is_empty() {
-                            metadata
-                                .insert("values".to_string(), values.join(","));
+                            metadata.insert("values".to_string(), values.join(","));
                         }
-                        metadata.insert(
-                            "interaction_id".to_string(),
-                            component.id.get().to_string(),
-                        );
-                        metadata.insert(
-                            "interaction_token".to_string(),
-                            component.token.clone(),
-                        );
+                        metadata
+                            .insert("interaction_id".to_string(), component.id.get().to_string());
+                        metadata.insert("interaction_token".to_string(), component.token.clone());
 
                         let channel_msg = ChannelMessage {
                             sender: component.user.id.get().to_string(),
@@ -380,20 +362,13 @@ impl EventHandler for DiscordHandler {
                         metadata.insert("user_id".to_string(), modal.user.id.get().to_string());
                         metadata.insert("username".to_string(), modal.user.name.clone());
                         if let Some(session_key) = &modal_entry.session_key {
-                            metadata
-                                .insert("session_key".to_string(), session_key.clone());
+                            metadata.insert("session_key".to_string(), session_key.clone());
                         }
                         for (k, v) in &field_values {
                             metadata.insert(format!("field_{k}"), v.clone());
                         }
-                        metadata.insert(
-                            "interaction_id".to_string(),
-                            modal.id.get().to_string(),
-                        );
-                        metadata.insert(
-                            "interaction_token".to_string(),
-                            modal.token.clone(),
-                        );
+                        metadata.insert("interaction_id".to_string(), modal.id.get().to_string());
+                        metadata.insert("interaction_token".to_string(), modal.token.clone());
 
                         let content = format!(
                             "Form submitted: {}",

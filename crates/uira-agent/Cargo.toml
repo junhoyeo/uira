@@ -15,6 +15,7 @@ otlp = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tonic", "tr
 uira-providers = { workspace = true }
 uira-security = { workspace = true }
 uira-orchestration = { workspace = true }
+uira-memory = { workspace = true }
 uira-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
