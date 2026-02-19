@@ -40,6 +40,8 @@ pub enum Event {
     SessionEnded {
         session_id: String,
         reason: SessionEndReason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_response: Option<String>,
     },
     SessionIdle {
         session_id: String,

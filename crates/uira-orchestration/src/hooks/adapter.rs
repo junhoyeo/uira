@@ -36,7 +36,7 @@ impl HookEventAdapter {
             Event::SessionStarted { .. } => Some(HookEvent::SessionStart),
             Event::SessionEnded { .. } => Some(HookEvent::Stop),
             Event::SessionIdle { .. } => Some(HookEvent::SessionIdle),
-            Event::UserInputRequested { .. } => Some(HookEvent::UserPromptSubmit),
+            Event::UserInputRequested { .. } => None,
             Event::UserPromptSubmitted { .. } => Some(HookEvent::UserPromptSubmit),
             Event::ToolExecutionStarted { .. } => Some(HookEvent::PreToolUse),
             Event::ToolExecutionCompleted { .. } => Some(HookEvent::PostToolUse),
@@ -63,7 +63,11 @@ impl HookEventAdapter {
                 extra: HashMap::new(),
             },
 
-            Event::SessionEnded { session_id, reason } => {
+            Event::SessionEnded {
+                session_id,
+                reason,
+                last_response,
+            } => {
                 let stop_reason = match reason {
                     SessionEndReason::Completed => "completed",
                     SessionEndReason::Cancelled => "cancelled",
@@ -73,8 +77,10 @@ impl HookEventAdapter {
                 };
                 HookInput {
                     session_id: Some(session_id.clone()),
-                    prompt: None,
-                    message: None,
+                    prompt: last_response.clone(),
+                    message: last_response.as_ref().map(|content| Message {
+                        content: Some(content.clone()),
+                    }),
                     parts: None,
                     tool_name: None,
                     tool_input: None,
@@ -295,6 +301,7 @@ mod tests {
         let session_ended = Event::SessionEnded {
             session_id: "test".to_string(),
             reason: SessionEndReason::Completed,
+            last_response: None,
         };
         assert_eq!(
             HookEventAdapter::event_to_hook_event(&session_ended),
@@ -352,6 +359,24 @@ mod tests {
         assert_eq!(
             input.extra.get("tool_call_id"),
             Some(&serde_json::json!("tc_456"))
+        );
+    }
+
+    #[test]
+    fn test_session_ended_maps_last_response_to_prompt() {
+        let event = Event::SessionEnded {
+            session_id: "ses_ended".to_string(),
+            reason: SessionEndReason::Completed,
+            last_response: Some("final assistant response".to_string()),
+        };
+
+        let input = HookEventAdapter::event_to_hook_input(&event);
+
+        assert_eq!(input.session_id, Some("ses_ended".to_string()));
+        assert_eq!(input.prompt, Some("final assistant response".to_string()));
+        assert_eq!(
+            input.get_prompt_text(),
+            "final assistant response".to_string()
         );
     }
 

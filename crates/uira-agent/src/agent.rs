@@ -15,7 +15,7 @@ use uira_core::{
     AgentError, AgentState, ApprovalRequirement, ContentBlock, ExecutionResult, Item, Message,
     MessageContent, Role, SessionId, ThreadEvent, ToolCall,
 };
-use uira_core::{Event, EventBus};
+use uira_core::{Event, EventBus, SessionEndReason};
 use uira_orchestration::hooks::hooks::keyword_detector::KeywordDetectorHook;
 use uira_providers::ModelClient;
 
@@ -1160,33 +1160,42 @@ impl Agent {
     }
 
     /// Get the final result if the agent is complete
+    fn last_assistant_text(&self) -> Option<String> {
+        let text = self
+            .session
+            .context
+            .messages()
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant)
+            .map(|m| match &m.content {
+                uira_core::MessageContent::Text(s) => s.clone(),
+                uira_core::MessageContent::Blocks(blocks) => blocks
+                    .iter()
+                    .filter_map(|b| {
+                        if let ContentBlock::Text { text } = b {
+                            Some(text.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(""),
+                uira_core::MessageContent::ToolCalls(_) => String::new(),
+            })
+            .unwrap_or_default();
+
+        if text.trim().is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    }
+
     pub fn result(&self) -> Option<ExecutionResult> {
         match self.state {
             AgentState::Complete => {
-                // Get the last assistant message text
-                let last_text = self
-                    .session
-                    .context
-                    .messages()
-                    .iter()
-                    .rev()
-                    .find(|m| m.role == Role::Assistant)
-                    .map(|m| match &m.content {
-                        uira_core::MessageContent::Text(s) => s.clone(),
-                        uira_core::MessageContent::Blocks(blocks) => blocks
-                            .iter()
-                            .filter_map(|b| {
-                                if let ContentBlock::Text { text } = b {
-                                    Some(text.as_str())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(""),
-                        uira_core::MessageContent::ToolCalls(_) => String::new(),
-                    })
-                    .unwrap_or_default();
+                let last_text = self.last_assistant_text().unwrap_or_default();
 
                 Some(ExecutionResult::success(
                     last_text,
@@ -1228,7 +1237,19 @@ impl Agent {
         }
 
         if let Some(ref bus) = self.event_bus {
-            let unified_event: Event = event.into();
+            let unified_event = match &event {
+                ThreadEvent::ThreadCompleted { .. } => Event::SessionEnded {
+                    session_id: self.session.id.to_string(),
+                    reason: SessionEndReason::Completed,
+                    last_response: self.last_assistant_text(),
+                },
+                ThreadEvent::ThreadCancelled => Event::SessionEnded {
+                    session_id: self.session.id.to_string(),
+                    reason: SessionEndReason::Cancelled,
+                    last_response: self.last_assistant_text(),
+                },
+                _ => event.into(),
+            };
             bus.publish(unified_event);
         }
     }

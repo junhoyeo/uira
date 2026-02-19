@@ -124,8 +124,11 @@ impl Session {
                     tool_router.register(MemorySearchTool::new(system.searcher.clone()));
                     tool_router.register(MemoryForgetTool::new(system.store.clone()));
                     tool_router.register(MemoryProfileTool::new(system.profile.clone()));
-                    init_memory_system(system);
-                    tracing::info!("memory system initialized with tools and hooks");
+                    if init_memory_system(system) {
+                        tracing::info!("memory system initialized with tools and hooks");
+                    } else {
+                        tracing::info!("memory system already initialized, reusing existing");
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to initialize memory system");
