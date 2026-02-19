@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
-use uira_core::{JsonSchema, ToolOutput};
+use uira_core::{ApprovalRequirement, JsonSchema, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 use uira_memory::config::MemoryConfig;
@@ -181,6 +181,10 @@ impl Tool for MemoryForgetTool {
                 message: e.to_string(),
             }),
         }
+    }
+
+    fn approval_requirement(&self, _input: &Value) -> ApprovalRequirement {
+        ApprovalRequirement::needs_approval("Memory deletion is destructive")
     }
 }
 

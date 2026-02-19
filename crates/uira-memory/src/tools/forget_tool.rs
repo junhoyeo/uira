@@ -44,7 +44,9 @@ pub async fn memory_forget_tool(
         return Ok(format!("Deleted {count} memories matching query: {query}"));
     }
 
-    Ok("Please provide either 'id' or 'query' to specify which memories to forget.".to_string())
+    Err(anyhow::anyhow!(
+        "Please provide either 'id' or 'query' to specify which memories to forget."
+    ))
 }
 
 #[cfg(test)]
@@ -91,7 +93,8 @@ mod tests {
     async fn forget_no_args() {
         let store = Arc::new(MemoryStore::new_in_memory(64).unwrap());
         let input = serde_json::json!({});
-        let result = memory_forget_tool(input, store).await.unwrap();
-        assert!(result.contains("Please provide"));
+        let result = memory_forget_tool(input, store).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Please provide"));
     }
 }

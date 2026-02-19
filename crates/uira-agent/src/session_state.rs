@@ -6,7 +6,7 @@ use std::sync::Arc;
 use uira_core::UIRA_DIR;
 use uira_core::{MessageId, SessionId, TokenUsage};
 use uira_memory::{
-    EmbeddingProvider, MemoryConfig, MemorySystem, MockEmbeddingProvider, OpenAIEmbeddingProvider,
+    EmbeddingProvider, MemorySystem, MockEmbeddingProvider, OpenAIEmbeddingProvider,
 };
 use uira_orchestration::{
     init_memory_system, register_builtins_with_todos, AgentExecutor, ApprovalCache,
@@ -94,7 +94,7 @@ impl Session {
         }
         register_builtins_with_todos(&mut tool_router, todo_store.clone());
 
-        let memory_config = MemoryConfig::default();
+        let memory_config = config.memory.clone().unwrap_or_default();
         if memory_config.enabled {
             let embedder: Arc<dyn EmbeddingProvider> = {
                 let api_key = std::env::var(&memory_config.embedding_api_key_env).ok();

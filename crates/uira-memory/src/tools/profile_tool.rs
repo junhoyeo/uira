@@ -71,7 +71,7 @@ pub async fn memory_profile_tool(
             }
         }
 
-        _ => Ok(format!(
+        _ => Err(anyhow::anyhow!(
             "Unknown action: {action}. Use 'view', 'add', or 'remove'."
         )),
     }
