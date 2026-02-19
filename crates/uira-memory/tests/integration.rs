@@ -104,14 +104,12 @@ async fn test_recall_hook_empty_db() {
         .await
         .unwrap();
 
-    match recalled {
-        None => {}
-        Some(context) => {
-            assert!(context.contains("<memory-context>"));
-            assert!(context.contains("<user-profile>"));
-            assert!(context.contains("No user profile facts"));
-        }
-    }
+    // On empty DB at turn 0 with profile_frequency=2, 0.is_multiple_of(2)=true
+    // so the profile section is included even though there are no search results.
+    let context = recalled.expect("recall on empty DB returns profile context at turn 0");
+    assert!(context.contains("<memory-context>"));
+    assert!(context.contains("<user-profile>"));
+    assert!(context.contains("No user profile facts recorded yet."));
 }
 
 #[tokio::test]
@@ -249,7 +247,7 @@ async fn test_full_lifecycle() {
     let profile_output = memory_profile_tool(json!({ "action": "view" }), system.profile.clone())
         .await
         .unwrap();
-    assert!(profile_output.contains("User Profile") || profile_output.contains("No user profile"));
+    assert!(profile_output.contains("User Profile"));
 
     let forget_output = memory_forget_tool(json!({ "id": stored_id }), system.store.clone())
         .await
@@ -290,4 +288,43 @@ async fn test_multiple_memories_search_ranking() {
     for pair in results.windows(2) {
         assert!(pair[0].final_score >= pair[1].final_score);
     }
+}
+
+#[tokio::test]
+async fn test_recall_short_query_returns_none() {
+    let system = test_system();
+    let recalled = system.recall_hook.recall("hi").await.unwrap();
+    assert!(recalled.is_none());
+}
+
+#[tokio::test]
+async fn test_disabled_config_no_op() {
+    let config = MemoryConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    let embedder: Arc<dyn EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(config.embedding_dimension));
+    let system = MemorySystem::new_in_memory(&config, embedder).unwrap();
+    assert_eq!(system.store.count().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn test_forget_nonexistent_id_returns_ok() {
+    let system = test_system();
+    let result = memory_forget_tool(
+        json!({ "id": "nonexistent-id-12345" }),
+        system.store.clone(),
+    )
+    .await
+    .unwrap();
+    assert!(result.contains("No memory found"));
+}
+
+#[tokio::test]
+async fn test_forget_no_args_returns_error() {
+    let system = test_system();
+    let result = memory_forget_tool(json!({}), system.store.clone()).await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("Please provide"));
 }
