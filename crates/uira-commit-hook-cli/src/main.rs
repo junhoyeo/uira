@@ -50,11 +50,11 @@ enum Commands {
     },
     /// Check for typos
     Typos {
-        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
+        #[arg(long, help = "Use AI to decide and apply fixes (stages by default, use --no-add to skip)")]
         ai: bool,
         #[arg(long, help = "Check only staged/cached files")]
         cached: bool,
-        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: correct 3 typos in main.rs')")]
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: correct 3 typos in main.rs')", requires = "ai", conflicts_with = "no_add")]
         commit: bool,
         #[arg(long, help = "Fix only, do not stage modified files")]
         no_add: bool,
@@ -90,11 +90,11 @@ enum Commands {
     },
     /// Run diagnostics (lsp_diagnostics) on files
     Diagnostics {
-        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
+        #[arg(long, help = "Use AI to decide and apply fixes (stages by default, use --no-add to skip)")]
         ai: bool,
         #[arg(long, help = "Check only staged/cached files")]
         cached: bool,
-        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: resolve 5 type errors in auth.rs')")]
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: resolve 5 type errors in auth.rs')", requires = "ai", conflicts_with = "no_add")]
         commit: bool,
         #[arg(long, help = "Fix only, do not stage modified files")]
         no_add: bool,
@@ -109,11 +109,11 @@ enum Commands {
     },
     /// Check and manage comments with AI assistance
     Comments {
-        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
+        #[arg(long, help = "Use AI to decide and apply fixes (stages by default, use --no-add to skip)")]
         ai: bool,
         #[arg(long, help = "Check only staged/cached files")]
         cached: bool,
-        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: remove 2 stale comments')")]
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: remove 2 stale comments')", requires = "ai", conflicts_with = "no_add")]
         commit: bool,
         #[arg(long, help = "Fix only, do not stage modified files")]
         no_add: bool,

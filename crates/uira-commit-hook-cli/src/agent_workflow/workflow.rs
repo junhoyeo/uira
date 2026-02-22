@@ -315,6 +315,17 @@ impl AgentWorkflow {
                             self.git_tracker.stage_files(&files_modified)?;
                         }
 
+                        // Handle auto-commit if enabled
+                        if self.config.auto_commit && !files_modified.is_empty() {
+                            let commit_msg = GitTracker::generate_commit_message(
+                                self.task.name(),
+                                &files_modified,
+                                summary.as_deref(),
+                            );
+                            self.git_tracker.commit(&commit_msg)?;
+                            println!("   Committed: {}", commit_msg);
+                        }
+
                         let result = WorkflowResult::Complete {
                             iterations: self.state.iteration + 1,
                             files_modified,

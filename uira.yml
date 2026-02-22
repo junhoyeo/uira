@@ -25,9 +25,9 @@ pre-commit:
     - name: clippy
       run: cargo clippy -- -D warnings
     - name: diagnostics
-      run: ./target/debug/uira-commit-hook-cli diagnostics --staged --severity error
+      run: ./target/debug/uira-commit-hook-cli diagnostics --ai --cached --severity error
     - name: typos
-      run: ./target/debug/uira-commit-hook-cli typos --ai --staged --stage
+      run: ./target/debug/uira-commit-hook-cli typos --ai --cached
 
 post-commit:
   parallel: false
