@@ -28,6 +28,7 @@ arboard = "3"
 unicode-width = "0.2"
 ratatui-image = { version = "10", default-features = false, features = ["crossterm", "image-defaults"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+similar = "2"
 
 [dev-dependencies]
 tokio = { workspace = true }

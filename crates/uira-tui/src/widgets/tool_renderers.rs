@@ -410,12 +410,12 @@ fn render_task(
     let parsed = serde_json::from_str::<Value>(content).ok();
     let agent = parsed
         .as_ref()
-        .and_then(|v| v.get("subagent_type"))
+        .and_then(|v| v.get("agent_type").or_else(|| v.get("subagent_type")))
         .and_then(Value::as_str)
         .unwrap_or("agent");
     let description = parsed
         .as_ref()
-        .and_then(|v| v.get("description"))
+        .and_then(|v| v.get("description").or_else(|| v.get("agent_description")))
         .and_then(Value::as_str)
         .unwrap_or("delegated task");
     let count = parsed
@@ -558,9 +558,14 @@ fn extract_query_and_count(content: &str) -> (Option<String>, Option<usize>) {
             .map(ToString::to_string);
         let count = value
             .get("numResults")
-            .or_else(|| value.get("results"))
             .and_then(Value::as_u64)
-            .map(|n| n as usize);
+            .map(|n| n as usize)
+            .or_else(|| {
+                value
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.len())
+            });
         return (query, count);
     }
 

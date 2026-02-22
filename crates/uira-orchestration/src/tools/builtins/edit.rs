@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
+use similar::TextDiff;
 use std::path::Path;
 use tokio::fs;
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
@@ -142,16 +143,13 @@ impl Tool for EditTool {
                 message: format!("Failed to write file: {}", e),
             })?;
 
-        let replacements = if input.replace_all {
-            content.matches(&input.old_string).count()
-        } else {
-            1
-        };
+        let diff = TextDiff::from_lines(&content, &new_content);
+        let unified = diff
+            .unified_diff()
+            .header(&format!("a/{}", input.file_path), &format!("b/{}", input.file_path))
+            .to_string();
 
-        Ok(ToolOutput::text(format!(
-            "Made {} replacement(s) in {}",
-            replacements, input.file_path
-        )))
+        Ok(ToolOutput::text(format!("{}\n{}", input.file_path, unified)))
     }
 }
 
@@ -169,19 +167,23 @@ mod tests {
 
         let tool = EditTool::new();
         let ctx = ToolContext::default();
-        tool.execute(
-            json!({
-                "file_path": file.path().to_string_lossy(),
-                "old_string": "World",
-                "new_string": "Rust"
-            }),
-            &ctx,
-        )
-        .await
-        .unwrap();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "World",
+                    "new_string": "Rust"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let content = std::fs::read_to_string(file.path()).unwrap();
         assert_eq!(content, "Hello, Rust!");
+        let output = result.as_text().unwrap();
+        assert!(output.starts_with(file.path().to_string_lossy().as_ref()));
+        assert!(output.contains("@@"));
     }
 
     #[tokio::test]
@@ -204,7 +206,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.as_text().unwrap().contains("3 replacement"));
+        let output = result.as_text().unwrap();
+        assert!(output.starts_with(file.path().to_string_lossy().as_ref()));
+        assert!(output.contains("@@"));
+        assert!(output.contains("-foo bar foo baz foo"));
+        assert!(output.contains("+qux bar qux baz qux"));
         let content = std::fs::read_to_string(file.path()).unwrap();
         assert_eq!(content, "qux bar qux baz qux");
     }

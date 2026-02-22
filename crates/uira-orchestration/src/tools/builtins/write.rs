@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
+use similar::TextDiff;
 use std::path::Path;
 use tokio::fs;
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
@@ -133,6 +134,15 @@ impl Tool for WriteTool {
         }
 
         let existed = path.exists();
+        let old_content = if existed {
+            fs::read_to_string(path)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("Failed to read existing file: {}", e),
+                })?
+        } else {
+            String::new()
+        };
 
         fs::write(path, &input.content)
             .await
@@ -140,13 +150,13 @@ impl Tool for WriteTool {
                 message: format!("Failed to write file: {}", e),
             })?;
 
-        let message = if existed {
-            format!("Overwrote {}", input.file_path)
-        } else {
-            format!("Created {}", input.file_path)
-        };
+        let diff = TextDiff::from_lines(&old_content, &input.content);
+        let unified = diff
+            .unified_diff()
+            .header(&format!("a/{}", input.file_path), &format!("b/{}", input.file_path))
+            .to_string();
 
-        Ok(ToolOutput::text(message))
+        Ok(ToolOutput::text(format!("{}\n{}", input.file_path, unified)))
     }
 }
 
@@ -174,7 +184,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.as_text().unwrap().contains("Created"));
+        let output = result.as_text().unwrap();
+        assert!(output.starts_with(file_path.to_string_lossy().as_ref()));
+        assert!(output.contains("@@"));
+        assert!(output.contains("+Hello, world!"));
         assert_eq!(
             std::fs::read_to_string(&file_path).unwrap(),
             "Hello, world!"
@@ -199,6 +212,33 @@ mod tests {
         .unwrap();
 
         assert!(file_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_write_overwrite_file_returns_diff() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "before\n").unwrap();
+
+        let tool = WriteTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file_path.to_string_lossy(),
+                    "content": "after\n"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let output = result.as_text().unwrap();
+        assert!(output.starts_with(file_path.to_string_lossy().as_ref()));
+        assert!(output.contains("@@"));
+        assert!(output.contains("-before"));
+        assert!(output.contains("+after"));
+        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "after\n");
     }
 
     #[test]
