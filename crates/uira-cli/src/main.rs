@@ -1387,15 +1387,11 @@ async fn run_interactive(
         external_mcp_specs,
     );
 
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let _terminal_guard = TerminalGuard;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Run TUI
+    // Build App BEFORE terminal setup. LogoImage::new() queries the terminal
+    // via OSC 11 and Picker::from_query_stdio() — both toggle raw mode internally
+    // and must complete before we enable raw mode + mouse capture, otherwise the
+    // background thread's disable_raw_mode() would undo our raw mode and cause
+    // SGR mouse escape sequences to leak as raw text into the input field.
     let active_model_id = if provider_config.model.contains('/') {
         provider_config.model.clone()
     } else {
@@ -1411,12 +1407,10 @@ async fn run_interactive(
         .map(|cfg| cfg.theme.as_str())
         .unwrap_or("default");
     let theme_overrides = build_theme_overrides(uira_config.as_ref());
-
     if let Err(err) = app.configure_theme(theme_name, theme_overrides) {
         tracing::warn!("Failed to apply theme '{}': {}", theme_name, err);
         let _ = app.configure_theme("default", uira_tui::ThemeOverrides::default());
     }
-
     if let Some(cfg) = uira_config.as_ref() {
         let (keybinds, warnings) =
             uira_tui::KeybindConfig::from_config_with_warnings(&cfg.keybinds);
@@ -1426,6 +1420,14 @@ async fn run_interactive(
             tracing::warn!("{}", warning);
         }
     }
+
+    // Setup terminal AFTER App construction so OSC 11 / Picker queries are done
+    enable_raw_mode()?;
+    let mut stdout = stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let _terminal_guard = TerminalGuard;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
     let executor_config = ExecutorConfig::new(provider_config.clone(), agent_config.clone());
     let executor = Arc::new(RecursiveAgentExecutor::new(executor_config));
