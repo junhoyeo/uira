@@ -25,9 +25,11 @@ pub struct LogoImage {
     terminal_bg: Option<image::Rgba<u8>>,
     /// Composited image stored for text-line rendering (halfblock mode)
     composited: Option<image::DynamicImage>,
-    /// Cached text-line rendering (invalidated when dimensions change)
+    /// Original un-composited image for re-compositing with different backgrounds
+    original_image: Option<image::DynamicImage>,
+    /// Cached text-line rendering (invalidated when dimensions or bg change)
     cached_lines: Option<Vec<ratatui::text::Line<'static>>>,
-    cached_lines_dims: Option<(u16, u16)>,
+    cached_lines_dims: Option<(u16, u16, Color)>,
 }
 
 impl LogoImage {
@@ -49,6 +51,7 @@ impl LogoImage {
             bg_rgba: terminal_bg.unwrap_or(image::Rgba([0, 0, 0, 255])),
             terminal_bg,
             composited: None,
+            original_image: None,
             cached_lines: None,
             cached_lines_dims: None,
         }
@@ -99,6 +102,7 @@ impl LogoImage {
         // Composite transparent pixels against the detected background ourselves,
         // producing a fully opaque image. This bypasses ratatui-image's
         // compositing which produces wrong colors on halfblocks.
+        self.original_image = Some(dyn_img.clone());
         let dyn_img = Self::composite_onto_bg(dyn_img, self.bg_rgba);
         self.composited = Some(dyn_img.clone());
         self.cached_lines = None;
@@ -226,16 +230,17 @@ impl LogoImage {
         max_width: u16,
         max_height: u16,
         accent_color: Color,
+        bg_color: Color,
     ) -> Vec<Line<'static>> {
         if let (Some(cached), Some(dims)) = (&self.cached_lines, self.cached_lines_dims) {
-            if dims == (max_width, max_height) {
+            if dims == (max_width, max_height, bg_color) {
                 return cached.clone();
             }
         }
 
-        let lines = self.build_halfblock_lines(max_width, max_height, accent_color);
+        let lines = self.build_halfblock_lines(max_width, max_height, accent_color, bg_color);
         self.cached_lines = Some(lines.clone());
-        self.cached_lines_dims = Some((max_width, max_height));
+        self.cached_lines_dims = Some((max_width, max_height, bg_color));
         lines
     }
 
@@ -244,9 +249,17 @@ impl LogoImage {
         max_width: u16,
         max_height: u16,
         accent_color: Color,
+        bg_color: Color,
     ) -> Vec<Line<'static>> {
-        let Some(ref img) = self.composited else {
-            return self.fallback_text_lines(max_width, accent_color);
+        // Re-composite the original image against the ChatView's bg color so
+        // transparent areas blend seamlessly with the surrounding chat background.
+        let chat_bg = match bg_color {
+            Color::Rgb(r, g, b) => image::Rgba([r, g, b, 255]),
+            _ => self.bg_rgba,
+        };
+        let img = match self.original_image {
+            Some(ref orig) => Self::composite_onto_bg(orig.clone(), chat_bg),
+            None => return self.fallback_text_lines(max_width, accent_color),
         };
 
         let text_height: u16 = 2;
@@ -290,7 +303,7 @@ impl LogoImage {
                 let bottom = if y + 1 < render_h {
                     *resized.get_pixel(x, y + 1)
                 } else {
-                    image::Rgba(self.bg_rgba.0)
+                    chat_bg
                 };
 
                 spans.push(Span::styled(
