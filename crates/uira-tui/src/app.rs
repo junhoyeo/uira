@@ -1608,7 +1608,8 @@ impl App {
                 .split(main_area);
 
             if self.chat_view.messages.is_empty() {
-                self.logo_image.render(frame, chunks[0], self.theme.accent);
+                self.logo_image
+                    .render(frame, chunks[0], self.theme.accent, self.theme.bg);
             } else {
                 self.chat_view.render_chat(frame, chunks[0]);
             }
@@ -1632,7 +1633,8 @@ impl App {
                 .split(main_area);
 
             if self.chat_view.messages.is_empty() {
-                self.logo_image.render(frame, chunks[0], self.theme.accent);
+                self.logo_image
+                    .render(frame, chunks[0], self.theme.accent, self.theme.bg);
             } else {
                 self.chat_view.render_chat(frame, chunks[0]);
             }

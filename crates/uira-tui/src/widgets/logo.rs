@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Paragraph},
     Frame,
 };
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol, Resize, StatefulImage};
@@ -49,24 +49,59 @@ impl LogoImage {
         }
     }
 
-    /// Load an image from a file path
+    /// Load an image from a file path.
+    ///
+    /// Detects the image's background color by sampling the top-left corner pixel
+    /// and makes matching pixels transparent, so the picker's background_color
+    /// (set via `set_background_color`) can replace them with the theme background.
     pub fn load_from_path<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
         let Some(ref picker) = self.picker else {
             let err = "No graphics protocol available".to_string();
             self.load_error = Some(err.clone());
             return Err(err);
         };
-
         let dyn_img = image::ImageReader::open(path.as_ref())
             .map_err(|e| format!("Failed to open image: {}", e))?
             .decode()
             .map_err(|e| format!("Failed to decode image: {}", e))?;
-
+        // Replace the image's own background with transparency so the picker's
+        // background_color (theme bg) shows through instead.
+        let dyn_img = Self::replace_bg_with_transparency(dyn_img);
         let (pw, ph) = (dyn_img.width(), dyn_img.height());
         self.protocol = Some(picker.new_resize_protocol(dyn_img));
         self.image_pixels = Some((pw, ph));
         self.load_error = None;
         Ok(())
+    }
+
+    /// Sample the top-left corner pixel as the "background" color and replace
+    /// all pixels close to it with fully transparent pixels.
+    fn replace_bg_with_transparency(img: image::DynamicImage) -> image::DynamicImage {
+        use image::DynamicImage;
+
+        let rgba = img.to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        if w == 0 || h == 0 {
+            return img;
+        }
+
+        // Sample corner pixel as background reference
+        let bg_pixel = *rgba.get_pixel(0, 0);
+        let (br, bg, bb) = (bg_pixel[0] as i16, bg_pixel[1] as i16, bg_pixel[2] as i16);
+
+        // Tolerance for color distance (handles anti-aliased edges)
+        const TOLERANCE: i16 = 30;
+
+        let mut out = rgba;
+        for pixel in out.pixels_mut() {
+            let (pr, pg, pb) = (pixel[0] as i16, pixel[1] as i16, pixel[2] as i16);
+            let dist = (pr - br).abs() + (pg - bg).abs() + (pb - bb).abs();
+            if dist < TOLERANCE {
+                pixel[3] = 0; // make transparent
+            }
+        }
+
+        DynamicImage::ImageRgba8(out)
     }
 
     /// Calculate how many terminal cells the image occupies when fitted into `rect_w × rect_h`.
@@ -101,7 +136,12 @@ impl LogoImage {
     }
 
     /// Render the logo right-aligned in the given area with title text below
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, accent_color: Color) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, accent_color: Color, bg_color: Color) {
+        // Fill entire area with theme background so cells outside the image
+        // don't show the terminal's default bg (which may differ from theme.bg)
+        let bg_block = Block::default().style(Style::default().bg(bg_color));
+        frame.render_widget(bg_block, area);
+
         let text_height: u16 = 2;
 
         // Calculate fitted size BEFORE borrowing protocol mutably
