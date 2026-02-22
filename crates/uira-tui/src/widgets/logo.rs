@@ -17,11 +17,21 @@ pub struct LogoImage {
     load_error: Option<String>,
     /// Original pixel dimensions (width, height) of the loaded image
     image_pixels: Option<(u32, u32)>,
+    /// Background color used for alpha compositing
+    bg_rgba: image::Rgba<u8>,
+    /// Terminal's actual background color detected via OSC 11 query.
+    /// When set, this overrides theme.bg for image compositing so the
+    /// logo seamlessly blends with the terminal window regardless of theme.
+    terminal_bg: Option<image::Rgba<u8>>,
 }
 
 impl LogoImage {
     /// Create a new logo image holder (call before event loop)
     pub fn new() -> Self {
+        // Detect terminal's actual background color via OSC 11 FIRST,
+        // before any other terminal queries (needs raw mode).
+        let terminal_bg = query_terminal_bg();
+
         // Try to detect terminal graphics protocol (Kitty, Sixel, iTerm2).
         // Falls back to halfblocks (unicode ▀▄) which works in all terminals.
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
@@ -31,29 +41,43 @@ impl LogoImage {
             picker: Some(picker),
             load_error: None,
             image_pixels: None,
+            bg_rgba: terminal_bg.unwrap_or(image::Rgba([0, 0, 0, 255])),
+            terminal_bg,
         }
     }
 
-    /// Set the background color for image transparency compositing.
-    /// Must be called before `load_from_path` so the protocol composites
-    /// transparent pixels against this color instead of showing black.
+    /// Set the background color used to replace the image's own background.
+    /// Must be called before `load_from_path` so the loaded image's background
+    /// pixels are directly painted with this color.
+    ///
+    /// If the terminal's actual background was detected via OSC 11, that color
+    /// is used instead of the provided theme color.
     pub fn set_background_color(&mut self, color: Color) {
+        // If terminal bg was detected, prefer that for image compositing
+        if let Some(term_bg) = self.terminal_bg {
+            self.bg_rgba = term_bg;
+            if let Some(ref mut picker) = self.picker {
+                picker.set_background_color(term_bg);
+            }
+            return;
+        }
+        let (r, g, b) = match color {
+            Color::Rgb(r, g, b) => (r, g, b),
+            Color::Black => (0, 0, 0),
+            Color::Reset => (0, 0, 0),
+            _ => (0, 0, 0),
+        };
+        self.bg_rgba = image::Rgba([r, g, b, 255]);
         if let Some(ref mut picker) = self.picker {
-            let (r, g, b) = match color {
-                Color::Rgb(r, g, b) => (r, g, b),
-                Color::Black => (0, 0, 0),
-                Color::Reset => (0, 0, 0),
-                _ => (0, 0, 0), // fallback to black for indexed colors
-            };
             picker.set_background_color(image::Rgba([r, g, b, 255]));
         }
     }
 
     /// Load an image from a file path.
     ///
-    /// Detects the image's background color by sampling the top-left corner pixel
-    /// and makes matching pixels transparent, so the picker's background_color
-    /// (set via `set_background_color`) can replace them with the theme background.
+    /// Alpha-composites the image against `bg_rgba` (set via `set_background_color`)
+    /// to produce a fully opaque image. This avoids relying on ratatui-image's
+    /// internal compositing which can produce incorrect colors.
     pub fn load_from_path<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
         let Some(ref picker) = self.picker else {
             let err = "No graphics protocol available".to_string();
@@ -64,9 +88,10 @@ impl LogoImage {
             .map_err(|e| format!("Failed to open image: {}", e))?
             .decode()
             .map_err(|e| format!("Failed to decode image: {}", e))?;
-        // Replace the image's own background with transparency so the picker's
-        // background_color (theme bg) shows through instead.
-        let dyn_img = Self::replace_bg_with_transparency(dyn_img);
+        // Composite transparent pixels against the detected background ourselves,
+        // producing a fully opaque image. This bypasses ratatui-image's
+        // compositing which produces wrong colors on halfblocks.
+        let dyn_img = Self::composite_onto_bg(dyn_img, self.bg_rgba);
         let (pw, ph) = (dyn_img.width(), dyn_img.height());
         self.protocol = Some(picker.new_resize_protocol(dyn_img));
         self.image_pixels = Some((pw, ph));
@@ -74,34 +99,21 @@ impl LogoImage {
         Ok(())
     }
 
-    /// Sample the top-left corner pixel as the "background" color and replace
-    /// all pixels close to it with fully transparent pixels.
-    fn replace_bg_with_transparency(img: image::DynamicImage) -> image::DynamicImage {
-        use image::DynamicImage;
-
-        let rgba = img.to_rgba8();
-        let (w, h) = (rgba.width(), rgba.height());
-        if w == 0 || h == 0 {
-            return img;
-        }
-
-        // Sample corner pixel as background reference
-        let bg_pixel = *rgba.get_pixel(0, 0);
-        let (br, bg, bb) = (bg_pixel[0] as i16, bg_pixel[1] as i16, bg_pixel[2] as i16);
-
-        // Tolerance for color distance (handles anti-aliased edges)
-        const TOLERANCE: i16 = 30;
-
-        let mut out = rgba;
-        for pixel in out.pixels_mut() {
-            let (pr, pg, pb) = (pixel[0] as i16, pixel[1] as i16, pixel[2] as i16);
-            let dist = (pr - br).abs() + (pg - bg).abs() + (pb - bb).abs();
-            if dist < TOLERANCE {
-                pixel[3] = 0; // make transparent
+    /// Alpha-composite every pixel against `bg` to produce a fully opaque image.
+    /// Transparent pixels become `bg`; semi-transparent pixels blend smoothly.
+    fn composite_onto_bg(img: image::DynamicImage, bg: image::Rgba<u8>) -> image::DynamicImage {
+        let mut rgba = img.to_rgba8();
+        let [br, bg_g, bb, _] = bg.0;
+        for pixel in rgba.pixels_mut() {
+            let a = pixel[3] as f32 / 255.0;
+            if a < 1.0 {
+                pixel[0] = (pixel[0] as f32 * a + br as f32 * (1.0 - a)).round() as u8;
+                pixel[1] = (pixel[1] as f32 * a + bg_g as f32 * (1.0 - a)).round() as u8;
+                pixel[2] = (pixel[2] as f32 * a + bb as f32 * (1.0 - a)).round() as u8;
+                pixel[3] = 255;
             }
         }
-
-        DynamicImage::ImageRgba8(out)
+        image::DynamicImage::ImageRgba8(rgba)
     }
 
     /// Calculate how many terminal cells the image occupies when fitted into `rect_w × rect_h`.
@@ -137,9 +149,13 @@ impl LogoImage {
 
     /// Render the logo right-aligned in the given area with title text below
     pub fn render(&mut self, frame: &mut Frame, area: Rect, accent_color: Color, bg_color: Color) {
-        // Fill entire area with theme background so cells outside the image
-        // don't show the terminal's default bg (which may differ from theme.bg)
-        let bg_block = Block::default().style(Style::default().bg(bg_color));
+        // Use terminal bg if detected, otherwise theme bg, so the logo area
+        // seamlessly blends with the terminal window.
+        let effective_bg = match self.terminal_bg {
+            Some(ref term_bg) => Color::Rgb(term_bg.0[0], term_bg.0[1], term_bg.0[2]),
+            None => bg_color,
+        };
+        let bg_block = Block::default().style(Style::default().bg(effective_bg));
         frame.render_widget(bg_block, area);
 
         let text_height: u16 = 2;
@@ -263,4 +279,100 @@ impl Default for LogoImage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// OSC 11 terminal background color detection
+// ---------------------------------------------------------------------------
+
+/// Query the terminal's actual background color using the OSC 11 escape sequence.
+///
+/// Sends `\x1b]11;?\x07` and parses the terminal's response which is typically
+/// `\x1b]11;rgb:RRRR/GGGG/BBBB\x07` (4-digit hex per component) or
+/// `\x1b]11;rgb:RR/GG/BB\x07` (2-digit hex).
+///
+/// Must be called before entering the alternate screen buffer and before any
+/// other terminal queries. Uses a background thread with timeout to avoid
+/// hanging if the terminal doesn't support the query.
+fn query_terminal_bg() -> Option<image::Rgba<u8>> {
+    use std::io::{Read, Write};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        if crossterm::terminal::enable_raw_mode().is_err() {
+            return;
+        }
+
+        let result = (|| -> Option<image::Rgba<u8>> {
+            let mut stdout = std::io::stdout();
+            stdout.write_all(b"\x1b]11;?\x07").ok()?;
+            stdout.flush().ok()?;
+
+            let mut response = Vec::with_capacity(64);
+            let mut byte = [0u8; 1];
+
+            while let Ok(1) = std::io::stdin().read(&mut byte) {
+                response.push(byte[0]);
+                // BEL terminator
+                if byte[0] == 0x07 {
+                    break;
+                }
+                // ST terminator (\x1b\\)
+                if response.len() >= 2 && response.ends_with(b"\x1b\\") {
+                    break;
+                }
+                // Safety limit
+                if response.len() > 64 {
+                    break;
+                }
+            }
+
+            parse_osc11_response(&response)
+        })();
+
+        let _ = crossterm::terminal::disable_raw_mode();
+
+        if let Some(color) = result {
+            let _ = tx.send(color);
+        }
+    });
+
+    rx.recv_timeout(Duration::from_millis(300)).ok()
+}
+
+/// Parse an OSC 11 response to extract the RGB background color.
+///
+/// Handles both 4-digit (`RRRR/GGGG/BBBB`) and 2-digit (`RR/GG/BB`) hex formats.
+fn parse_osc11_response(response: &[u8]) -> Option<image::Rgba<u8>> {
+    let s = std::str::from_utf8(response).ok()?;
+    let rgb_idx = s.find("rgb:")?;
+    let after_rgb = &s[rgb_idx + 4..];
+
+    let parts: Vec<&str> = after_rgb.split('/').take(3).collect();
+    if parts.len() < 3 {
+        return None;
+    }
+
+    let parse_component = |s: &str| -> Option<u8> {
+        let hex: String = s.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        if hex.is_empty() {
+            return None;
+        }
+        let val = u16::from_str_radix(&hex, 16).ok()?;
+        if hex.len() > 2 {
+            Some((val >> 8) as u8)
+        } else {
+            Some(val as u8)
+        }
+    };
+
+    let r = parse_component(parts[0])?;
+    let g = parse_component(parts[1])?;
+    let b = parse_component(parts[2])?;
+
+    Some(image::Rgba([r, g, b, 255]))
 }
