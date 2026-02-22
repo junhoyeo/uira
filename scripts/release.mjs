@@ -66,11 +66,11 @@ const CRATE_ORDER = [
 const PLATFORMS = [
   { codeTarget: "darwin-arm64", npmTag: "darwin-arm64", os: "darwin", cpu: "arm64" },
   { codeTarget: "darwin-x64", npmTag: "darwin-x64", os: "darwin", cpu: "x64" },
-  { codeTarget: "linux-x64-gnu", npmTag: "linux-x64", os: "linux", cpu: "x64", libc: "glibc" },
-  { codeTarget: "linux-arm64-gnu", npmTag: "linux-arm64", os: "linux", cpu: "arm64", libc: "glibc" },
+  { codeTarget: "linux-x64-gnu", npmTag: "linux-x64-gnu", os: "linux", cpu: "x64", libc: "glibc" },
+  { codeTarget: "linux-arm64-gnu", npmTag: "linux-arm64-gnu", os: "linux", cpu: "arm64", libc: "glibc" },
   { codeTarget: "linux-x64-musl", npmTag: "linux-x64-musl", os: "linux", cpu: "x64", libc: "musl" },
   { codeTarget: "linux-arm64-musl", npmTag: "linux-arm64-musl", os: "linux", cpu: "arm64", libc: "musl" },
-  { codeTarget: "win32-x64-msvc", npmTag: "win32-x64", os: "win32", cpu: "x64" },
+  { codeTarget: "win32-x64-msvc", npmTag: "win32-x64-msvc", os: "win32", cpu: "x64" },
 ];
 
 const MAIN_PKG_NAME = "@uiradev/uira";

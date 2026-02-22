@@ -8,11 +8,11 @@ const path = require('path');
 const PLATFORMS = {
   'darwin-arm64': '@uiradev/uira-darwin-arm64',
   'darwin-x64': '@uiradev/uira-darwin-x64',
-  'linux-x64-gnu': '@uiradev/uira-linux-x64',
+  'linux-x64-gnu': '@uiradev/uira-linux-x64-gnu',
   'linux-x64-musl': '@uiradev/uira-linux-x64-musl',
-  'linux-arm64-gnu': '@uiradev/uira-linux-arm64',
+  'linux-arm64-gnu': '@uiradev/uira-linux-arm64-gnu',
   'linux-arm64-musl': '@uiradev/uira-linux-arm64-musl',
-  'win32-x64': '@uiradev/uira-win32-x64',
+  'win32-x64': '@uiradev/uira-win32-x64-msvc',
 };
 
 function isMusl() {
