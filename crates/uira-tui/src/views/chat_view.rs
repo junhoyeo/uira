@@ -27,6 +27,8 @@ pub struct ChatView {
     pub(crate) user_scrolled: bool,
     pub(crate) auto_follow: bool,
     pub(crate) rendered_lines: Vec<Vec<Line<'static>>>,
+    /// Pre-rendered logo lines to display at the top of chat (scrollable)
+    pub(crate) logo_lines: Vec<Line<'static>>,
     pub(crate) last_render_width: u16,
     agent_color_map: HashMap<String, usize>,
     line_message_index: Vec<Option<usize>>,
@@ -53,6 +55,7 @@ impl ChatView {
             user_scrolled: false,
             auto_follow: true,
             rendered_lines: Vec::new(),
+            logo_lines: Vec::new(),
             last_render_width: 0,
             agent_color_map: HashMap::new(),
             line_message_index: Vec::new(),
@@ -333,6 +336,15 @@ impl ChatView {
         self.cache_dirty = true;
     }
 
+    /// Set the logo lines to display at the top of the chat view.
+    /// These are prepended as the first entry in the rendered content and scroll naturally.
+    pub fn set_logo_lines(&mut self, lines: Vec<Line<'static>>) {
+        if self.logo_lines != lines {
+            self.logo_lines = lines;
+            self.invalidate_render_cache();
+        }
+    }
+
     fn rebuild_render_cache_if_needed(&mut self, width: u16) {
         let width_changed = width != self.last_render_width;
         if !self.cache_dirty && !width_changed {
@@ -347,6 +359,18 @@ impl ChatView {
         self.cached_static_line_message_index.clear();
 
         let wrap_width = width as usize;
+
+        // Prepend logo lines as the first entry (scrolls with chat)
+        if !self.logo_lines.is_empty() {
+            let logo_entry: Vec<Line<'static>> = self.logo_lines.clone();
+            self.line_message_index
+                .extend(std::iter::repeat_n(None, logo_entry.len()));
+            self.rendered_lines.push(logo_entry);
+            // Add separator after logo
+            self.line_message_index.push(None);
+            self.rendered_lines.push(vec![Line::from("")]);
+        }
+
         for message_index in 0..self.messages.len() {
             let msg = self.messages[message_index].clone();
             let lines = self.render_message_lines(msg, wrap_width);

@@ -148,6 +148,7 @@ fn expand_env_vars(config: UiraConfig) -> UiraConfig {
         providers: expand_providers_settings(config.providers),
         keybinds: config.keybinds,
         sidebar: config.sidebar,
+        show_logo: config.show_logo,
         memory: config.memory,
     }
 }
@@ -295,21 +296,27 @@ mod tests {
 
     #[test]
     fn test_expand_env_string_with_braces() {
-        env::set_var("TEST_VAR", "test_value");
+        unsafe {
+            env::set_var("TEST_VAR", "test_value");
+        }
         let result = expand_env_string("prefix_${TEST_VAR}_suffix");
         assert_eq!(result, "prefix_test_value_suffix");
     }
 
     #[test]
     fn test_expand_env_string_without_braces() {
-        env::set_var("TEST_VAR", "test_value");
+        unsafe {
+            env::set_var("TEST_VAR", "test_value");
+        }
         let result = expand_env_string("prefix_$TEST_VAR");
         assert_eq!(result, "prefix_test_value");
     }
 
     #[test]
     fn test_expand_env_string_preserves_space_after_var() {
-        env::set_var("TEST_VAR2", "value");
+        unsafe {
+            env::set_var("TEST_VAR2", "value");
+        }
         let result = expand_env_string("hello $TEST_VAR2 world");
         assert_eq!(result, "hello value world");
     }
@@ -322,8 +329,10 @@ mod tests {
 
     #[test]
     fn test_expand_theme_env_settings() {
-        env::set_var("UIRA_THEME_NAME", "dracula");
-        env::set_var("UIRA_THEME_ACCENT", "#ff79c6");
+        unsafe {
+            env::set_var("UIRA_THEME_NAME", "dracula");
+            env::set_var("UIRA_THEME_ACCENT", "#ff79c6");
+        }
 
         let yaml = r#"
 theme: $UIRA_THEME_NAME

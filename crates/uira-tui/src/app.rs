@@ -915,6 +915,7 @@ pub struct App {
     cached_git_summary: (usize, usize, usize),
     git_summary_last_update: std::time::Instant,
     logo_image: LogoImage,
+    show_logo: bool,
 }
 
 impl App {
@@ -1372,6 +1373,7 @@ impl App {
             cached_git_summary: (0, 0, 0),
             git_summary_last_update: std::time::Instant::now(),
             logo_image,
+            show_logo: true,
         }
     }
 
@@ -1399,6 +1401,10 @@ impl App {
 
     pub fn configure_keybinds(&mut self, keybinds: KeybindConfig) {
         self.keybinds = keybinds;
+    }
+
+    pub fn set_show_logo(&mut self, show: bool) {
+        self.show_logo = show;
     }
 
     pub fn with_model(mut self, model: &str) -> Self {
@@ -1607,12 +1613,17 @@ impl App {
                 ])
                 .split(main_area);
 
-            if self.chat_view.messages.is_empty() {
-                self.logo_image
-                    .render(frame, chunks[0], self.theme.accent, self.theme.bg);
-            } else {
-                self.chat_view.render_chat(frame, chunks[0]);
+            if self.show_logo {
+                let chat_area = chunks[0];
+                let max_logo_h = chat_area.height / 2;
+                let lines =
+                    self.logo_image
+                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent);
+                self.chat_view.set_logo_lines(lines);
+            } else if !self.chat_view.logo_lines.is_empty() {
+                self.chat_view.set_logo_lines(Vec::new());
             }
+            self.chat_view.render_chat(frame, chunks[0]);
             self.approval_overlay.render(frame, chunks[1]);
             self.render_session_header(frame, chunks[2]);
             self.render_hud(frame, chunks[3]);
@@ -1632,12 +1643,17 @@ impl App {
                 ])
                 .split(main_area);
 
-            if self.chat_view.messages.is_empty() {
-                self.logo_image
-                    .render(frame, chunks[0], self.theme.accent, self.theme.bg);
-            } else {
-                self.chat_view.render_chat(frame, chunks[0]);
+            if self.show_logo {
+                let chat_area = chunks[0];
+                let max_logo_h = chat_area.height / 2;
+                let lines =
+                    self.logo_image
+                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent);
+                self.chat_view.set_logo_lines(lines);
+            } else if !self.chat_view.logo_lines.is_empty() {
+                self.chat_view.set_logo_lines(Vec::new());
             }
+            self.chat_view.render_chat(frame, chunks[0]);
             self.render_session_header(frame, chunks[1]);
             self.render_hud(frame, chunks[2]);
             self.render_status(frame, chunks[3]);

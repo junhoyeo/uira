@@ -92,6 +92,10 @@ pub struct UiraConfig {
     #[serde(default)]
     pub sidebar: SidebarConfig,
 
+
+    /// Whether to show the startup logo in the chat view (default: true)
+    #[serde(default = "default_true")]
+    pub show_logo: bool,
     #[serde(default)]
     pub memory: MemorySettings,
 }
@@ -118,6 +122,7 @@ impl Default for UiraConfig {
             providers: ProvidersSettings::default(),
             keybinds: KeybindsConfig::default(),
             sidebar: SidebarConfig::default(),
+            show_logo: true,
             memory: MemorySettings::default(),
         }
     }

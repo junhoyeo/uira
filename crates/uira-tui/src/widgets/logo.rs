@@ -23,6 +23,11 @@ pub struct LogoImage {
     /// When set, this overrides theme.bg for image compositing so the
     /// logo seamlessly blends with the terminal window regardless of theme.
     terminal_bg: Option<image::Rgba<u8>>,
+    /// Composited image stored for text-line rendering (halfblock mode)
+    composited: Option<image::DynamicImage>,
+    /// Cached text-line rendering (invalidated when dimensions change)
+    cached_lines: Option<Vec<ratatui::text::Line<'static>>>,
+    cached_lines_dims: Option<(u16, u16)>,
 }
 
 impl LogoImage {
@@ -43,6 +48,9 @@ impl LogoImage {
             image_pixels: None,
             bg_rgba: terminal_bg.unwrap_or(image::Rgba([0, 0, 0, 255])),
             terminal_bg,
+            composited: None,
+            cached_lines: None,
+            cached_lines_dims: None,
         }
     }
 
@@ -92,6 +100,9 @@ impl LogoImage {
         // producing a fully opaque image. This bypasses ratatui-image's
         // compositing which produces wrong colors on halfblocks.
         let dyn_img = Self::composite_onto_bg(dyn_img, self.bg_rgba);
+        self.composited = Some(dyn_img.clone());
+        self.cached_lines = None;
+        self.cached_lines_dims = None;
         let (pw, ph) = (dyn_img.width(), dyn_img.height());
         self.protocol = Some(picker.new_resize_protocol(dyn_img));
         self.image_pixels = Some((pw, ph));
@@ -206,6 +217,166 @@ impl LogoImage {
         } else {
             self.render_fallback(frame, area, accent_color);
         }
+    }
+
+    /// Render the logo as text lines using halfblock characters (▀) for scrollable chat integration.
+    /// Returns right-aligned image lines + "uira" title + URL, suitable for inclusion in ChatView.
+    pub fn render_as_lines(
+        &mut self,
+        max_width: u16,
+        max_height: u16,
+        accent_color: Color,
+    ) -> Vec<Line<'static>> {
+        if let (Some(cached), Some(dims)) = (&self.cached_lines, self.cached_lines_dims) {
+            if dims == (max_width, max_height) {
+                return cached.clone();
+            }
+        }
+
+        let lines = self.build_halfblock_lines(max_width, max_height, accent_color);
+        self.cached_lines = Some(lines.clone());
+        self.cached_lines_dims = Some((max_width, max_height));
+        lines
+    }
+
+    fn build_halfblock_lines(
+        &self,
+        max_width: u16,
+        max_height: u16,
+        accent_color: Color,
+    ) -> Vec<Line<'static>> {
+        let Some(ref img) = self.composited else {
+            return self.fallback_text_lines(max_width, accent_color);
+        };
+
+        let text_height: u16 = 2;
+        let img_max_h = max_height.saturating_sub(text_height);
+        if img_max_h == 0 || max_width == 0 {
+            return self.fallback_text_lines(max_width, accent_color);
+        }
+
+        let target_px_h = img_max_h as u32 * 2;
+        let target_px_w = max_width as u32;
+
+        let (pw, ph) = (img.width(), img.height());
+        let scale_w = target_px_w as f64 / pw as f64;
+        let scale_h = target_px_h as f64 / ph as f64;
+        let scale = scale_w.min(scale_h);
+
+        let render_w = ((pw as f64 * scale).round() as u32).max(1);
+        let render_h = ((ph as f64 * scale).round() as u32).max(1);
+
+        let resized = image::imageops::resize(
+            &img.to_rgba8(),
+            render_w,
+            render_h,
+            image::imageops::FilterType::Lanczos3,
+        );
+
+        let cell_w = render_w as u16;
+        let mut lines: Vec<Line<'static>> = Vec::new();
+
+        let mut y = 0u32;
+        while y < render_h {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+
+            let pad = max_width.saturating_sub(cell_w) as usize;
+            if pad > 0 {
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+
+            for x in 0..render_w {
+                let top = resized.get_pixel(x, y);
+                let bottom = if y + 1 < render_h {
+                    *resized.get_pixel(x, y + 1)
+                } else {
+                    image::Rgba(self.bg_rgba.0)
+                };
+
+                spans.push(Span::styled(
+                    "▀",
+                    Style::default()
+                        .fg(Color::Rgb(top[0], top[1], top[2]))
+                        .bg(Color::Rgb(bottom[0], bottom[1], bottom[2])),
+                ));
+            }
+            lines.push(Line::from(spans));
+            y += 2;
+        }
+
+        let title = "uira";
+        let url = "github.com/junhoyeo/uira";
+
+        let title_pad = " ".repeat((max_width as usize).saturating_sub(title.len()));
+        let url_pad = " ".repeat((max_width as usize).saturating_sub(url.len()));
+
+        lines.push(Line::from(vec![
+            Span::raw(title_pad),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(accent_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw(url_pad),
+            Span::styled(url, Style::default().fg(Color::DarkGray)),
+        ]));
+
+        lines
+    }
+
+    fn fallback_text_lines(&self, max_width: u16, accent_color: Color) -> Vec<Line<'static>> {
+        let ascii_art = vec![
+            "██╗   ██╗██╗██████╗  █████╗ ",
+            "██║   ██║██║██╔══██╗██╔══██╗",
+            "██║   ██║██║██████╔╝███████║",
+            "██║   ██║██║██╔══██╗██╔══██║",
+            "╚██████╔╝██║██║  ██║██║  ██║",
+            " ╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝",
+        ];
+        let title = "uira";
+        let url = "github.com/junhoyeo/uira";
+        let art_width = ascii_art.first().map(|s| s.chars().count()).unwrap_or(0);
+
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        for line in &ascii_art {
+            let padding = " ".repeat(
+                (max_width as usize)
+                    .saturating_sub(art_width)
+                    .saturating_div(2),
+            );
+            lines.push(Line::from(vec![
+                Span::raw(padding),
+                Span::styled(*line, Style::default().fg(accent_color)),
+            ]));
+        }
+        lines.push(Line::from(""));
+        let title_pad = " ".repeat(
+            (max_width as usize)
+                .saturating_sub(title.len())
+                .saturating_div(2),
+        );
+        lines.push(Line::from(vec![
+            Span::raw(title_pad),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(accent_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        let url_pad = " ".repeat(
+            (max_width as usize)
+                .saturating_sub(url.len())
+                .saturating_div(2),
+        );
+        lines.push(Line::from(vec![
+            Span::raw(url_pad),
+            Span::styled(url, Style::default().fg(Color::DarkGray)),
+        ]));
+        lines
     }
 
     /// Render fallback ASCII art when image can't be displayed

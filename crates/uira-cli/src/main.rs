@@ -1421,6 +1421,7 @@ async fn run_interactive(
         let (keybinds, warnings) =
             uira_tui::KeybindConfig::from_config_with_warnings(&cfg.keybinds);
         app.configure_keybinds(keybinds);
+        app.set_show_logo(cfg.show_logo);
         for warning in warnings {
             tracing::warn!("{}", warning);
         }
