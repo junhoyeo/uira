@@ -54,6 +54,7 @@ use crate::widgets::dialog::DialogStack;
 use crate::widgets::diff::WrapMode;
 use crate::widgets::hud::{self, BackgroundTaskRegistry};
 use crate::widgets::ChatMessage;
+use crate::widgets::LogoImage;
 use crate::{AppEvent, FrecencyStore, Theme, ThemeOverrides};
 
 /// Maximum size for the streaming buffer (1MB)
@@ -913,6 +914,7 @@ pub struct App {
     external_theme_fingerprint: u64,
     cached_git_summary: (usize, usize, usize),
     git_summary_last_update: std::time::Instant,
+    logo_image: LogoImage,
 }
 
 impl App {
@@ -1291,6 +1293,21 @@ impl App {
         let mut chat_view = ChatView::new(theme.clone());
         chat_view.set_diff_wrap_mode(diff_wrap_mode);
 
+        // Initialize logo image with banner from Desktop
+        let mut logo_image = LogoImage::new();
+        logo_image.set_background_color(theme.bg);
+        if let Some(home) = dirs::home_dir() {
+            let logo_path = home.join("Desktop/uira-banner.png");
+            if logo_path.exists() {
+                match logo_image.load_from_path(&logo_path) {
+                    Ok(()) => tracing::info!("Loaded startup logo from {:?}", logo_path),
+                    Err(e) => tracing::warn!("Failed to load startup logo: {}", e),
+                }
+            } else {
+                tracing::debug!("No startup logo found at {:?}", logo_path);
+            }
+        }
+
         Self {
             should_quit: false,
             event_tx,
@@ -1354,6 +1371,7 @@ impl App {
             external_theme_fingerprint: Theme::external_theme_fingerprint(),
             cached_git_summary: (0, 0, 0),
             git_summary_last_update: std::time::Instant::now(),
+            logo_image,
         }
     }
 
@@ -1589,7 +1607,11 @@ impl App {
                 ])
                 .split(main_area);
 
-            self.chat_view.render_chat(frame, chunks[0]);
+            if self.chat_view.messages.is_empty() {
+                self.logo_image.render(frame, chunks[0], self.theme.accent);
+            } else {
+                self.chat_view.render_chat(frame, chunks[0]);
+            }
             self.approval_overlay.render(frame, chunks[1]);
             self.render_session_header(frame, chunks[2]);
             self.render_hud(frame, chunks[3]);
@@ -1609,7 +1631,11 @@ impl App {
                 ])
                 .split(main_area);
 
-            self.chat_view.render_chat(frame, chunks[0]);
+            if self.chat_view.messages.is_empty() {
+                self.logo_image.render(frame, chunks[0], self.theme.accent);
+            } else {
+                self.chat_view.render_chat(frame, chunks[0]);
+            }
             self.render_session_header(frame, chunks[1]);
             self.render_hud(frame, chunks[2]);
             self.render_status(frame, chunks[3]);

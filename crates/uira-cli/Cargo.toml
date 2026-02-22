@@ -36,7 +36,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 colored = { workspace = true }
 crossterm = "0.28"
-ratatui = "0.29"
+ratatui = "0.30"
 
 [dev-dependencies]
 tempfile = { workspace = true }
