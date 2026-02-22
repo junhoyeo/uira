@@ -268,10 +268,10 @@ Uira provides an AI-assisted workflow system that integrates with git hooks to a
 │  │ comment-checker│       │ to fix issues │        │ → <DONE/>     │            │
 │  └───────────────┘        └───────────────┘        └───────────────┘            │
 │                                                                                  │
-│  4. Stage Changes (--stage)    5. Continue/Fail Hook                            │
+│  4. Stage Changes (default)    5. Continue/Fail Hook                            │
 │  ┌───────────────┐             ┌───────────────┐                                │
 │  │ git add <file>│────────────▶│ Exit 0 (pass) │                                │
-│  │               │             │ Exit 1 (fail) │                                │
+│  │ (--no-add skip│             │ Exit 1 (fail) │                                │
 │  └───────────────┘             └───────────────┘                                │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -303,9 +303,9 @@ When you commit, the pre-commit hook executes:
 .git/hooks/pre-commit
     └── exec uira-commit-hook-cli run pre-commit
             └── Runs configured commands from uira.yml
-                    ├── uira-commit-hook-cli typos --ai --stage
-                    ├── uira-commit-hook-cli diagnostics --ai --stage
-                    └── uira-commit-hook-cli comments --ai --stage
+                    ├── uira-commit-hook-cli typos --ai
+                    ├── uira-commit-hook-cli diagnostics --ai
+                    └── uira-commit-hook-cli comments --ai
 ```
 
 ### Hook Configuration Example
@@ -318,13 +318,13 @@ pre-commit:
     - name: format
       run: uira-commit-hook-cli format --check
     - name: typos
-      run: uira-commit-hook-cli typos --ai --stage
+      run: uira-commit-hook-cli typos --ai
       on_fail: stop
     - name: diagnostics
-      run: uira-commit-hook-cli diagnostics --ai --staged --stage --severity error
+      run: uira-commit-hook-cli diagnostics --ai --cached --severity error
       on_fail: stop
     - name: comments
-      run: uira-commit-hook-cli comments --ai --staged --stage
+      run: uira-commit-hook-cli comments --ai --cached
       on_fail: warn
 ```
 

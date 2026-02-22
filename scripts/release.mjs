@@ -62,15 +62,18 @@ const CRATE_ORDER = [
   "uira-commit-hook-cli",
 ];
 
+/** Platform targets — tagged versions of @uiradev/uira (like OpenAI Codex pattern). */
 const PLATFORMS = [
-  { codeTarget: "darwin-arm64", os: "darwin", cpu: "arm64", pkg: "@uiradev/uira-darwin-arm64" },
-  { codeTarget: "darwin-x64", os: "darwin", cpu: "x64", pkg: "@uiradev/uira-darwin-x64" },
-  { codeTarget: "linux-x64-gnu", os: "linux", cpu: "x64", pkg: "@uiradev/uira-linux-x64-gnu", libc: "glibc" },
-  { codeTarget: "linux-arm64-gnu", os: "linux", cpu: "arm64", pkg: "@uiradev/uira-linux-arm64-gnu", libc: "glibc" },
-  { codeTarget: "linux-x64-musl", os: "linux", cpu: "x64", pkg: "@uiradev/uira-linux-x64-musl", libc: "musl" },
-  { codeTarget: "linux-arm64-musl", os: "linux", cpu: "arm64", pkg: "@uiradev/uira-linux-arm64-musl", libc: "musl" },
-  { codeTarget: "win32-x64-msvc", os: "win32", cpu: "x64", pkg: "@uiradev/uira-win32-x64-msvc" },
+  { codeTarget: "darwin-arm64", npmTag: "darwin-arm64", os: "darwin", cpu: "arm64" },
+  { codeTarget: "darwin-x64", npmTag: "darwin-x64", os: "darwin", cpu: "x64" },
+  { codeTarget: "linux-x64-gnu", npmTag: "linux-x64-gnu", os: "linux", cpu: "x64", libc: "glibc" },
+  { codeTarget: "linux-arm64-gnu", npmTag: "linux-arm64-gnu", os: "linux", cpu: "arm64", libc: "glibc" },
+  { codeTarget: "linux-x64-musl", npmTag: "linux-x64-musl", os: "linux", cpu: "x64", libc: "musl" },
+  { codeTarget: "linux-arm64-musl", npmTag: "linux-arm64-musl", os: "linux", cpu: "arm64", libc: "musl" },
+  { codeTarget: "win32-x64-msvc", npmTag: "win32-x64-msvc", os: "win32", cpu: "x64" },
 ];
+
+const MAIN_PKG_NAME = "@uiradev/uira";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -190,13 +193,13 @@ function bump(input) {
   // 2. packages/uira/package.json
   const uiraPkg = readJson(UIRA_PKG);
   uiraPkg.version = version;
-  if (uiraPkg.optionalDependencies) {
-    for (const dep of Object.keys(uiraPkg.optionalDependencies)) {
-      if (dep.startsWith("@uiradev/")) {
-        uiraPkg.optionalDependencies[dep] = version;
-      }
-    }
+  // Rebuild optionalDependencies with npm: aliases for new version
+  const optDeps = {};
+  for (const p of PLATFORMS) {
+    const aliasName = `${MAIN_PKG_NAME}-${p.npmTag}`;
+    optDeps[aliasName] = `npm:${MAIN_PKG_NAME}@${version}-${p.npmTag}`;
   }
+  uiraPkg.optionalDependencies = optDeps;
   writeJson(UIRA_PKG, uiraPkg);
   log("packages/uira/package.json");
 
@@ -322,6 +325,10 @@ function publishCrates() {
 }
 
 // ── generate-npm ─────────────────────────────────────────────────────────────
+//
+// Codex-style: publish tagged versions of the SAME package (@uiradev/uira)
+// e.g. @uiradev/uira@0.2.0-darwin-arm64 with os/cpu/libc fields.
+// Main package references them via npm: aliases in optionalDependencies.
 
 function generateNpm(artifactsDir, outputDir) {
   if (!artifactsDir || !outputDir) {
@@ -348,12 +355,13 @@ function generateNpm(artifactsDir, outputDir) {
 
     const isWindows = platform.os === "win32";
     const ext = isWindows ? ".exe" : "";
+    const taggedVersion = `${version}-${platform.npmTag}`;
 
-    // Package manifest
+    // Package manifest — same name, platform-tagged version
     const manifest = {
-      name: platform.pkg,
-      version,
-      description: `Platform-specific binary for @uiradev/uira (${platform.codeTarget})`,
+      name: MAIN_PKG_NAME,
+      version: taggedVersion,
+      description: `Platform binary for ${MAIN_PKG_NAME} (${platform.codeTarget})`,
       license: mainPkg.license,
       repository: mainPkg.repository,
       os: [platform.os],
@@ -375,15 +383,18 @@ function generateNpm(artifactsDir, outputDir) {
     }
 
     writeJson(path.join(pkgDir, "package.json"), manifest);
-    log(`Generated ${platform.pkg}@${version}`);
+    log(`Generated ${MAIN_PKG_NAME}@${taggedVersion}`);
   }
 
-  // Sync optionalDependencies in main package
+  // Sync optionalDependencies in main package using npm: aliases
   const updatedOptDeps = {};
-  for (const p of PLATFORMS) updatedOptDeps[p.pkg] = version;
+  for (const p of PLATFORMS) {
+    const aliasName = `${MAIN_PKG_NAME}-${p.npmTag}`;
+    updatedOptDeps[aliasName] = `npm:${MAIN_PKG_NAME}@${version}-${p.npmTag}`;
+  }
   mainPkg.optionalDependencies = updatedOptDeps;
   writeJson(UIRA_PKG, mainPkg);
-  log(`Updated ${UIRA_PKG} optionalDependencies`);
+  log(`Updated ${UIRA_PKG} optionalDependencies with npm: aliases`);
 
   console.log(`\nGenerated ${PLATFORMS.length} platform packages.`);
 }
@@ -395,16 +406,20 @@ function publishNpmPlatforms(dir) {
 
   heading("Publishing npm platform packages");
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const pkgJson = path.join(dir, entry.name, "package.json");
-    if (!fs.existsSync(pkgJson)) continue;
+  for (const platform of PLATFORMS) {
+    const pkgDir = path.join(dir, platform.codeTarget);
+    const pkgJson = path.join(pkgDir, "package.json");
+    if (!fs.existsSync(pkgJson)) {
+      console.warn(`  Skipping ${platform.codeTarget}: no package at ${pkgDir}`);
+      continue;
+    }
 
     const pkg = readJson(pkgJson);
-    log(`Publishing ${pkg.name}@${pkg.version}...`);
-    run("npm", ["publish", path.join(dir, entry.name), "--access", "public", "--provenance"]);
-    log(`${pkg.name} published`);
+    // Publish with a tag so it doesn't become "latest"
+    const tag = platform.npmTag;
+    log(`Publishing ${pkg.name}@${pkg.version} (tag: ${tag})...`);
+    run("npm", ["publish", pkgDir, "--access", "public", "--provenance", "--tag", tag]);
+    log(`${pkg.name}@${pkg.version} published`);
   }
 }
 
