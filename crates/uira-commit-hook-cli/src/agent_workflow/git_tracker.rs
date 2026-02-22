@@ -76,4 +76,65 @@ impl GitTracker {
 
         Ok(())
     }
+
+    /// Commit staged files with the given message
+    pub fn commit(&self, message: &str) -> anyhow::Result<()> {
+        let status = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(&self.working_dir)
+            .status()?;
+
+        if !status.success() {
+            anyhow::bail!("git commit failed with exit code: {:?}", status.code());
+        }
+
+        Ok(())
+    }
+
+    /// Generate a conventional commit message based on the task and files modified
+    pub fn generate_commit_message(
+        task_name: &str,
+        files_modified: &[String],
+        summary: Option<&str>,
+    ) -> String {
+        let file_count = files_modified.len();
+        let file_hint = if file_count == 1 {
+            files_modified[0].clone()
+        } else if file_count <= 3 {
+            files_modified.join(", ")
+        } else {
+            format!("{} files", file_count)
+        };
+
+        let action = match task_name {
+            "typos" => {
+                if let Some(s) = summary {
+                    if s.contains("typo") || s.contains("spelling") {
+                        return format!("fix: {}", s);
+                    }
+                }
+                format!("fix: correct typos in {}", file_hint)
+            }
+            "diagnostics" => {
+                if let Some(s) = summary {
+                    return format!("fix: {}", s);
+                }
+                format!("fix: resolve diagnostics in {}", file_hint)
+            }
+            "comments" => {
+                if let Some(s) = summary {
+                    return format!("refactor: {}", s);
+                }
+                format!("refactor: clean up comments in {}", file_hint)
+            }
+            _ => {
+                if let Some(s) = summary {
+                    return format!("fix: {}", s);
+                }
+                format!("fix: auto-fix issues in {}", file_hint)
+            }
+        };
+
+        action
+    }
 }

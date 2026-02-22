@@ -6,8 +6,12 @@ pub struct WorkflowConfig {
     pub provider: String,
     pub max_iterations: u32,
     pub working_directory: PathBuf,
+    /// When true, auto-stage modified files after fixing (default when --ai is used)
     pub auto_stage: bool,
-    pub staged_only: bool,
+    /// When true, commit after fixing with AI-generated message
+    pub auto_commit: bool,
+    /// Check only cached/staged files (--cached flag)
+    pub cached_only: bool,
     pub files: Vec<String>,
     pub task_options: TaskOptions,
 }
@@ -29,7 +33,8 @@ impl Default for WorkflowConfig {
             max_iterations: 10,
             working_directory: cwd,
             auto_stage: false,
-            staged_only: false,
+            auto_commit: false,
+            cached_only: false,
             files: vec![],
             task_options: TaskOptions::default(),
         }

@@ -50,12 +50,14 @@ enum Commands {
     },
     /// Check for typos
     Typos {
-        #[arg(long, help = "Use AI to decide whether to apply fixes or ignore")]
+        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
         ai: bool,
-        #[arg(long, help = "Only check staged files")]
-        staged: bool,
-        #[arg(long, help = "Automatically stage modified files after fixing")]
-        stage: bool,
+        #[arg(long, help = "Check only staged/cached files")]
+        cached: bool,
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: correct 3 typos in main.rs')")]
+        commit: bool,
+        #[arg(long, help = "Fix only, do not stage modified files")]
+        no_add: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
@@ -88,12 +90,14 @@ enum Commands {
     },
     /// Run diagnostics (lsp_diagnostics) on files
     Diagnostics {
-        #[arg(long, help = "Use AI to decide and apply fixes")]
+        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
         ai: bool,
-        #[arg(long, help = "Only check staged files")]
-        staged: bool,
-        #[arg(long, help = "Automatically stage modified files after fixing")]
-        stage: bool,
+        #[arg(long, help = "Check only staged/cached files")]
+        cached: bool,
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: resolve 5 type errors in auth.rs')")]
+        commit: bool,
+        #[arg(long, help = "Fix only, do not stage modified files")]
+        no_add: bool,
         #[arg(
             long,
             value_parser = clap::builder::PossibleValuesParser::new(["error", "warning", "all"]),
@@ -105,12 +109,14 @@ enum Commands {
     },
     /// Check and manage comments with AI assistance
     Comments {
-        #[arg(long, help = "Use AI to decide whether to remove or keep comments")]
+        #[arg(long, help = "Use AI to decide and apply fixes (default: fix + stage)")]
         ai: bool,
-        #[arg(long, help = "Only check staged files")]
-        staged: bool,
-        #[arg(long, help = "Automatically stage modified files after fixing")]
-        stage: bool,
+        #[arg(long, help = "Check only staged/cached files")]
+        cached: bool,
+        #[arg(long, help = "Commit after fixing with AI-generated message (e.g., 'fix: remove 2 stale comments')")]
+        commit: bool,
+        #[arg(long, help = "Fix only, do not stage modified files")]
+        no_add: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         files: Vec<String>,
     },
@@ -185,10 +191,11 @@ fn main() {
         Commands::Lint { files } => lint_command(&files),
         Commands::Typos {
             ai,
-            staged,
-            stage,
+            cached,
+            commit,
+            no_add,
             files,
-        } => typos_command(ai, staged, stage, &files),
+        } => typos_command(ai, cached, commit, no_add, &files),
         Commands::Format { check, files } => format_command(check, &files),
         Commands::Agent { action } => agent_command(action),
         Commands::Session { action } => session_command(action),
@@ -196,17 +203,19 @@ fn main() {
         Commands::Goals { action } => goals_command(action),
         Commands::Diagnostics {
             ai,
-            staged,
-            stage,
+            cached,
+            commit,
+            no_add,
             severity,
             files,
-        } => diagnostics_command(ai, staged, stage, severity.as_deref(), &files),
+        } => diagnostics_command(ai, cached, commit, no_add, severity.as_deref(), &files),
         Commands::Comments {
             ai,
-            staged,
-            stage,
+            cached,
+            commit,
+            no_add,
             files,
-        } => comments_command(ai, staged, stage, &files),
+        } => comments_command(ai, cached, commit, no_add, &files),
     };
 
     if let Err(e) = result {
@@ -384,13 +393,14 @@ fn lint_command(files: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn typos_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
+fn typos_command(ai: bool, cached: bool, commit: bool, no_add: bool, files: &[String]) -> anyhow::Result<()> {
     if ai {
         println!("🔍 Starting AI-assisted typos workflow...\n");
 
         let config = WorkflowConfig {
-            auto_stage: stage,
-            staged_only: staged,
+            auto_stage: !no_add,
+            auto_commit: commit,
+            cached_only: cached,
             files: files.to_vec(),
             ..Default::default()
         };
@@ -400,7 +410,7 @@ fn typos_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyho
             let detector = TyposDetector::new(&working_dir);
             let scope = if !files.is_empty() {
                 Scope::from_files(working_dir.clone(), files.to_vec())
-            } else if staged {
+            } else if cached {
                 Scope::from_staged(&working_dir)?
             } else {
                 Scope::from_repo(&working_dir)?
@@ -463,7 +473,7 @@ fn typos_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyho
 
         if !files.is_empty() {
             cmd.args(files);
-        } else if staged {
+        } else if cached {
             let output = std::process::Command::new("git")
                 .args(["diff", "--cached", "--name-only", "--diff-filter=ACM"])
                 .output()
@@ -912,8 +922,9 @@ fn goals_command(action: GoalsCommands) -> anyhow::Result<()> {
 
 fn diagnostics_command(
     ai: bool,
-    staged: bool,
-    stage: bool,
+    cached: bool,
+    commit: bool,
+    no_add: bool,
     severity: Option<&str>,
     files: &[String],
 ) -> anyhow::Result<()> {
@@ -924,7 +935,7 @@ fn diagnostics_command(
 
     println!("🔍 Running diagnostics...\n");
 
-    let files_to_check = if staged {
+    let files_to_check = if cached {
         let output = Command::new("git")
             .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
             .output()
@@ -946,8 +957,9 @@ fn diagnostics_command(
 
     if ai {
         let workflow_config = WorkflowConfig {
-            auto_stage: stage,
-            staged_only: staged,
+            auto_stage: !no_add,
+            auto_commit: commit,
+            cached_only: cached,
             files: files_to_check.clone(),
             task_options: TaskOptions {
                 severity: severity.map(String::from),
@@ -1101,7 +1113,7 @@ fn diagnostics_command(
     Ok(())
 }
 
-fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> anyhow::Result<()> {
+fn comments_command(ai: bool, cached: bool, commit: bool, no_add: bool, files: &[String]) -> anyhow::Result<()> {
     use anyhow::Context;
     use colored::Colorize;
     use std::process::Command;
@@ -1109,7 +1121,7 @@ fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> an
 
     println!("💬 Checking comments...\n");
 
-    let files_to_check = if staged {
+    let files_to_check = if cached {
         let output = Command::new("git")
             .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR"])
             .output()
@@ -1131,8 +1143,9 @@ fn comments_command(ai: bool, staged: bool, stage: bool, files: &[String]) -> an
 
     if ai {
         let workflow_config = WorkflowConfig {
-            auto_stage: stage,
-            staged_only: staged,
+            auto_stage: !no_add,
+            auto_commit: commit,
+            cached_only: cached,
             files: files_to_check.clone(),
             ..Default::default()
         };
