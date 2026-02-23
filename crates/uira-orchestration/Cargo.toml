@@ -51,6 +51,7 @@ walkdir = "2"
 ast-grep-core = "0.40"
 ast-grep-language = "0.40"
 once_cell = "1.19"
+similar = "2"
 
 [dev-dependencies]
 tokio-test = "0.4"
