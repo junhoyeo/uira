@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Uira](./.github/assets/cover.jpg)](https://github.com/junhoyeo/uira)
+[![Uira](./.github/assets/hero.png)](https://github.com/junhoyeo/uira)
 
 </div>
 
@@ -414,9 +414,9 @@ Also checks hidden variants (`.uira.*`) and `~/.config/uira/` for global config.
     "pre_commit": {
       "parallel": false,
       "commands": [
-        { "name": "typos", "run": "uira-commit-hook-cli typos --ai --stage", "on_fail": "stop" },
-        { "name": "diagnostics", "run": "uira-commit-hook-cli diagnostics --ai --staged --stage --severity error", "on_fail": "stop" },
-        { "name": "comments", "run": "uira-commit-hook-cli comments --ai --staged --stage", "on_fail": "warn" }
+        { "name": "typos", "run": "uira-commit-hook-cli typos --ai", "on_fail": "stop" },
+        { "name": "diagnostics", "run": "uira-commit-hook-cli diagnostics --ai --cached --severity error", "on_fail": "stop" },
+        { "name": "comments", "run": "uira-commit-hook-cli comments --ai --cached", "on_fail": "warn" }
       ]
     }
   },
@@ -639,10 +639,87 @@ Approval decisions are cached with TTL and persisted to disk for faster repeated
 The harness system integrates AI agents into your git workflow. An embedded agent runs autonomously with full tool access (Read, Edit, Grep, Glob, Write, Bash) until the task is verified complete.
 
 ```
-Developer commits → pre-commit hook → uira-commit-hook-cli
-→ Detect issues (typos, diagnostics, comments)
-→ Agent fixes autonomously
-→ Re-verify (issues == 0?) → Stage changes → Hook passes
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Developer Workflow                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                     ┌─────────────────┴─────────────────┐
+                     ▼                                   ▼
+            ┌────────────────┐                  ┌────────────────┐
+            │  Manual CLI    │                  │   Git Commit   │
+            │  Invocation    │                  │    Trigger     │
+            └────────────────┘                  └────────────────┘
+                     │                                   │
+                     │                                   ▼
+                     │                          ┌────────────────┐
+                     │                          │  .git/hooks/   │
+                     │                          │  pre-commit    │
+                     │                          └────────────────┘
+                     │                                   │
+                     │                                   ▼
+│                          ┌─────────────────────────┐
+│                          │  uira-commit-hook-cli   │
+│                          │  run pre-commit         │
+│                          └─────────────────────────┘
+                     │                                   │
+                     └─────────────────┬─────────────────┘
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    uira-commit-hook-cli (AI Harness)                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌──────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────┐│
+│  │ uira-commit-hook-cli │  │   uira-commit-hook-cli   │  │ uira-commit-hook-cli  ││
+│  │ typos --ai           │  │   diagnostics --ai       │  │ comments --ai         ││
+│  └──────────┬───────────┘  └────────────┬─────────────┘  └───────────┬───────────┘│
+│           │                    │                    │                           │
+│           └────────────────────┼────────────────────┘                           │
+│                                ▼                                                 │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │                         AgentWorkflow                                     │   │
+│  │                                                                           │   │
+│  │  • Embedded agent session (same harness as uira-agent)                   │   │
+│  │  • Full tool access: Read, Edit, Grep, Glob, Write, Bash,                │   │
+│  │    WebSearch, CodeSearch, GrepApp, FetchUrl                              │   │
+│  │  • Runs autonomously until <DONE/> is output                             │   │
+│  │  • Verification via re-detection (no remaining issues)                   │   │
+│  │  • Git diff-based modification tracking                                  │   │
+│  │                                                                           │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           Model Providers                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                     │
+│    │  Anthropic   │    │   OpenAI     │    │   Gemini     │                     │
+│    │   Claude     │    │    GPT       │    │              │                     │
+│    └──────────────┘    └──────────────┘    └──────────────┘                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            Agent Workflow Loop                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. Detect Issues         2. Agent Fixes            3. Verify & Complete        │
+│  ┌───────────────┐        ┌───────────────┐        ┌───────────────┐            │
+│  │ typos CLI     │───────▶│ Agent uses    │───────▶│ Re-detect     │            │
+│  │ lsp_diagnostics│       │ Read/Edit/Bash│        │ issues = 0?   │            │
+│  │ comment-checker│       │ to fix issues │        │ → <DONE/>     │            │
+│  └───────────────┘        └───────────────┘        └───────────────┘            │
+│                                                                                  │
+│  4. Stage Changes (default)    5. Continue/Fail Hook                            │
+│  ┌───────────────┐             ┌───────────────┐                                │
+│  │ git add <file>│────────────▶│ Exit 0 (pass) │                                │
+│  │ (--no-add skip│             │ Exit 1 (fail) │                                │
+│  └───────────────┘             └───────────────┘                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### AI-Assisted Commands
@@ -668,6 +745,35 @@ uira-commit-hook-cli install
 git commit -m "feat: add new feature"
 ```
 
+When you commit, the pre-commit hook executes:
+```
+.git/hooks/pre-commit
+    └── exec uira-commit-hook-cli run pre-commit
+            └── Runs configured commands from uira.yml
+                    ├── uira-commit-hook-cli typos --ai
+                    ├── uira-commit-hook-cli diagnostics --ai
+                    └── uira-commit-hook-cli comments --ai
+```
+
+### Hook Configuration Example
+
+```yaml
+# uira.yml
+pre-commit:
+  parallel: false
+  commands:
+    - name: format
+      run: uira-commit-hook-cli format --check
+    - name: typos
+      run: uira-commit-hook-cli typos --ai
+      on_fail: stop
+    - name: diagnostics
+      run: uira-commit-hook-cli diagnostics --ai --cached --severity error
+      on_fail: stop
+    - name: comments
+      run: uira-commit-hook-cli comments --ai --cached
+      on_fail: warn
+```
 ## Session Persistence
 
 Sessions are saved as append-only JSONL files:
@@ -830,5 +936,7 @@ Always use merge commits when merging PRs.
 <p align="center">
   <strong>MIT © <a href="https://github.com/junhoyeo">Junho Yeo</a></strong>
 </p>
+
+[![Uira](./.github/assets/cover.jpg)](https://github.com/junhoyeo/uira)
 
 If you find this project intriguing, **please consider starring it ⭐** or [follow me on GitHub](https://github.com/junhoyeo) and join the ride. I code around the clock and ship mind-blowing things on a regular basis — your support won't go to waste.

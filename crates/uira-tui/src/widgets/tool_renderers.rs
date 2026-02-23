@@ -51,11 +51,11 @@ pub fn render_tool_output(
         "bash" => render_bash(content, width, theme, context),
         "edit" | "write" => render_edit(content, width, theme, context),
         "read" => render_read(content, width, theme, context),
-        "glob" | "grep" | "codesearch" | "code_search" => {
+        "glob" | "grep" | "codesearch" | "code_search" | "grep_app" => {
             render_code_search(content, width, theme, context)
         }
         "websearch" | "web_search" => render_web_search(content, width, theme, context),
-        "webfetch" | "web_fetch" => render_web_fetch(content, width, theme, context),
+        "webfetch" | "web_fetch" | "fetch_url" => render_web_fetch(content, width, theme, context),
         "applypatch" | "apply_patch" => render_apply_patch(content, width, theme, context),
         "question" | "ask_user" => render_question(content, width, theme, context),
         "task" | "delegate_task" | "subagent" => render_task(content, width, theme, context),
@@ -410,12 +410,12 @@ fn render_task(
     let parsed = serde_json::from_str::<Value>(content).ok();
     let agent = parsed
         .as_ref()
-        .and_then(|v| v.get("subagent_type"))
+        .and_then(|v| v.get("agent_type").or_else(|| v.get("subagent_type")))
         .and_then(Value::as_str)
         .unwrap_or("agent");
     let description = parsed
         .as_ref()
-        .and_then(|v| v.get("description"))
+        .and_then(|v| v.get("description").or_else(|| v.get("agent_description")))
         .and_then(Value::as_str)
         .unwrap_or("delegated task");
     let count = parsed
@@ -558,9 +558,14 @@ fn extract_query_and_count(content: &str) -> (Option<String>, Option<usize>) {
             .map(ToString::to_string);
         let count = value
             .get("numResults")
-            .or_else(|| value.get("results"))
             .and_then(Value::as_u64)
-            .map(|n| n as usize);
+            .map(|n| n as usize)
+            .or_else(|| {
+                value
+                    .get("results")
+                    .and_then(Value::as_array)
+                    .map(|arr| arr.len())
+            });
         return (query, count);
     }
 

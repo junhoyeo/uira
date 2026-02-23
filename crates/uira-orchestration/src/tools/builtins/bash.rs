@@ -185,17 +185,16 @@ impl Tool for BashTool {
                 message: e.to_string(),
             })?;
 
+        let command = input.command.clone();
         let timeout_duration = Duration::from_millis(input.timeout_ms.unwrap_or(120_000));
-
         let working_dir = input
             .working_directory
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| ctx.cwd.clone());
-
-        let result = match ctx.sandbox_type {
+        let bash_output = match ctx.sandbox_type {
             SandboxType::Native => {
                 self.execute_sandboxed(
-                    &input.command,
+                    &command,
                     &working_dir,
                     timeout_duration,
                     &ctx.sandbox_policy,
@@ -203,22 +202,40 @@ impl Tool for BashTool {
                 .await
             }
             SandboxType::None | SandboxType::Container => {
-                self.execute_direct(&input.command, &working_dir, timeout_duration)
+                self.execute_direct(&command, &working_dir, timeout_duration)
                     .await
             }
-        };
+        }?;
 
-        result
+        Ok(ToolOutput::text(Self::format_output(&command, &bash_output)))
     }
 }
-
 impl BashTool {
+    /// Format BashOutput into a human-readable string for TUI rendering.
+    /// Format: command on first line, then stdout, then stderr/exit_code if relevant.
+    fn format_output(command: &str, output: &BashOutput) -> String {
+        let mut result = String::new();
+        result.push_str(command);
+        if !output.stdout.is_empty() {
+            result.push('\n');
+            result.push_str(&output.stdout);
+        }
+        if !output.stderr.is_empty() {
+            result.push_str("\nstderr:\n");
+            result.push_str(&output.stderr);
+        }
+        if output.exit_code != 0 {
+            result.push_str(&format!("\nexit code: {}", output.exit_code));
+        }
+        result
+    }
+
     async fn execute_direct(
         &self,
         command: &str,
         working_dir: &std::path::Path,
         timeout_duration: Duration,
-    ) -> Result<ToolOutput, ToolError> {
+    ) -> Result<BashOutput, ToolError> {
         let mut cmd = tokio::process::Command::new("bash");
         cmd.arg("-c")
             .arg(command)
@@ -237,18 +254,11 @@ impl BashTool {
                 let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
                 let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
                 let exit_code = output.status.code().unwrap_or(-1);
-
-                let bash_output = BashOutput {
+                Ok(BashOutput {
                     stdout,
                     stderr,
                     exit_code,
-                };
-
-                serde_json::to_value(bash_output)
-                    .map(ToolOutput::json)
-                    .map_err(|e| ToolError::ExecutionFailed {
-                        message: format!("Failed to serialize output: {}", e),
-                    })
+                })
             }
             Ok(Err(e)) => Err(ToolError::ExecutionFailed {
                 message: format!("Failed to execute command: {}", e),
@@ -265,7 +275,7 @@ impl BashTool {
         working_dir: &std::path::Path,
         timeout_duration: Duration,
         sandbox_policy: &SandboxPolicy,
-    ) -> Result<ToolOutput, ToolError> {
+    ) -> Result<BashOutput, ToolError> {
         let sandbox_manager = SandboxManager::new(sandbox_policy.clone());
 
         let mut cmd = std::process::Command::new("bash");
@@ -292,18 +302,11 @@ impl BashTool {
                 let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
                 let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
                 let exit_code = output.status.code().unwrap_or(-1);
-
-                let bash_output = BashOutput {
+                Ok(BashOutput {
                     stdout,
                     stderr,
                     exit_code,
-                };
-
-                serde_json::to_value(bash_output)
-                    .map(ToolOutput::json)
-                    .map_err(|e| ToolError::ExecutionFailed {
-                        message: format!("Failed to serialize output: {}", e),
-                    })
+                })
             }
             Ok(Ok(Err(e))) => Err(ToolError::ExecutionFailed {
                 message: format!("Failed to execute sandboxed command: {}", e),
@@ -334,10 +337,11 @@ mod tests {
             .execute(json!({"command": "echo hello"}), &ctx)
             .await
             .unwrap();
-
-        let output: BashOutput = serde_json::from_value(result.as_json().unwrap()).unwrap();
-        assert_eq!(output.stdout.trim(), "hello");
-        assert_eq!(output.exit_code, 0);
+        let text = result.as_text().unwrap();
+        // format_output puts command on first line, stdout follows
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "echo hello");
+        assert_eq!(lines[1], "hello");
     }
 
     #[test]

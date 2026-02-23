@@ -154,9 +154,10 @@ impl Tool for ReadTool {
         let limit = input.limit.unwrap_or(2000);
 
         let selected_lines: Vec<&str> = lines.iter().skip(offset).take(limit).copied().collect();
+        let formatted = Self::format_output(&selected_lines.join("\n"), offset);
 
-        let output = Self::format_output(&selected_lines.join("\n"), offset);
-
+        // Prepend file path so TUI render_read can extract it
+        let output = format!("{}\n{}", input.file_path, formatted);
         Ok(ToolOutput::text(output))
     }
 }

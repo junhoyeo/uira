@@ -12,6 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, ListState, Paragraph, Wrap},
     Terminal,
 };
+use similar::TextDiff;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Stdout, Write};
 use std::path::{Path, PathBuf};
@@ -811,13 +812,43 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
 fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sender<AppEvent>) {
     tokio::spawn(async move {
         while let Some(pending) = approval_rx.recv().await {
+            let diff_preview = {
+                let tool = pending.tool_name.to_lowercase();
+                if tool.contains("edit") || tool.contains("write") {
+                    let before = pending
+                        .input
+                        .get("old_string")
+                        .or_else(|| pending.input.get("oldText"))
+                        .and_then(|v| v.as_str());
+                    let after = pending
+                        .input
+                        .get("new_string")
+                        .or_else(|| pending.input.get("newText"))
+                        .or_else(|| pending.input.get("content"))
+                        .and_then(|v| v.as_str());
+                    match (before, after) {
+                        (Some(b), Some(a)) => {
+                            let diff = TextDiff::from_lines(b, a);
+                            Some(diff.unified_diff().header("before", "after").to_string())
+                        }
+                        (None, Some(content)) => {
+                            let diff = TextDiff::from_lines("", content);
+                            Some(diff.unified_diff().header("before", "after").to_string())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            };
+
             // Convert agent's ApprovalPending to TUI's ApprovalRequest
             let request = ApprovalRequest {
                 id: pending.id,
                 tool_name: pending.tool_name,
                 input: pending.input,
                 reason: pending.reason,
-                diff_preview: None,
+                diff_preview,
                 response_tx: pending.response_tx,
             };
 

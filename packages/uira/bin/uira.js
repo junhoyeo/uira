@@ -4,6 +4,7 @@ const { execFileSync } = require('child_process');
 const { existsSync } = require('fs');
 const path = require('path');
 
+// npm: aliases — npm installs these as node_modules/@uiradev/uira-<tag>
 const PLATFORMS = {
   'darwin-arm64': '@uiradev/uira-darwin-arm64',
   'darwin-x64': '@uiradev/uira-darwin-x64',
