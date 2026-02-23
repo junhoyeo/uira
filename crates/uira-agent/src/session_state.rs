@@ -108,7 +108,10 @@ impl Session {
                     }
                     _ => {
                         tracing::warn!(
-                            "memory enabled but no embedding API key found, using mock embeddings"
+                            provider = %memory_config.embedding_provider,
+                            env_var = %memory_config.embedding_api_key_env,
+                            "memory enabled but no embedding API key found for provider \'{}\'; vector search disabled, using text-only FTS5 search",
+                            memory_config.embedding_provider
                         );
                         Arc::new(MockEmbeddingProvider::new(
                             memory_config.embedding_dimension,

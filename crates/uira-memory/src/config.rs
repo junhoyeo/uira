@@ -17,6 +17,9 @@ pub struct MemoryConfig {
     #[serde(default = "default_embedding_api_key_env")]
     pub embedding_api_key_env: String,
 
+    #[serde(default = "default_embedding_provider")]
+    pub embedding_provider: String,
+
     #[serde(default = "default_embedding_api_base")]
     pub embedding_api_base: String,
 
@@ -76,6 +79,7 @@ impl Default for MemoryConfig {
             embedding_dimension: default_embedding_dimension(),
             embedding_api_key_env: default_embedding_api_key_env(),
             embedding_api_base: default_embedding_api_base(),
+            embedding_provider: default_embedding_provider(),
             auto_recall: default_auto_recall(),
             auto_capture: default_auto_capture(),
             max_recall_results: default_max_recall_results(),
@@ -120,6 +124,10 @@ fn default_embedding_api_key_env() -> String {
 
 fn default_embedding_api_base() -> String {
     "https://api.openai.com/v1".to_string()
+}
+
+fn default_embedding_provider() -> String {
+    "openai".to_string()
 }
 
 fn default_auto_recall() -> bool {
@@ -217,6 +225,7 @@ mod tests {
         assert_eq!(config.chunk_overlap, 50);
         assert_eq!(config.recall_min_query_length, 10);
         assert_eq!(config.recall_cooldown_turns, 1);
+        assert_eq!(config.embedding_provider, "openai");
     }
 
     #[test]
