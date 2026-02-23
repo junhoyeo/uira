@@ -111,6 +111,15 @@ pub const EDIT_ERROR_PATTERNS: &[&str] = &[
     "oldString found multiple times",
     "old_string not found",
     "old_string and new_string must be different",
+    "hashline mismatch",
+    "file hash mismatch",
+    "requires a valid `pos`",
+    "requires a valid `end`",
+    "append edit `pos` must be line#id",
+    "prepend edit `pos` must be line#id",
+    "hashline mode requires a non-empty `edits` array",
+    "hashline mode requires `expected_file_hash`",
+    "unsupported edit op",
 ];
 
 lazy_static! {

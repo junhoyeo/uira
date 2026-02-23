@@ -80,17 +80,23 @@ impl CommentChecker {
                 self.check_write(file_path, content)
             }
             "Edit" => {
-                let old_string = tool_input
-                    .get("old_string")
-                    .or_else(|| tool_input.get("oldString"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
                 let new_string = tool_input
                     .get("new_string")
                     .or_else(|| tool_input.get("newString"))
-                    .and_then(|v| v.as_str())?;
+                    .and_then(|v| v.as_str());
 
-                self.check_edit(file_path, old_string, new_string)
+                if let Some(new_string) = new_string {
+                    let old_string = tool_input
+                        .get("old_string")
+                        .or_else(|| tool_input.get("oldString"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    return self.check_edit(file_path, old_string, new_string);
+                }
+
+                let edits = tool_input.get("edits").and_then(|v| v.as_array())?;
+                self.format_if_any(self.detect_comments_from_edit_lines(file_path, edits))
             }
             "MultiEdit" => {
                 let edits = tool_input.get("edits").and_then(|v| v.as_array())?;
@@ -112,6 +118,11 @@ impl CommentChecker {
                         let new_comments = self.detector.detect(new_str, file_path, true);
                         let only_new = Self::filter_new_comments(&old_comments, new_comments);
                         all_comments.extend(only_new);
+                    } else {
+                        all_comments.extend(self.detect_comments_from_edit_lines(
+                            file_path,
+                            std::slice::from_ref(edit),
+                        ));
                     }
                 }
 
@@ -168,6 +179,59 @@ impl CommentChecker {
         }
 
         Some(format_hook_message(&filtered, None))
+    }
+
+    fn detect_comments_from_edit_lines(
+        &self,
+        file_path: &str,
+        edits: &[serde_json::Value],
+    ) -> Vec<CommentInfo> {
+        let mut comments = Vec::new();
+        for edit in edits {
+            let Some(lines) = edit.get("lines").and_then(|v| v.as_array()) else {
+                continue;
+            };
+
+            for line in lines {
+                let Some(line_text) = line.as_str() else {
+                    continue;
+                };
+                let content = if let Some((left, rhs)) = line_text.split_once('|') {
+                    if Self::looks_like_hashline_prefix(left) {
+                        rhs.trim_start()
+                    } else {
+                        line_text
+                    }
+                } else {
+                    line_text
+                };
+                comments.extend(self.detector.detect(content, file_path, true));
+            }
+        }
+        comments
+    }
+
+    fn looks_like_hashline_prefix(value: &str) -> bool {
+        let raw = value.trim().trim_start_matches('L');
+        let Some((line_part, hash_part)) = raw.split_once('#') else {
+            return false;
+        };
+        if line_part
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0)
+            .is_none()
+        {
+            return false;
+        }
+        let mut chars = hash_part.trim().chars();
+        let first = chars.next();
+        let second = chars.next();
+        match (first, second, chars.next()) {
+            (Some(a), Some(b), None) => a.is_ascii_alphabetic() && b.is_ascii_alphabetic(),
+            _ => false,
+        }
     }
 }
 
@@ -227,6 +291,46 @@ mod tests {
             &json!({
                 "file_path": "test.py",
                 "content": "# New comment\nx = 1"
+            }),
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_check_tool_result_hashline_edit_lines() {
+        let checker = CommentChecker::new();
+        let result = checker.check_tool_result(
+            "Edit",
+            &json!({
+                "file_path": "test.py",
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": "1#ZZ",
+                        "end": "1#ZZ",
+                        "lines": ["1#ZZ | # hashline comment"]
+                    }
+                ]
+            }),
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_non_hashline_pipe_text_not_stripped_for_detection() {
+        let checker = CommentChecker::new();
+        let result = checker.check_tool_result(
+            "Edit",
+            &json!({
+                "file_path": "test.py",
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": "1#ZZ",
+                        "end": "1#ZZ",
+                        "lines": ["value = a | b  # trailing comment"]
+                    }
+                ]
             }),
         );
         assert!(result.is_some());

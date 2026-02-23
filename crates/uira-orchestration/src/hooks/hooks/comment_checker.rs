@@ -79,6 +79,59 @@ impl CommentCheckerHook {
         Self::filter_new_comments(&old_comments, new_comments)
     }
 
+    fn detect_comments_from_edit_lines(
+        &self,
+        file_path: &str,
+        edits: &[serde_json::Value],
+    ) -> Vec<CommentInfo> {
+        let mut comments = Vec::new();
+        for edit in edits {
+            let Some(lines) = edit.get("lines").and_then(|v| v.as_array()) else {
+                continue;
+            };
+
+            for line in lines {
+                let Some(line_text) = line.as_str() else {
+                    continue;
+                };
+                let content = if let Some((left, rhs)) = line_text.split_once('|') {
+                    if Self::looks_like_hashline_prefix(left) {
+                        rhs.trim_start()
+                    } else {
+                        line_text
+                    }
+                } else {
+                    line_text
+                };
+                comments.extend(self.detector.detect(content, file_path, true));
+            }
+        }
+        comments
+    }
+
+    fn looks_like_hashline_prefix(value: &str) -> bool {
+        let raw = value.trim().trim_start_matches('L');
+        let Some((line_part, hash_part)) = raw.split_once('#') else {
+            return false;
+        };
+        if line_part
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0)
+            .is_none()
+        {
+            return false;
+        }
+        let mut chars = hash_part.trim().chars();
+        let first = chars.next();
+        let second = chars.next();
+        match (first, second, chars.next()) {
+            (Some(a), Some(b), None) => a.is_ascii_alphabetic() && b.is_ascii_alphabetic(),
+            _ => false,
+        }
+    }
+
     fn check_comments(&self, input: &HookInput) -> Option<String> {
         let tool_name = input.tool_name.as_deref()?;
 
@@ -110,15 +163,24 @@ impl CommentCheckerHook {
                     .get("new_string")
                     .or_else(|| tool_input.get("newString"))
                     .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())?;
+                    .filter(|s| !s.is_empty());
 
-                let old_string = tool_input
-                    .get("old_string")
-                    .or_else(|| tool_input.get("oldString"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                if let Some(new_string) = new_string {
+                    let old_string = tool_input
+                        .get("old_string")
+                        .or_else(|| tool_input.get("oldString"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
 
-                self.detect_new_comments_for_edit(old_string, new_string, file_path)
+                    self.detect_new_comments_for_edit(old_string, new_string, file_path)
+                } else {
+                    let edits = tool_input
+                        .get("edits")
+                        .and_then(|v| v.as_array())
+                        .filter(|arr| !arr.is_empty())?;
+
+                    self.detect_comments_from_edit_lines(file_path, edits)
+                }
             }
             "MultiEdit" => {
                 let edits = tool_input
@@ -144,6 +206,11 @@ impl CommentCheckerHook {
                         let edit_comments =
                             self.detect_new_comments_for_edit(old_string, new_str, file_path);
                         all_comments.extend(edit_comments);
+                    } else {
+                        all_comments.extend(self.detect_comments_from_edit_lines(
+                            file_path,
+                            std::slice::from_ref(edit),
+                        ));
                     }
                 }
                 all_comments
@@ -323,5 +390,75 @@ mod tests {
         let input = make_input("Write", "test.py", "x = 1\ny = 2");
 
         assert!(hook.check_comments(&input).is_none());
+    }
+
+    #[test]
+    fn test_detects_comments_in_hashline_edit_payload() {
+        let hook = CommentCheckerHook::new();
+        let mut tool_input = serde_json::Map::new();
+        tool_input.insert("file_path".to_string(), serde_json::json!("test.py"));
+        tool_input.insert(
+            "edits".to_string(),
+            serde_json::json!([
+                {
+                    "op": "replace",
+                    "pos": "1#ZZ",
+                    "end": "1#ZZ",
+                    "lines": ["1#ZZ | # inserted comment"]
+                }
+            ]),
+        );
+
+        let input = HookInput {
+            session_id: Some("test-session".to_string()),
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: Some("Edit".to_string()),
+            tool_input: Some(serde_json::Value::Object(tool_input)),
+            tool_output: None,
+            directory: None,
+            stop_reason: None,
+            user_requested: None,
+            transcript_path: None,
+            extra: HashMap::new(),
+        };
+
+        assert!(hook.check_comments(&input).is_some());
+    }
+
+    #[test]
+    fn test_detects_comments_in_non_hashline_pipe_edit_payload() {
+        let hook = CommentCheckerHook::new();
+        let mut tool_input = serde_json::Map::new();
+        tool_input.insert("file_path".to_string(), serde_json::json!("test.py"));
+        tool_input.insert(
+            "edits".to_string(),
+            serde_json::json!([
+                {
+                    "op": "replace",
+                    "pos": "1#ZZ",
+                    "end": "1#ZZ",
+                    "lines": ["value = a | b  # comment"]
+                }
+            ]),
+        );
+
+        let input = HookInput {
+            session_id: Some("test-session".to_string()),
+            prompt: None,
+            message: None,
+            parts: None,
+            tool_name: Some("Edit".to_string()),
+            tool_input: Some(serde_json::Value::Object(tool_input)),
+            tool_output: None,
+            directory: None,
+            stop_reason: None,
+            user_requested: None,
+            transcript_path: None,
+            extra: HashMap::new(),
+        };
+
+        assert!(hook.check_comments(&input).is_some());
     }
 }

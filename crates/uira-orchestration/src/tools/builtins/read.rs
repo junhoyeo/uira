@@ -8,6 +8,8 @@ use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 
+use super::hashline;
+
 const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Input for read tool
@@ -28,18 +30,14 @@ impl ReadTool {
         Self
     }
 
-    fn format_output(content: &str, offset: usize) -> String {
-        content
-            .lines()
+    fn format_output(lines: &[&str], offset: usize) -> String {
+        lines
+            .iter()
             .enumerate()
             .map(|(i, line)| {
                 let line_num = offset + i + 1;
-                let truncated = if line.chars().count() > 2000 {
-                    format!("{}...", line.chars().take(2000).collect::<String>())
-                } else {
-                    line.to_string()
-                };
-                format!("{:>6}\t{}", line_num, truncated)
+                let tag = hashline::line_tag(line_num, line);
+                format!("  {} | {}", tag, line)
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -59,7 +57,7 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a file. Returns the file content with line numbers."
+        "Read file contents with LINE#ID hashline tags and file hash metadata."
     }
 
     fn schema(&self) -> JsonSchema {
@@ -154,10 +152,20 @@ impl Tool for ReadTool {
         let limit = input.limit.unwrap_or(2000);
 
         let selected_lines: Vec<&str> = lines.iter().skip(offset).take(limit).copied().collect();
-        let formatted = Self::format_output(&selected_lines.join("\n"), offset);
+        let formatted = Self::format_output(&selected_lines, offset);
+        let file_hash = hashline::compute_file_hash(&content);
+        let start_line = if selected_lines.is_empty() {
+            0
+        } else {
+            offset + 1
+        };
+        let end_line = offset + selected_lines.len();
 
         // Prepend file path so TUI render_read can extract it
-        let output = format!("{}\n{}", input.file_path, formatted);
+        let output = format!(
+            "{}\nfile_hash: {}\nrange: L{}-L{}\n{}",
+            input.file_path, file_hash, start_line, end_line, formatted
+        );
         Ok(ToolOutput::text(output))
     }
 }
@@ -184,6 +192,9 @@ mod tests {
             .unwrap();
 
         let text = result.as_text().unwrap();
+        assert!(text.contains("file_hash:"));
+        assert!(text.contains("range: L1-L3"));
+        assert!(text.contains("1#"));
         assert!(text.contains("line 1"));
         assert!(text.contains("line 2"));
         assert!(text.contains("line 3"));
@@ -207,6 +218,7 @@ mod tests {
             .unwrap();
 
         let text = result.as_text().unwrap();
+        assert!(text.contains("range: L3-L5"));
         assert!(text.contains("line 3"));
         assert!(text.contains("line 4"));
         assert!(text.contains("line 5"));
