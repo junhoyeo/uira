@@ -408,7 +408,7 @@ function publishNpmPlatforms(dir) {
   heading("Publishing npm platform packages");
 
   for (const platform of PLATFORMS) {
-    const pkgDir = path.join(dir, platform.codeTarget);
+    const pkgDir = path.resolve(dir, platform.codeTarget);
     const pkgJson = path.join(pkgDir, "package.json");
     if (!fs.existsSync(pkgJson)) {
       console.warn(`  Skipping ${platform.codeTarget}: no package at ${pkgDir}`);
