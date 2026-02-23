@@ -11,6 +11,7 @@ pub enum HookEvent {
     PostToolUse,
     SessionIdle,
     MessagesTransform,
+    AssistantTurnComplete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
