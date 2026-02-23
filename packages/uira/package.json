@@ -64,7 +64,7 @@
     "npm"
   ],
   "scripts": {
-    "build": "bun run build:ts",
+    "build": "npx tsup",
     "build:ts": "tsup",
     "test": "node bin/uira.js --version"
   },
