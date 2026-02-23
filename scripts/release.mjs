@@ -367,7 +367,7 @@ function generateNpm(artifactsDir, outputDir) {
       repository: mainPkg.repository,
       os: [platform.os],
       cpu: [platform.cpu],
-      publishConfig: { access: "public", provenance: true },
+      publishConfig: { access: "public" },
     };
     if (platform.libc) manifest.libc = [platform.libc];
 
@@ -419,7 +419,7 @@ function publishNpmPlatforms(dir) {
     // Publish with a tag so it doesn't become "latest"
     const tag = platform.npmTag;
     log(`Publishing ${pkg.name}@${pkg.version} (tag: ${tag})...`);
-    run("npm", ["publish", pkgDir, "--access", "public", "--provenance", "--tag", tag]);
+    run("npm", ["publish", pkgDir, "--access", "public", "--tag", tag]);
     log(`${pkg.name}@${pkg.version} published`);
   }
 }
