@@ -57,7 +57,7 @@ impl MemoryRecallHook {
         let turn = self.turn_counter.fetch_add(1, Ordering::Relaxed);
 
         // Cooldown: skip recall for N turns after a recall fires
-        if turn % (self.config.recall_cooldown_turns + 1) != 0 {
+        if !turn.is_multiple_of(self.config.recall_cooldown_turns + 1) {
             return Ok(None);
         }
         let results = searcher

@@ -4,6 +4,7 @@ use serde_json::json;
 use uira_memory::tools::{
     memory_forget_tool, memory_profile_tool, memory_search_tool, memory_store_tool,
 };
+use uira_memory::types::{MemoryEntry, MemorySource};
 use uira_memory::{
     EmbeddingProvider, MemoryConfig, MemorySystem, MemoryTools, MockEmbeddingProvider,
 };
@@ -327,4 +328,50 @@ async fn test_forget_no_args_returns_error() {
     let result = memory_forget_tool(json!({}), system.store.clone()).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Please provide"));
+}
+
+#[tokio::test]
+async fn test_full_memory_wiring_config_tools_store_and_recall_dedup() {
+    let config = MemoryConfig {
+        enabled: true,
+        retention_days: Some(30),
+        max_memories: Some(100),
+        recall_min_query_length: 5,
+        recall_cooldown_turns: 0,
+        embedding_provider: "openai".to_string(),
+        profile_frequency: 0,
+        ..Default::default()
+    };
+    let embedder: Arc<dyn EmbeddingProvider> =
+        Arc::new(MockEmbeddingProvider::new(config.embedding_dimension));
+    let system = MemorySystem::new_in_memory(&config, embedder).unwrap();
+
+    let tools: MemoryTools = system.tools();
+    assert!(tools.config.enabled);
+    assert_eq!(tools.config.retention_days, Some(30));
+    assert_eq!(tools.config.max_memories, Some(100));
+    assert_eq!(tools.config.recall_min_query_length, 5);
+    assert_eq!(tools.config.recall_cooldown_turns, 0);
+    assert_eq!(tools.config.embedding_provider, "openai");
+    assert!(!tools.config.embedding_provider.is_empty());
+
+    let entry = MemoryEntry::new(
+        "test query memory for full wiring dedup verification",
+        MemorySource::Conversation,
+        &config.container_tag,
+    );
+    let row_id = system.store.store_text_only(&entry).unwrap();
+    assert!(row_id > 0);
+
+    let first = system.recall_hook.recall("test query").await.unwrap();
+    let first_context = first.expect("first recall should return memory context");
+    assert!(first_context.contains("full wiring dedup verification"));
+
+    let second = system.recall_hook.recall("test query").await.unwrap();
+    if let Some(second_context) = second {
+        assert!(
+            !second_context.contains("full wiring dedup verification"),
+            "second recall should not return the same memory after dedup"
+        );
+    }
 }
