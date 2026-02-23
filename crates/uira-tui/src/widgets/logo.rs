@@ -481,25 +481,28 @@ impl Default for LogoImage {
 /// hanging if the terminal doesn't support the query.
 fn query_terminal_bg() -> Option<image::Rgba<u8>> {
     use std::io::{Read, Write};
-    use std::sync::mpsc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc};
     use std::thread;
     use std::time::Duration;
-
     let (tx, rx) = mpsc::channel();
 
+    // Track whether the caller timed out waiting for the thread.
+    // If so, the main event loop has moved on and likely re-enabled raw mode;
+    // the thread must NOT call disable_raw_mode() or it will undo the main
+    // loop's raw mode and cause SGR mouse escape sequences to leak as text.
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let timed_out_flag = timed_out.clone();
     thread::spawn(move || {
         if crossterm::terminal::enable_raw_mode().is_err() {
             return;
         }
-
         let result = (|| -> Option<image::Rgba<u8>> {
             let mut stdout = std::io::stdout();
             stdout.write_all(b"\x1b]11;?\x07").ok()?;
             stdout.flush().ok()?;
-
             let mut response = Vec::with_capacity(64);
             let mut byte = [0u8; 1];
-
             while let Ok(1) = std::io::stdin().read(&mut byte) {
                 response.push(byte[0]);
                 // BEL terminator
@@ -515,18 +518,30 @@ fn query_terminal_bg() -> Option<image::Rgba<u8>> {
                     break;
                 }
             }
-
             parse_osc11_response(&response)
         })();
 
-        let _ = crossterm::terminal::disable_raw_mode();
-
+        // Only disable raw mode if the caller is still waiting (not timed out).
+        // After timeout, the main thread owns terminal state and will have
+        // re-enabled raw mode for the event loop. Calling disable here would
+        // race with the event loop and cause escape sequence leaks.
+        if !timed_out_flag.load(Ordering::Acquire) {
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
         if let Some(color) = result {
             let _ = tx.send(color);
         }
     });
 
-    rx.recv_timeout(Duration::from_millis(300)).ok()
+    let result = rx.recv_timeout(Duration::from_millis(300)).ok();
+    if result.is_none() {
+        // Tell the orphaned thread to skip disable_raw_mode() when it
+        // eventually unblocks. We also proactively disable raw mode here
+        // so the terminal is in a clean state for the caller.
+        timed_out.store(true, Ordering::Release);
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+    result
 }
 
 /// Parse an OSC 11 response to extract the RGB background color.
