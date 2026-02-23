@@ -154,6 +154,58 @@ impl MemoryStore {
         Ok(())
     }
 
+    pub fn store_text_only(&self, entry: &MemoryEntry) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        let metadata_json = serde_json::to_string(&entry.metadata)?;
+        let created = entry.created_at.to_rfc3339();
+        let updated = entry.updated_at.to_rfc3339();
+
+        tx.execute(
+            "INSERT OR REPLACE INTO memories (id, content, source, category, container_tag, metadata, session_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                entry.id,
+                entry.content,
+                entry.source.as_str(),
+                entry.category.as_str(),
+                entry.container_tag,
+                metadata_json,
+                entry.session_id,
+                created,
+                updated,
+            ],
+        )?;
+
+        tx.execute(
+            "INSERT OR REPLACE INTO memories_fts (id, content) VALUES (?1, ?2)",
+            params![entry.id, entry.content],
+        )?;
+
+        let row_id = tx.last_insert_rowid();
+        tx.commit()?;
+        Ok(row_id)
+    }
+
+    pub fn update_embedding(&self, id: i64, embedding: &[f32]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let embedding_bytes = embedding_to_bytes(embedding);
+        let updated = tx.execute(
+            "INSERT OR REPLACE INTO memories_vec (id, embedding)
+             SELECT id, ?1 FROM memories WHERE rowid = ?2",
+            params![embedding_bytes, id],
+        )?;
+
+        if updated == 0 {
+            anyhow::bail!("memory row not found for rowid {id}");
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get(&self, id: &str) -> Result<Option<MemoryEntry>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -484,6 +536,33 @@ mod tests {
         assert_eq!(retrieved.content, "I prefer dark mode");
         assert_eq!(retrieved.category, MemoryCategory::Preference);
         assert_eq!(retrieved.container_tag, "default");
+    }
+
+    #[test]
+    fn store_text_only_inserts_and_returns_row_id() {
+        let store = MemoryStore::new_in_memory(128).unwrap();
+        let entry = MemoryEntry::new("text-only memory", MemorySource::Conversation, "default");
+
+        let row_id = store.store_text_only(&entry).unwrap();
+
+        assert!(row_id > 0);
+        assert_eq!(store.count().unwrap(), 1);
+        let retrieved = store.get(&entry.id).unwrap().unwrap();
+        assert_eq!(retrieved.content, "text-only memory");
+    }
+
+    #[test]
+    fn update_embedding_updates_vector_row() {
+        let store = MemoryStore::new_in_memory(128).unwrap();
+        let entry = MemoryEntry::new("needs embedding", MemorySource::Conversation, "default");
+        let embedding = make_embedding(128, 4.0);
+
+        let row_id = store.store_text_only(&entry).unwrap();
+        store.update_embedding(row_id, &embedding).unwrap();
+
+        let results = store.vector_search(&embedding, 1).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, entry.id);
     }
 
     #[test]

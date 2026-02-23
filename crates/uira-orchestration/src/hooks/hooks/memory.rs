@@ -79,7 +79,7 @@ impl Hook for MemoryCaptureAdapter {
     }
 
     fn events(&self) -> &[HookEvent] {
-        &[HookEvent::Stop]
+        &[HookEvent::AssistantTurnComplete]
     }
 
     async fn execute(
