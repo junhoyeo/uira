@@ -1,6 +1,6 @@
 [package]
 name = "uira-agent"
-description = "Core agent loop with state machine, session persistence (JSONL sessions), and streaming for Uira agent harness"
+description = "Core agent loop, state machine, streaming, and context management for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

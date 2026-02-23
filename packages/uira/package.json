@@ -1,7 +1,7 @@
 {
   "name": "@uiradev/uira",
   "version": "0.1.0",
-  "description": "Lightning-fast AI coding agent & git hooks manager built in Rust",
+  "description": "A lightweight, secure AI agent harness for your entire development lifecycle — built in Rust",
   "keywords": [
     "ai",
     "agent",

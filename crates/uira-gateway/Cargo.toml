@@ -1,6 +1,6 @@
 [package]
 name = "uira-gateway"
-description = "WebSocket gateway for multi-session Uira agent management"
+description = "Gateway server with Slack, Telegram, and Discord integrations for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

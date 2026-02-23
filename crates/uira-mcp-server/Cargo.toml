@@ -1,6 +1,6 @@
 [package]
 name = "uira-mcp-server"
-description = "MCP server exposing LSP and AST-grep tools for Claude Code"
+description = "MCP server with LSP and AST-grep tools for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

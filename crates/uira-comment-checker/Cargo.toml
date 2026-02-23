@@ -1,6 +1,6 @@
 [package]
 name = "uira-comment-checker"
-description = "Comment detection using tree-sitter - Rust port of go-claude-code-comment-checker"
+description = "AI-assisted comment quality analysis using tree-sitter"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

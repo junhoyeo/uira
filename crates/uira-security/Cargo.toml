@@ -1,6 +1,6 @@
 [package]
 name = "uira-security"
-description = "Security: platform-native sandboxing + pattern-based permission evaluation"
+description = "Platform-native sandboxing (macOS/Linux) and permission management for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

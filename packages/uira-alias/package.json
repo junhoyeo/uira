@@ -1,7 +1,7 @@
 {
   "name": "uira",
   "version": "0.0.1",
-  "description": "Alias for @uiradev/uira — Native Rust AI agent with multi-provider orchestration",
+  "description": "Alias for @uiradev/uira — A lightweight, secure AI agent harness for your entire development lifecycle",
   "type": "commonjs",
   "main": "index.js",
   "bin": {

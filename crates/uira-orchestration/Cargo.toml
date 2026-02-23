@@ -1,6 +1,6 @@
 [package]
 name = "uira-orchestration"
-description = "Unified orchestration crate for agents, sdk, and feature modules"
+description = "Agent definitions, SDK, tool registry, and hook implementations for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

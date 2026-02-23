@@ -1,6 +1,6 @@
 [package]
 name = "uira-providers"
-description = "Model provider clients (Anthropic, OpenAI) with streaming support for Uira agent harness"
+description = "Multi-provider model clients (Anthropic, OpenAI, Gemini, Ollama) with OAuth authentication"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

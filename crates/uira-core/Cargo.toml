@@ -1,6 +1,6 @@
 [package]
 name = "uira-core"
-description = "Merged config and events modules for Uira"
+description = "Shared types, events, protocol definitions, and configuration loading for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

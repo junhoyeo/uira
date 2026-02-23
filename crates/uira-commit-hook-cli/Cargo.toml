@@ -1,6 +1,6 @@
 [package]
 name = "uira-commit-hook-cli"
-description = "Lightning-fast Rust-native git hooks manager with AI harness"
+description = "Standalone CLI for git hooks and AI-assisted dev workflows"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

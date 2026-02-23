@@ -1,6 +1,6 @@
 [package]
 name = "uira-tui"
-description = "Ratatui-based terminal UI with approval overlay and syntax highlighting for Uira agent harness"
+description = "Ratatui-based terminal interface for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

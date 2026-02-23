@@ -1,6 +1,6 @@
 [package]
 name = "uira-cli"
-description = "Command-line interface with session management and multi-provider support for Uira agent harness"
+description = "CLI entry point with session management for Uira"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
