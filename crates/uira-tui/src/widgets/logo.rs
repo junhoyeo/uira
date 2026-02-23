@@ -32,6 +32,7 @@ pub struct LogoImage {
     cached_lines_dims: Option<(u16, u16, Color)>,
 }
 
+#[allow(dead_code)]
 impl LogoImage {
     /// Create a new logo image holder (call before event loop)
     pub fn new() -> Self {

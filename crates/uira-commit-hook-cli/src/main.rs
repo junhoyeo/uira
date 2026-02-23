@@ -16,6 +16,7 @@ use hooks::HookExecutor;
 use linter::Linter;
 use runtime::block_on;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process;
@@ -291,9 +292,12 @@ fn install_command() -> anyhow::Result<()> {
 
         fs::write(&hook_path, hook_script)?;
 
-        let mut perms = fs::metadata(&hook_path)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&hook_path, perms)?;
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&hook_path)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&hook_path, perms)?;
+        }
 
         installed_hooks.push(hook_name.clone());
     }
