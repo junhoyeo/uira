@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uira_memory::MemoryConfig;
 
 #[path = "../schema/keybinds.rs"]
 pub mod keybinds;
@@ -97,7 +98,7 @@ pub struct UiraConfig {
     #[serde(default = "default_true")]
     pub show_logo: bool,
     #[serde(default)]
-    pub memory: MemorySettings,
+    pub memory: MemoryConfig,
 }
 
 impl Default for UiraConfig {
@@ -123,7 +124,7 @@ impl Default for UiraConfig {
             keybinds: KeybindsConfig::default(),
             sidebar: SidebarConfig::default(),
             show_logo: true,
-            memory: MemorySettings::default(),
+            memory: MemoryConfig::default(),
         }
     }
 }
@@ -1286,85 +1287,7 @@ pub struct DiscordChannelConfig {
 // Memory Configuration
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemorySettings {
-    #[serde(default)]
-    pub enabled: bool,
 
-    #[serde(default = "default_memory_storage_path")]
-    pub storage_path: String,
-
-    #[serde(default = "default_memory_embedding_model")]
-    pub embedding_model: String,
-
-    #[serde(default = "default_memory_embedding_dimension")]
-    pub embedding_dimension: usize,
-
-    #[serde(default = "default_memory_embedding_api_key_env")]
-    pub embedding_api_key_env: String,
-
-    #[serde(default = "default_memory_embedding_api_base")]
-    pub embedding_api_base: String,
-
-    #[serde(default = "default_true")]
-    pub auto_recall: bool,
-
-    #[serde(default = "default_true")]
-    pub auto_capture: bool,
-
-    #[serde(default = "default_memory_max_recall_results")]
-    pub max_recall_results: usize,
-
-    #[serde(default = "default_memory_container_tag")]
-    pub container_tag: String,
-}
-
-impl Default for MemorySettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            storage_path: default_memory_storage_path(),
-            embedding_model: default_memory_embedding_model(),
-            embedding_dimension: default_memory_embedding_dimension(),
-            embedding_api_key_env: default_memory_embedding_api_key_env(),
-            embedding_api_base: default_memory_embedding_api_base(),
-            auto_recall: true,
-            auto_capture: true,
-            max_recall_results: default_memory_max_recall_results(),
-            container_tag: default_memory_container_tag(),
-        }
-    }
-}
-
-fn default_memory_storage_path() -> String {
-    dirs::home_dir()
-        .map(|h| format!("{}/.uira/memory.db", h.display()))
-        .unwrap_or_else(|| "~/.uira/memory.db".to_string())
-}
-
-fn default_memory_embedding_model() -> String {
-    "text-embedding-3-small".to_string()
-}
-
-fn default_memory_embedding_dimension() -> usize {
-    1536
-}
-
-fn default_memory_embedding_api_key_env() -> String {
-    "OPENAI_API_KEY".to_string()
-}
-
-fn default_memory_embedding_api_base() -> String {
-    "https://api.openai.com/v1".to_string()
-}
-
-fn default_memory_max_recall_results() -> usize {
-    5
-}
-
-fn default_memory_container_tag() -> String {
-    "default".to_string()
-}
 
 // ============================================================================
 // Keybindings Configuration
@@ -1715,7 +1638,7 @@ sidebar:
 
     #[test]
     fn test_memory_settings_defaults() {
-        let settings = MemorySettings::default();
+        let settings = MemoryConfig::default();
         assert!(!settings.enabled);
         assert!(settings.storage_path.contains("memory.db"));
         assert_eq!(settings.embedding_model, "text-embedding-3-small");
@@ -1724,7 +1647,7 @@ sidebar:
         assert!(settings.auto_recall);
         assert!(settings.auto_capture);
         assert_eq!(settings.max_recall_results, 5);
-        assert_eq!(settings.container_tag, "default");
+        assert!(settings.container_tag.starts_with("project-") || settings.container_tag == "default");
     }
 
     #[test]
