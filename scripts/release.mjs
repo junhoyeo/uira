@@ -416,7 +416,7 @@ function publishNpmPlatforms(dir) {
     const tag = platform.npmTag;
     log(`Publishing ${pkg.name}@${pkg.version} (tag: ${tag})...`);
     try {
-      run("npm", ["publish", pkgDir, "--access", "public", "--tag", tag]);
+      run("npm", ["publish", pkgDir, "--access", "public", "--tag", tag], { silent: true });
       log(`${pkg.name}@${pkg.version} published`);
     } catch (e) {
       const output = (e.stderr?.toString() || "") + (e.stdout?.toString() || "") + (e.message || "");
@@ -442,7 +442,7 @@ function publishNpmMain() {
   const pkgDir = path.join(ROOT, "packages/uira");
   run("npm", ["run", "build"], { cwd: pkgDir });
   try {
-    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir, silent: true });
   } catch (e) {
     if (isAlreadyPublished(e)) {
       log("@uiradev/uira already published, skipping");
@@ -461,7 +461,7 @@ function publishNpmHook() {
   const pkgDir = path.join(ROOT, "packages/hook");
   run("npm", ["run", "build"], { cwd: pkgDir });
   try {
-    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir, silent: true });
   } catch (e) {
     if (isAlreadyPublished(e)) {
       log("@uiradev/hook already published, skipping");
@@ -479,7 +479,7 @@ function publishNpmAlias() {
   heading("Publishing uira (alias)");
   const pkgDir = path.join(ROOT, "packages/uira-alias");
   try {
-    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir, silent: true });
   } catch (e) {
     if (isAlreadyPublished(e)) {
       log("uira already published, skipping");
