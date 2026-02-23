@@ -1,20 +1,7 @@
 use async_trait::async_trait;
-use once_cell::sync::OnceCell;
-use std::sync::Arc;
 
 use crate::hooks::hook::{Hook, HookContext, HookResult};
 use crate::hooks::types::{HookEvent, HookInput, HookOutput};
-use uira_memory::MemorySystem;
-
-static MEMORY_SYSTEM: OnceCell<Arc<MemorySystem>> = OnceCell::new();
-
-pub fn init_memory_system(system: Arc<MemorySystem>) -> bool {
-    MEMORY_SYSTEM.set(system).is_ok()
-}
-
-pub fn get_memory_system() -> Option<&'static Arc<MemorySystem>> {
-    MEMORY_SYSTEM.get()
-}
 
 pub struct MemoryRecallAdapter;
 
@@ -44,9 +31,9 @@ impl Hook for MemoryRecallAdapter {
         &self,
         _event: HookEvent,
         input: &HookInput,
-        _context: &HookContext,
+        context: &HookContext,
     ) -> HookResult {
-        let system = match get_memory_system() {
+        let system = match context.memory_system.as_ref() {
             Some(s) => s,
             None => return Ok(HookOutput::pass()),
         };
@@ -99,9 +86,9 @@ impl Hook for MemoryCaptureAdapter {
         &self,
         _event: HookEvent,
         input: &HookInput,
-        _context: &HookContext,
+        context: &HookContext,
     ) -> HookResult {
-        let system = match get_memory_system() {
+        let system = match context.memory_system.as_ref() {
             Some(s) => s,
             None => return Ok(HookOutput::pass()),
         };

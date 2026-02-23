@@ -23,8 +23,7 @@ pub use features::{
 };
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use hooks::{
-    create_hook_event_adapter, default_hooks, get_memory_system, init_memory_system,
-    GoalCheckResult, GoalRunner, Hook, HookEventAdapter, HookRegistry, MemoryCaptureAdapter,
+    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter, HookRegistry, MemoryCaptureAdapter,
     MemoryRecallAdapter, VerificationResult,
 };
 pub use sdk::{

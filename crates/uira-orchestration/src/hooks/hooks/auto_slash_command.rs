@@ -717,10 +717,7 @@ mod tests {
             extra,
         };
 
-        let context = HookContext::new(
-            Some("sess-1".to_string()),
-            wd.path().to_string_lossy().to_string(),
-        );
+        let context = HookContext::new(Some("sess-1".to_string()), wd.path().to_string_lossy().to_string(), None);
         let out = hook
             .execute(HookEvent::UserPromptSubmit, &input, &context)
             .await

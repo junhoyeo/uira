@@ -380,10 +380,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(
-            Some("test-session".to_string()),
-            temp.path().to_string_lossy().to_string(),
-        );
+        let context = HookContext::new(Some("test-session".to_string()), temp.path().to_string_lossy().to_string(), None);
 
         let output = hook
             .execute(HookEvent::Stop, &input, &context)

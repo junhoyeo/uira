@@ -80,9 +80,7 @@ pub use learner::{
     QualityValidation, SkillExtractionRequest, SkillFileCandidate, SkillInjectionResult,
     SkillMetadata, SkillScope, SkillSource, MAX_SKILL_CONTENT_LENGTH,
 };
-pub use memory::{
-    get_memory_system, init_memory_system, MemoryCaptureAdapter, MemoryRecallAdapter,
-};
+pub use memory::{MemoryCaptureAdapter, MemoryRecallAdapter};
 pub use non_interactive_env::{
     is_non_interactive, BeforeCommandResult, NonInteractiveEnvConfig, NonInteractiveEnvHook,
     PatternGroup, ShellCommandPatterns, Workarounds, HOOK_NAME as NON_INTERACTIVE_ENV_HOOK_NAME,

@@ -265,7 +265,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(None, "/tmp".to_string());
+        let context = HookContext::new(None, "/tmp".to_string(), None);
 
         let result = registry
             .execute_hooks(HookEvent::UserPromptSubmit, &input, &context)
@@ -317,7 +317,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(None, "/tmp".to_string());
+        let context = HookContext::new(None, "/tmp".to_string(), None);
 
         let result = registry
             .execute_hooks(HookEvent::Stop, &input, &context)

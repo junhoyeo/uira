@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use uira_memory::MemorySystem;
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use uira_security::{SandboxPolicy, SandboxType};
 
@@ -14,6 +15,7 @@ use crate::tools::ToolError;
 pub struct ToolContext {
     pub cwd: std::path::PathBuf,
     pub session_id: String,
+    pub memory_system: Option<Arc<MemorySystem>>,
     pub full_auto: bool,
     pub env: std::collections::HashMap<String, String>,
     pub sandbox_type: SandboxType,
@@ -25,6 +27,7 @@ impl Default for ToolContext {
         Self {
             cwd: std::env::current_dir().unwrap_or_default(),
             session_id: String::new(),
+            memory_system: None,
             full_auto: false,
             env: std::collections::HashMap::new(),
             sandbox_type: SandboxType::None,

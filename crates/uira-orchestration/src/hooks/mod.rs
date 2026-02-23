@@ -27,7 +27,7 @@ pub use hooks::{
     },
     comment_checker::{CommentCheckerHook, HOOK_NAME as COMMENT_CHECKER_HOOK_NAME},
     keyword_detector::{KeywordDetectorHook, KeywordType},
-    memory::{get_memory_system, init_memory_system, MemoryCaptureAdapter, MemoryRecallAdapter},
+    memory::{MemoryCaptureAdapter, MemoryRecallAdapter},
     notepad::{
         NotepadConfig, NotepadHook, NotepadStats, PriorityContextResult, PruneResult,
         DEFAULT_NOTEPAD_CONFIG, MANUAL_HEADER, NOTEPAD_FILENAME, PRIORITY_HEADER,

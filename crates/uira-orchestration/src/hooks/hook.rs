@@ -1,24 +1,43 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::sync::Arc;
+use uira_memory::MemorySystem;
 
 use super::types::{HookEvent, HookInput, HookOutput};
 
 /// Context passed to hooks during execution
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HookContext {
     /// Session identifier
     pub session_id: Option<String>,
     /// Working directory
     pub directory: String,
+    pub memory_system: Option<Arc<MemorySystem>>,
     /// Additional context data
     pub data: HashMap<String, serde_json::Value>,
 }
 
+impl std::fmt::Debug for HookContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HookContext")
+            .field("session_id", &self.session_id)
+            .field("directory", &self.directory)
+            .field("has_memory_system", &self.memory_system.is_some())
+            .field("data", &self.data)
+            .finish()
+    }
+}
+
 impl HookContext {
-    pub fn new(session_id: Option<String>, directory: String) -> Self {
+    pub fn new(
+        session_id: Option<String>,
+        directory: String,
+        memory_system: Option<Arc<MemorySystem>>,
+    ) -> Self {
         Self {
             session_id,
             directory,
+            memory_system,
             data: HashMap::new(),
         }
     }
@@ -120,7 +139,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string(), None);
 
         let result = hook
             .execute(HookEvent::UserPromptSubmit, &input, &context)
@@ -133,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_hook_context_with_data() {
-        let context = HookContext::new(Some("session".to_string()), "/tmp".to_string())
+        let context = HookContext::new(Some("session".to_string()), "/tmp".to_string(), None)
             .with_data("key", serde_json::json!("value"));
 
         assert_eq!(context.data.get("key"), Some(&serde_json::json!("value")));

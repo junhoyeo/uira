@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use uira_core::{BroadcastBus, EventBus, HandlerRegistry, SubscriberRunner};
+use uira_memory::MemorySystem;
 use uira_orchestration::create_hook_event_adapter;
 
 pub struct EventSystem {
@@ -10,11 +11,11 @@ pub struct EventSystem {
 }
 
 impl EventSystem {
-    pub fn new(working_directory: String) -> Self {
+    pub fn new(working_directory: String, memory_system: Option<Arc<MemorySystem>>) -> Self {
         let bus = Arc::new(BroadcastBus::new());
         let mut registry = HandlerRegistry::new();
 
-        let hook_adapter = create_hook_event_adapter(working_directory);
+        let hook_adapter = create_hook_event_adapter(working_directory, memory_system);
         registry.register(Arc::new(hook_adapter));
 
         Self {
@@ -24,11 +25,15 @@ impl EventSystem {
         }
     }
 
-    pub fn with_capacity(working_directory: String, capacity: usize) -> Self {
+    pub fn with_capacity(
+        working_directory: String,
+        capacity: usize,
+        memory_system: Option<Arc<MemorySystem>>,
+    ) -> Self {
         let bus = Arc::new(BroadcastBus::with_capacity(capacity));
         let mut registry = HandlerRegistry::new();
 
-        let hook_adapter = create_hook_event_adapter(working_directory);
+        let hook_adapter = create_hook_event_adapter(working_directory, memory_system);
         registry.register(Arc::new(hook_adapter));
 
         Self {
@@ -69,8 +74,11 @@ impl Drop for EventSystem {
     }
 }
 
-pub fn create_event_system(working_directory: String) -> EventSystem {
-    EventSystem::new(working_directory)
+pub fn create_event_system(
+    working_directory: String,
+    memory_system: Option<Arc<MemorySystem>>,
+) -> EventSystem {
+    EventSystem::new(working_directory, memory_system)
 }
 
 #[cfg(test)]
@@ -80,14 +88,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_system_creation() {
-        let system = EventSystem::new("/tmp".to_string());
+        let system = EventSystem::new("/tmp".to_string(), None);
         assert_eq!(system.registry.handler_count(), 1);
         assert!(!system.is_running());
     }
 
     #[tokio::test]
     async fn test_event_system_start_stop() {
-        let mut system = EventSystem::new("/tmp".to_string());
+        let mut system = EventSystem::new("/tmp".to_string(), None);
         system.start();
         assert!(system.is_running());
 
@@ -97,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_system_publish() {
-        let mut system = EventSystem::new("/tmp".to_string());
+        let mut system = EventSystem::new("/tmp".to_string(), None);
         system.start();
 
         let event = Event::SessionStarted {

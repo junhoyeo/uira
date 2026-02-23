@@ -90,6 +90,7 @@ impl ToolCallRuntime {
                     let ctx = ToolContext {
                         cwd: ctx.cwd.clone(),
                         session_id: ctx.session_id.clone(),
+                        memory_system: ctx.memory_system.clone(),
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
                         sandbox_type: ctx.sandbox_type,
@@ -153,6 +154,7 @@ impl ToolCallRuntime {
                     let ctx = ToolContext {
                         cwd: ctx.cwd.clone(),
                         session_id: ctx.session_id.clone(),
+                        memory_system: ctx.memory_system.clone(),
                         full_auto: ctx.full_auto,
                         env: ctx.env.clone(),
                         sandbox_type: ctx.sandbox_type,

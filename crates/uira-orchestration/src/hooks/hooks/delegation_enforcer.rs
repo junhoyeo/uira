@@ -183,7 +183,7 @@ mod tests {
     #[tokio::test]
     async fn test_hook_injects_model_when_missing() {
         let hook = DelegationEnforcerHook::new();
-        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string(), None);
 
         let input = HookInput {
             session_id: Some("test-session".to_string()),
@@ -222,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn test_hook_preserves_existing_model() {
         let hook = DelegationEnforcerHook::new();
-        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string(), None);
 
         let input = HookInput {
             session_id: Some("test-session".to_string()),
@@ -256,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn test_hook_ignores_non_task_tools() {
         let hook = DelegationEnforcerHook::new();
-        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string(), None);
 
         let input = HookInput {
             session_id: Some("test-session".to_string()),
@@ -287,7 +287,7 @@ mod tests {
     #[tokio::test]
     async fn test_hook_handles_tiered_variants() {
         let hook = DelegationEnforcerHook::new();
-        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("test-session".to_string()), "/tmp".to_string(), None);
 
         let test_cases = vec![
             ("executor-low", "haiku"),

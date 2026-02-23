@@ -319,7 +319,9 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("UIRA_UIRA_DIR", dir.path());
+        unsafe {
+            std::env::set_var("UIRA_UIRA_DIR", dir.path());
+        }
 
         let state = AgentUsageState {
             session_id: "ses_1".to_string(),
@@ -339,7 +341,9 @@ mod tests {
         clear_agent_usage_state("ses_1");
         assert!(load_agent_usage_state("ses_1").is_none());
 
-        std::env::remove_var("UIRA_UIRA_DIR");
+        unsafe {
+            std::env::remove_var("UIRA_UIRA_DIR");
+        }
     }
 
     #[tokio::test]
@@ -348,10 +352,12 @@ mod tests {
 
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("UIRA_UIRA_DIR", dir.path());
+        unsafe {
+            std::env::set_var("UIRA_UIRA_DIR", dir.path());
+        }
 
         let hook = AgentUsageReminderHook::new();
-        let context = HookContext::new(Some("ses_x".to_string()), "/tmp".to_string());
+        let context = HookContext::new(Some("ses_x".to_string()), "/tmp".to_string(), None);
 
         let input = HookInput {
             session_id: Some("ses_x".to_string()),
@@ -401,6 +407,8 @@ mod tests {
         assert!(out.message.is_none());
         assert!(load_agent_usage_state("ses_x").is_none());
 
-        std::env::remove_var("UIRA_UIRA_DIR");
+        unsafe {
+            std::env::remove_var("UIRA_UIRA_DIR");
+        }
     }
 }

@@ -488,7 +488,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let ctx = HookContext::new(Some("sess".to_string()), "/tmp".to_string());
+        let ctx = HookContext::new(Some("sess".to_string()), "/tmp".to_string(), None);
 
         let out = hook
             .execute(HookEvent::PostToolUse, &input, &ctx)
@@ -527,7 +527,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let ctx = HookContext::new(Some("sess-cooldown".to_string()), "/tmp".to_string());
+        let ctx = HookContext::new(Some("sess-cooldown".to_string()), "/tmp".to_string(), None);
 
         let out1 = hook
             .execute(HookEvent::PostToolUse, &mk_input(), &ctx)

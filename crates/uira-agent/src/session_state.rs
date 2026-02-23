@@ -9,10 +9,10 @@ use uira_memory::{
     EmbeddingProvider, MemorySystem, MockEmbeddingProvider, OpenAIEmbeddingProvider,
 };
 use uira_orchestration::{
-    init_memory_system, register_builtins_with_todos, AgentExecutor, ApprovalCache,
-    AstToolProvider, DelegationToolProvider, LspToolProvider, McpToolProvider, MemoryForgetTool,
-    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, TodoStore, ToolCallRuntime, ToolContext,
-    ToolOrchestrator, ToolRouter,
+    register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
+    DelegationToolProvider, LspToolProvider, McpToolProvider, MemoryForgetTool,
+    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, TodoStore, ToolCallRuntime,
+    ToolContext, ToolOrchestrator, ToolRouter,
 };
 use uira_providers::ModelClient;
 use uira_security::build_evaluator_from_rules;
@@ -57,6 +57,8 @@ pub struct Session {
 
     pub todo_store: TodoStore,
 
+    pub memory_system: Option<Arc<MemorySystem>>,
+
     pub cwd: PathBuf,
 
     pub turn: usize,
@@ -95,6 +97,8 @@ impl Session {
         register_builtins_with_todos(&mut tool_router, todo_store.clone());
 
         let memory_config = config.memory.clone().unwrap_or_default();
+        let mut memory_system: Option<Arc<MemorySystem>> = None;
+
         if memory_config.enabled {
             let embedder: Arc<dyn EmbeddingProvider> = {
                 let api_key = std::env::var(&memory_config.embedding_api_key_env).ok();
@@ -124,11 +128,8 @@ impl Session {
                     tool_router.register(MemorySearchTool::new(system.searcher.clone()));
                     tool_router.register(MemoryForgetTool::new(system.store.clone()));
                     tool_router.register(MemoryProfileTool::new(system.profile.clone()));
-                    if init_memory_system(system) {
-                        tracing::info!("memory system initialized with tools and hooks");
-                    } else {
-                        tracing::info!("memory system already initialized, reusing existing");
-                    }
+                    memory_system = Some(system);
+                    tracing::info!("memory system initialized with tools and hooks");
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to initialize memory system");
@@ -205,6 +206,7 @@ impl Session {
             context,
             sandbox: SandboxManager::new(config.sandbox_policy.clone()),
             todo_store,
+            memory_system,
             tool_router,
             orchestrator,
             parallel_runtime,
@@ -230,6 +232,7 @@ impl Session {
         ToolContext {
             cwd: self.cwd.clone(),
             session_id: self.id.to_string(),
+            memory_system: self.memory_system.clone(),
             full_auto: Self::is_full_auto(&self.config),
             env: std::collections::HashMap::new(),
             sandbox_type,

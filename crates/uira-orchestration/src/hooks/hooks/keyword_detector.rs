@@ -272,7 +272,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(None, "/tmp".to_string());
+        let context = HookContext::new(None, "/tmp".to_string(), None);
 
         let result = hook
             .execute(HookEvent::UserPromptSubmit, &input, &context)
@@ -301,7 +301,7 @@ mod tests {
             transcript_path: None,
             extra: HashMap::new(),
         };
-        let context = HookContext::new(None, "/tmp".to_string());
+        let context = HookContext::new(None, "/tmp".to_string(), None);
 
         let result = hook
             .execute(HookEvent::UserPromptSubmit, &input, &context)

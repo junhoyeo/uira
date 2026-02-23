@@ -116,7 +116,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn create_test_context() -> HookContext {
-        HookContext::new(None, "/tmp".to_string())
+        HookContext::new(None, "/tmp".to_string(), None)
     }
 
     fn create_test_input(tool_name: &str, tool_input: serde_json::Value) -> HookInput {

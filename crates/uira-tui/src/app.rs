@@ -1511,15 +1511,16 @@ impl App {
             });
         self.working_directory = working_directory.clone();
 
-        let mut event_system = uira_agent::create_event_system(working_directory);
-        event_system.start();
-
         let executor = executor.map(|exec| exec as Arc<_>);
         let (agent, event_stream) = Agent::new_with_executor(config, client, executor)
-            .with_event_system(&event_system)
             .with_session_recording()
             .map_err(|e| std::io::Error::other(e.to_string()))?
             .with_event_stream();
+        let memory_system = agent.session().memory_system.clone();
+        let mut event_system = uira_agent::create_event_system(working_directory, memory_system);
+        event_system.start();
+
+        let agent = agent.with_event_system(&event_system);
         let (mut agent, input_tx, approval_rx, command_tx) = agent.with_interactive();
 
         self.agent_input_tx = Some(input_tx);

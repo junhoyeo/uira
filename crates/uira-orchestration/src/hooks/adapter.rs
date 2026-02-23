@@ -13,6 +13,7 @@ use super::types::{HookEvent, HookInput, HookOutput, Message};
 use uira_core::{
     Event, EventCategory, EventHandler, HandlerResult, SessionEndReason, SubscriptionFilter,
 };
+use uira_memory::MemorySystem;
 
 const HANDLER_NAME: &str = "hook-event-adapter";
 
@@ -20,13 +21,19 @@ const HANDLER_NAME: &str = "hook-event-adapter";
 pub struct HookEventAdapter {
     registry: Arc<HookRegistry>,
     working_directory: String,
+    memory_system: Option<Arc<MemorySystem>>,
 }
 
 impl HookEventAdapter {
-    pub fn new(registry: Arc<HookRegistry>, working_directory: String) -> Self {
+    pub fn new(
+        registry: Arc<HookRegistry>,
+        working_directory: String,
+        memory_system: Option<Arc<MemorySystem>>,
+    ) -> Self {
         Self {
             registry,
             working_directory,
+            memory_system,
         }
     }
 
@@ -257,6 +264,7 @@ impl EventHandler for HookEventAdapter {
         let context = HookContext::new(
             event.session_id().map(|s| s.to_string()),
             self.working_directory.clone(),
+            self.memory_system.clone(),
         );
 
         match self
@@ -278,9 +286,12 @@ impl EventHandler for HookEventAdapter {
 }
 
 /// Helper to create a HookEventAdapter with default hooks
-pub fn create_hook_event_adapter(working_directory: String) -> HookEventAdapter {
+pub fn create_hook_event_adapter(
+    working_directory: String,
+    memory_system: Option<Arc<MemorySystem>>,
+) -> HookEventAdapter {
     let registry = Arc::new(super::registry::default_hooks());
-    HookEventAdapter::new(registry, working_directory)
+    HookEventAdapter::new(registry, working_directory, memory_system)
 }
 
 #[cfg(test)]
@@ -400,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_handler_name_contract() {
-        let adapter = HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string());
+        let adapter = HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string(), None);
         assert_eq!(EventHandler::name(&adapter), HANDLER_NAME);
     }
 }

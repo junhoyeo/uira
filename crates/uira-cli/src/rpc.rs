@@ -200,12 +200,13 @@ pub async fn run_rpc_mode(
                 .to_string()
         });
 
-    let mut event_system = uira_agent::create_event_system(working_directory);
+    let agent = Agent::new(agent_config, client).with_session_recording()?;
+    let memory_system = agent.session().memory_system.clone();
+
+    let mut event_system = uira_agent::create_event_system(working_directory, memory_system);
     event_system.start();
 
-    let agent = Agent::new(agent_config, client)
-        .with_event_system(&event_system)
-        .with_session_recording()?;
+    let agent = agent.with_event_system(&event_system);
     let (agent, event_stream) = agent.with_event_stream();
     let cancel_signal = agent.control().cancel_signal();
     let session_id = agent.session().id.to_string();
