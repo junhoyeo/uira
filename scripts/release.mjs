@@ -404,9 +404,7 @@ function generateNpm(artifactsDir, outputDir) {
 
 function publishNpmPlatforms(dir) {
   if (!dir) die("Usage: release.mjs publish-npm-platforms <dir>");
-
   heading("Publishing npm platform packages");
-
   for (const platform of PLATFORMS) {
     const pkgDir = path.resolve(dir, platform.codeTarget);
     const pkgJson = path.join(pkgDir, "package.json");
@@ -414,25 +412,44 @@ function publishNpmPlatforms(dir) {
       console.warn(`  Skipping ${platform.codeTarget}: no package at ${pkgDir}`);
       continue;
     }
-
     const pkg = readJson(pkgJson);
-    // Publish with a tag so it doesn't become "latest"
     const tag = platform.npmTag;
     log(`Publishing ${pkg.name}@${pkg.version} (tag: ${tag})...`);
-    run("npm", ["publish", pkgDir, "--access", "public", "--tag", tag]);
-    log(`${pkg.name}@${pkg.version} published`);
+    try {
+      run("npm", ["publish", pkgDir, "--access", "public", "--tag", tag]);
+      log(`${pkg.name}@${pkg.version} published`);
+    } catch (e) {
+      const output = (e.stderr?.toString() || "") + (e.stdout?.toString() || "") + (e.message || "");
+      if (output.includes("previously published versions") || output.includes("E403") || output.includes("already exists")) {
+        log(`${pkg.name}@${pkg.version} already published, skipping`);
+      } else {
+        throw e;
+      }
+    }
   }
 }
 
+
+/** Check if an npm publish error is "already published". */
+function isAlreadyPublished(e) {
+  const output = (e.stderr?.toString() || "") + (e.stdout?.toString() || "") + (e.message || "");
+  return output.includes("previously published versions") || output.includes("E403") || output.includes("already exists") || output.includes("EPUBLISHCONFLICT");
+}
 // ── publish-npm-main ─────────────────────────────────────────────────────────
 
 function publishNpmMain() {
   heading("Publishing @uiradev/uira");
-
   const pkgDir = path.join(ROOT, "packages/uira");
   run("npm", ["run", "build"], { cwd: pkgDir });
-  run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
-
+  try {
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+  } catch (e) {
+    if (isAlreadyPublished(e)) {
+      log("@uiradev/uira already published, skipping");
+      return;
+    }
+    throw e;
+  }
   const version = readJson(UIRA_PKG).version;
   console.log(`\n@uiradev/uira@${version} published`);
 }
@@ -441,11 +458,17 @@ function publishNpmMain() {
 
 function publishNpmHook() {
   heading("Publishing @uiradev/hook");
-
   const pkgDir = path.join(ROOT, "packages/hook");
   run("npm", ["run", "build"], { cwd: pkgDir });
-  run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
-
+  try {
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+  } catch (e) {
+    if (isAlreadyPublished(e)) {
+      log("@uiradev/hook already published, skipping");
+      return;
+    }
+    throw e;
+  }
   const version = readJson(HOOK_PKG).version;
   console.log(`\n@uiradev/hook@${version} published`);
 }
@@ -454,10 +477,16 @@ function publishNpmHook() {
 
 function publishNpmAlias() {
   heading("Publishing uira (alias)");
-
   const pkgDir = path.join(ROOT, "packages/uira-alias");
-  run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
-
+  try {
+    run("npm", ["publish", "--access", "public", "--provenance"], { cwd: pkgDir });
+  } catch (e) {
+    if (isAlreadyPublished(e)) {
+      log("uira already published, skipping");
+      return;
+    }
+    throw e;
+  }
   const version = readJson(ALIAS_PKG).version;
   console.log(`\nuira@${version} published`);
 }
