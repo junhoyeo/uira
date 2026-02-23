@@ -51,11 +51,11 @@ pub fn render_tool_output(
         "bash" => render_bash(content, width, theme, context),
         "edit" | "write" => render_edit(content, width, theme, context),
         "read" => render_read(content, width, theme, context),
-        "glob" | "grep" | "codesearch" | "code_search" => {
+        "glob" | "grep" | "codesearch" | "code_search" | "grep_app" => {
             render_code_search(content, width, theme, context)
         }
         "websearch" | "web_search" => render_web_search(content, width, theme, context),
-        "webfetch" | "web_fetch" => render_web_fetch(content, width, theme, context),
+        "webfetch" | "web_fetch" | "fetch_url" => render_web_fetch(content, width, theme, context),
         "applypatch" | "apply_patch" => render_apply_patch(content, width, theme, context),
         "question" | "ask_user" => render_question(content, width, theme, context),
         "task" | "delegate_task" | "subagent" => render_task(content, width, theme, context),
