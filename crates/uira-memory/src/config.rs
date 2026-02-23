@@ -29,6 +29,13 @@ pub struct MemoryConfig {
     #[serde(default = "default_max_recall_results")]
     pub max_recall_results: usize,
 
+
+    #[serde(default = "default_recall_min_query_length")]
+    pub recall_min_query_length: usize,
+
+    #[serde(default = "default_recall_cooldown_turns")]
+    pub recall_cooldown_turns: usize,
+
     #[serde(default = "default_profile_frequency")]
     pub profile_frequency: usize,
 
@@ -72,6 +79,8 @@ impl Default for MemoryConfig {
             auto_recall: default_auto_recall(),
             auto_capture: default_auto_capture(),
             max_recall_results: default_max_recall_results(),
+            recall_min_query_length: default_recall_min_query_length(),
+            recall_cooldown_turns: default_recall_cooldown_turns(),
             profile_frequency: default_profile_frequency(),
             capture_mode: default_capture_mode(),
             container_tag: default_container_tag(),
@@ -127,6 +136,14 @@ fn default_max_recall_results() -> usize {
 
 fn default_profile_frequency() -> usize {
     5
+}
+
+fn default_recall_min_query_length() -> usize {
+    10
+}
+
+fn default_recall_cooldown_turns() -> usize {
+    1
 }
 
 fn default_capture_mode() -> String {
@@ -198,6 +215,8 @@ mod tests {
         assert_eq!(config.fts_weight, 0.3);
         assert_eq!(config.chunk_size, 512);
         assert_eq!(config.chunk_overlap, 50);
+        assert_eq!(config.recall_min_query_length, 10);
+        assert_eq!(config.recall_cooldown_turns, 1);
     }
 
     #[test]
