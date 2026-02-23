@@ -13,6 +13,8 @@
 <div align="center">
 
 [![GitHub Release](https://img.shields.io/github/v/release/junhoyeo/uira?color=0073FF&labelColor=black&logo=github&style=flat-square)](https://github.com/junhoyeo/uira/releases)
+[![npm version](https://img.shields.io/npm/v/@uiradev/uira?color=0073FF&labelColor=black&logo=npm&style=flat-square)](https://www.npmjs.com/package/@uiradev/uira)
+[![npm downloads](https://img.shields.io/npm/dm/@uiradev/uira?color=0073FF&labelColor=black&logo=npm&style=flat-square)](https://www.npmjs.com/package/@uiradev/uira)
 [![GitHub Stars](https://img.shields.io/github/stars/junhoyeo/uira?color=0073FF&labelColor=black&style=flat-square)](https://github.com/junhoyeo/uira/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/junhoyeo/uira?color=0073FF&labelColor=black&style=flat-square)](https://github.com/junhoyeo/uira/issues)
 [![License](https://img.shields.io/badge/license-MIT-white?labelColor=black&style=flat-square)](https://github.com/junhoyeo/uira/blob/main/LICENSE)
@@ -101,10 +103,8 @@ Three pillars:
 ## Quick Start
 # Install via npm (prebuilt binaries, recommended)
 npm i -g @uiradev/uira
-
 # Or via npx (no install)
 npx @uiradev/uira
-
 # Or build from source
 git clone https://github.com/junhoyeo/uira
 cd uira
