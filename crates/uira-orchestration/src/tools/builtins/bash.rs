@@ -207,7 +207,10 @@ impl Tool for BashTool {
             }
         }?;
 
-        Ok(ToolOutput::text(Self::format_output(&command, &bash_output)))
+        Ok(ToolOutput::text(Self::format_output(
+            &command,
+            &bash_output,
+        )))
     }
 }
 impl BashTool {

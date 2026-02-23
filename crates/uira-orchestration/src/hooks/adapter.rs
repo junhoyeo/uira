@@ -411,7 +411,8 @@ mod tests {
 
     #[test]
     fn test_handler_name_contract() {
-        let adapter = HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string(), None);
+        let adapter =
+            HookEventAdapter::new(Arc::new(HookRegistry::new()), "/tmp".to_string(), None);
         assert_eq!(EventHandler::name(&adapter), HANDLER_NAME);
     }
 }

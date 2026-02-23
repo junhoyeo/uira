@@ -23,8 +23,8 @@ pub use features::{
 };
 pub use features::{KeywordDetector, KeywordPattern, StateManager};
 pub use hooks::{
-    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter, HookRegistry, MemoryCaptureAdapter,
-    MemoryRecallAdapter, VerificationResult,
+    create_hook_event_adapter, default_hooks, GoalCheckResult, GoalRunner, Hook, HookEventAdapter,
+    HookRegistry, MemoryCaptureAdapter, MemoryRecallAdapter, VerificationResult,
 };
 pub use sdk::{
     create_uira_session, AgentDefinitionEntry, AgentDefinitions, AgentState, AgentStatus,

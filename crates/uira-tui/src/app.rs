@@ -1648,9 +1648,12 @@ impl App {
             if self.show_logo {
                 let chat_area = chunks[0];
                 let max_logo_h = chat_area.height / 2;
-                let lines =
-                    self.logo_image
-                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent, self.theme.bg);
+                let lines = self.logo_image.render_as_lines(
+                    chat_area.width,
+                    max_logo_h,
+                    self.theme.accent,
+                    self.theme.bg,
+                );
                 self.chat_view.set_logo_lines(lines);
             } else if !self.chat_view.logo_lines.is_empty() {
                 self.chat_view.set_logo_lines(Vec::new());
@@ -1678,9 +1681,12 @@ impl App {
             if self.show_logo {
                 let chat_area = chunks[0];
                 let max_logo_h = chat_area.height / 2;
-                let lines =
-                    self.logo_image
-                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent, self.theme.bg);
+                let lines = self.logo_image.render_as_lines(
+                    chat_area.width,
+                    max_logo_h,
+                    self.theme.accent,
+                    self.theme.bg,
+                );
                 self.chat_view.set_logo_lines(lines);
             } else if !self.chat_view.logo_lines.is_empty() {
                 self.chat_view.set_logo_lines(Vec::new());

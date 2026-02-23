@@ -444,7 +444,12 @@ impl MemoryStore {
         Ok(count)
     }
 
-    pub fn cleanup(&self, container_tag: &str, retention_days: Option<u32>, max_memories: Option<usize>) -> Result<usize> {
+    pub fn cleanup(
+        &self,
+        container_tag: &str,
+        retention_days: Option<u32>,
+        max_memories: Option<usize>,
+    ) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
         let mut total_deleted = 0;
@@ -757,7 +762,9 @@ mod tests {
         // Insert 5 entries
         for i in 0..5 {
             let entry = MemoryEntry::new(format!("memory {i}"), MemorySource::Manual, container);
-            store.insert(&entry, &make_embedding(128, i as f32)).unwrap();
+            store
+                .insert(&entry, &make_embedding(128, i as f32))
+                .unwrap();
         }
         assert_eq!(store.count().unwrap(), 5);
 
@@ -782,5 +789,4 @@ mod tests {
         assert_eq!(deleted, 0);
         assert_eq!(store.count().unwrap(), 1);
     }
-
 }

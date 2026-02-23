@@ -169,8 +169,8 @@ impl Default for MemoryCaptureHook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::embeddings::MockEmbeddingProvider;
+    use async_trait::async_trait;
     use std::time::{Duration, Instant};
 
     struct SlowEmbeddingProvider {
@@ -182,10 +182,7 @@ mod tests {
     impl EmbeddingProvider for SlowEmbeddingProvider {
         async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
             tokio::time::sleep(self.delay).await;
-            Ok(texts
-                .iter()
-                .map(|_| vec![0.5; self.dimension])
-                .collect())
+            Ok(texts.iter().map(|_| vec![0.5; self.dimension]).collect())
         }
 
         fn dimension(&self) -> usize {
