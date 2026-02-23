@@ -8,7 +8,7 @@
 
 ![Demo](./.github/assets/demo.png)
 
-> Lightweight, secure AI harness for the entire dev lifecycle — built in Rust.
+> A lightweight, secure AI agent harness for your entire development lifecycle — built in Rust.
 
 <div align="center">
 
@@ -950,6 +950,6 @@ Always use merge commits when merging PRs.
   <strong>MIT © <a href="https://github.com/junhoyeo">Junho Yeo</a></strong>
 </p>
 
-[![Uira](./.github/assets/cover.jpg)](https://github.com/junhoyeo/uira)
+[![Uira](./.github/assets/footer.jpg)](https://github.com/junhoyeo/uira)
 
 If you find this project intriguing, **please consider starring it ⭐** or [follow me on GitHub](https://github.com/junhoyeo) and join the ride. I code around the clock and ship mind-blowing things on a regular basis — your support won't go to waste.
