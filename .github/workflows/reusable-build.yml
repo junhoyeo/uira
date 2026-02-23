@@ -49,6 +49,8 @@ jobs:
     env:
       RUSTFLAGS: "-C strip=symbols -C codegen-units=1"
       CARGO_PROFILE_RELEASE_LTO: thin
+      # sqlite-vec uses BSD u_int*_t types not available in musl; define them via CFLAGS
+      CFLAGS: "${{ contains(matrix.target, 'musl') && '-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int64_t=uint64_t' || '' }}"
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
