@@ -101,6 +101,7 @@ Three pillars:
 - **OXC Tooling** — Rust-native JavaScript/TypeScript linting, parsing, and transformation
 
 ## Quick Start
+```bash
 # Install via npm (prebuilt binaries, recommended)
 npm i -g @uiradev/uira
 # Or via npx (no install)
