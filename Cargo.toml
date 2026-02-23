@@ -64,7 +64,7 @@ serde_yaml_ng = "0.10"
 json5 = "0.4"
 
 # HTTP
-reqwest = { version = "0.12", features = ["json", "blocking", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "stream", "rustls-tls"] }
 
 # HTTP server framework (Actix Web)
 actix-web = "4"
@@ -76,7 +76,7 @@ axum = { version = "0.8", features = ["ws"] }
 tokio-tungstenite = "0.26"
 
 # Telegram bot framework
-teloxide = { version = "0.13", features = ["macros"] }
+teloxide = { version = "0.13", default-features = false, features = ["macros", "ctrlc_handler", "rustls"] }
 
 # Discord bot framework
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "cache", "http", "utils", "collector", "rustls_backend"] }
