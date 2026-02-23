@@ -1,0 +1,9 @@
+# Pass CFLAGS into cross Docker containers for musl builds.
+# sqlite-vec uses BSD u_int*_t types not available in musl;
+# the CFLAGS env var defines them as standard types.
+
+[target.aarch64-unknown-linux-musl]
+env.passthrough = ["CFLAGS"]
+
+[target.aarch64-unknown-linux-gnu]
+env.passthrough = ["CFLAGS"]
