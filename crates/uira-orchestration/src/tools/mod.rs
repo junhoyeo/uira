@@ -3,6 +3,7 @@ pub mod ast_grep;
 pub mod background_task;
 pub mod builtins;
 pub mod comment_hook;
+pub mod comment_shared;
 pub mod delegate_task;
 pub mod lsp;
 pub mod orchestrator;

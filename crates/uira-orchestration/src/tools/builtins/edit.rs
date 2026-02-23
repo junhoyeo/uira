@@ -84,6 +84,17 @@ impl EditTool {
         lines: &mut Vec<String>,
         edits: &[HashlineEditOp],
     ) -> Result<(), ToolError> {
+        let anchored_edits = edits
+            .iter()
+            .filter(|edit| edit.pos.is_some() || edit.end.is_some())
+            .count();
+        if anchored_edits > 1 {
+            return Err(ToolError::ExecutionFailed {
+                message: "multiple LINE#ID-anchored edits in one request are not supported yet; split into separate Edit calls and re-Read between calls"
+                    .to_string(),
+            });
+        }
+
         for edit in edits {
             let op = edit.op.to_lowercase();
             let replacement = edit
@@ -238,7 +249,7 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Edit a file using hashline-native edits (`edits`) or legacy exact string replacement (`old_string`/`new_string`)."
+        "Edit a file using hashline-native edits (`edits`) or legacy exact string replacement (`old_string`/`new_string`). Hashline mode currently supports at most one LINE#ID-anchored edit per call."
     }
 
     fn schema(&self) -> JsonSchema {
@@ -279,7 +290,7 @@ impl Tool for EditTool {
             .property(
                 "edits",
                 JsonSchema::array(edit_op_schema)
-                    .description("Hashline-native edit operations applied in order"),
+                    .description("Hashline-native edit operations applied in order (currently supports at most one LINE#ID-anchored edit per call)"),
             )
             .property(
                 "old_string",
@@ -596,5 +607,49 @@ mod tests {
         let bytes = std::fs::read(file.path()).unwrap();
         let text = String::from_utf8(bytes).unwrap();
         assert_eq!(text, "alpha\r\ngamma\r\n");
+    }
+
+    #[tokio::test]
+    async fn test_edit_hashline_rejects_multiple_anchored_edits() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "line 1").unwrap();
+        writeln!(file, "line 2").unwrap();
+
+        let original = read_text(file.path());
+        let file_hash = hashline::compute_file_hash(&original);
+        let line1 = hashline::line_tag(1, "line 1");
+        let line2 = hashline::line_tag(2, "line 2");
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "expected_file_hash": file_hash,
+                    "edits": [
+                        {
+                            "op": "replace",
+                            "pos": line1,
+                            "end": line1,
+                            "lines": ["line one"]
+                        },
+                        {
+                            "op": "replace",
+                            "pos": line2,
+                            "end": line2,
+                            "lines": ["line two"]
+                        }
+                    ]
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("multiple LINE#ID-anchored edits"));
     }
 }

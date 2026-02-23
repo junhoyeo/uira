@@ -11,6 +11,7 @@ use crate::tools::{Tool, ToolContext, ToolError};
 use super::hashline;
 
 const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_LINE_DISPLAY_CHARS: usize = 2000;
 
 /// Input for read tool
 #[derive(Debug, Deserialize)]
@@ -37,7 +38,17 @@ impl ReadTool {
             .map(|(i, line)| {
                 let line_num = offset + i + 1;
                 let tag = hashline::line_tag(line_num, line);
-                format!("  {} | {}", tag, line)
+                let truncated = if line.chars().count() > MAX_LINE_DISPLAY_CHARS {
+                    format!(
+                        "{}...",
+                        line.chars()
+                            .take(MAX_LINE_DISPLAY_CHARS)
+                            .collect::<String>()
+                    )
+                } else {
+                    (*line).to_string()
+                };
+                format!("  {} | {}", tag, truncated)
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -224,5 +235,25 @@ mod tests {
         assert!(text.contains("line 5"));
         assert!(!text.contains("line 1"));
         assert!(!text.contains("line 6"));
+    }
+
+    #[tokio::test]
+    async fn test_read_truncates_long_lines() {
+        let mut file = NamedTempFile::new().unwrap();
+        let long_line = "a".repeat(2500);
+        writeln!(file, "{}", long_line).unwrap();
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(json!({"file_path": file.path().to_string_lossy()}), &ctx)
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        assert!(text.contains("..."));
+        assert!(!text.contains(&long_line));
+        let expected_prefix = "a".repeat(2000);
+        assert!(text.contains(&expected_prefix));
     }
 }

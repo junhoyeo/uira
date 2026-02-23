@@ -59,6 +59,9 @@ pub fn parse_line_ref(value: &str) -> Option<LineRef> {
     if chars.next().is_some() {
         return None;
     }
+    if !h1.is_ascii_alphabetic() || !h2.is_ascii_alphabetic() {
+        return None;
+    }
 
     Some(LineRef {
         line_number,
@@ -67,9 +70,14 @@ pub fn parse_line_ref(value: &str) -> Option<LineRef> {
 }
 
 pub fn parse_line_content(value: &str) -> String {
+    if let Some((left, right)) = value.split_once(" | ") {
+        if parse_line_ref(left).is_some() {
+            return right.to_string();
+        }
+    }
     if let Some((left, right)) = value.split_once('|') {
         if parse_line_ref(left).is_some() {
-            return right.trim_start().to_string();
+            return right.to_string();
         }
     }
     value.to_string()
@@ -112,5 +120,13 @@ mod tests {
 
         let raw = parse_line_content("let x = a | b;");
         assert_eq!(raw, "let x = a | b;");
+
+        let indented = parse_line_content("2#AB |     return x");
+        assert_eq!(indented, "    return x");
+
+        let indented_no_delim_space = parse_line_content("2#AB|    return x");
+        assert_eq!(indented_no_delim_space, "    return x");
+
+        assert!(parse_line_ref("3#A1").is_none());
     }
 }
