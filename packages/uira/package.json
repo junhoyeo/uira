@@ -1,6 +1,6 @@
 {
   "name": "@uiradev/uira",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A lightweight, secure AI agent harness for your entire development lifecycle — built in Rust",
   "keywords": [
     "ai",
@@ -76,13 +76,13 @@
     "provenance": true
   },
   "optionalDependencies": {
-    "@uiradev/uira-darwin-arm64": "npm:@uiradev/uira@0.1.0-darwin-arm64",
-    "@uiradev/uira-darwin-x64": "npm:@uiradev/uira@0.1.0-darwin-x64",
-    "@uiradev/uira-linux-x64-gnu": "npm:@uiradev/uira@0.1.0-linux-x64-gnu",
-    "@uiradev/uira-linux-arm64-gnu": "npm:@uiradev/uira@0.1.0-linux-arm64-gnu",
-    "@uiradev/uira-linux-x64-musl": "npm:@uiradev/uira@0.1.0-linux-x64-musl",
-    "@uiradev/uira-linux-arm64-musl": "npm:@uiradev/uira@0.1.0-linux-arm64-musl",
-    "@uiradev/uira-win32-x64-msvc": "npm:@uiradev/uira@0.1.0-win32-x64-msvc"
+    "@uiradev/uira-darwin-arm64": "npm:@uiradev/uira@0.1.1-darwin-arm64",
+    "@uiradev/uira-darwin-x64": "npm:@uiradev/uira@0.1.1-darwin-x64",
+    "@uiradev/uira-linux-x64-gnu": "npm:@uiradev/uira@0.1.1-linux-x64-gnu",
+    "@uiradev/uira-linux-arm64-gnu": "npm:@uiradev/uira@0.1.1-linux-arm64-gnu",
+    "@uiradev/uira-linux-x64-musl": "npm:@uiradev/uira@0.1.1-linux-x64-musl",
+    "@uiradev/uira-linux-arm64-musl": "npm:@uiradev/uira@0.1.1-linux-arm64-musl",
+    "@uiradev/uira-win32-x64-msvc": "npm:@uiradev/uira@0.1.1-win32-x64-msvc"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

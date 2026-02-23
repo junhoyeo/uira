@@ -1,6 +1,6 @@
 {
   "name": "@uiradev/hook",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Git hooks made easy with AI assistance",
   "keywords": [
     "git",
@@ -39,7 +39,7 @@
     "postinstall": "node scripts/install.js"
   },
   "dependencies": {
-    "@uiradev/uira": "workspace:*"
+    "@uiradev/uira": "0.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

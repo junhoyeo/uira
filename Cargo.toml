@@ -17,7 +17,7 @@ members = [
   "crates/uira-memory",
 ]
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Junho Yeo <i@junho.io>"]
 license = "MIT"
@@ -25,31 +25,31 @@ repository = "https://github.com/junhoyeo/uira"
 
 [workspace.dependencies]
 # Internal crates - Core
-uira-core = { path = "crates/uira-core" }
+uira-core = { path = "crates/uira-core", version = "0.1.1" }
 
 # Internal crates - Features
-uira-orchestration = { path = "crates/uira-orchestration" }
+uira-orchestration = { path = "crates/uira-orchestration", version = "0.1.1" }
 
 # Internal crates - Tools
-uira-mcp-client = { path = "crates/uira-mcp-client" }
-uira-oxc = { path = "crates/uira-oxc" }
-uira-comment-checker = { path = "crates/uira-comment-checker" }
+uira-mcp-client = { path = "crates/uira-mcp-client", version = "0.1.1" }
+uira-oxc = { path = "crates/uira-oxc", version = "0.1.1" }
+uira-comment-checker = { path = "crates/uira-comment-checker", version = "0.1.1" }
 
 # Internal crates - Agent harness
-uira-providers = { path = "crates/uira-providers" }
-uira-security = { path = "crates/uira-security" }
-uira-agent = { path = "crates/uira-agent" }
+uira-providers = { path = "crates/uira-providers", version = "0.1.1" }
+uira-security = { path = "crates/uira-security", version = "0.1.1" }
+uira-agent = { path = "crates/uira-agent", version = "0.1.1" }
 
 # Internal crates - Applications
-uira-cli = { path = "crates/uira-cli" }
-uira-tui = { path = "crates/uira-tui" }
-uira-mcp-server = { path = "crates/uira-mcp-server" }
+uira-cli = { path = "crates/uira-cli", version = "0.1.1" }
+uira-tui = { path = "crates/uira-tui", version = "0.1.1" }
+uira-mcp-server = { path = "crates/uira-mcp-server", version = "0.1.1" }
 
 # Internal crates - Expansion (gateway, channels, skills)
-uira-gateway = { path = "crates/uira-gateway" }
+uira-gateway = { path = "crates/uira-gateway", version = "0.1.1" }
 
 # Internal crates - Memory
-uira-memory = { path = "crates/uira-memory" }
+uira-memory = { path = "crates/uira-memory", version = "0.1.1" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

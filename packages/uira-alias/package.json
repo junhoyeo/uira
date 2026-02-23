@@ -1,6 +1,6 @@
 {
   "name": "uira",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Alias for @uiradev/uira — A lightweight, secure AI agent harness for your entire development lifecycle",
   "type": "commonjs",
   "main": "index.js",
@@ -26,7 +26,7 @@
     "claude"
   ],
   "dependencies": {
-    "@uiradev/uira": "0.0.1"
+    "@uiradev/uira": "0.1.1"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
