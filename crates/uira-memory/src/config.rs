@@ -68,6 +68,12 @@ pub struct MemoryConfig {
 
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
+
+    #[serde(default)]
+    pub retention_days: Option<u32>,
+
+    #[serde(default)]
+    pub max_memories: Option<usize>,
 }
 
 impl Default for MemoryConfig {
@@ -95,6 +101,8 @@ impl Default for MemoryConfig {
             min_capture_length: default_min_capture_length(),
             chunk_size: default_chunk_size(),
             chunk_overlap: default_chunk_overlap(),
+            retention_days: None,
+            max_memories: None,
         }
     }
 }

@@ -33,6 +33,12 @@ pub struct MemorySystem {
 impl MemorySystem {
     pub fn new(config: &MemoryConfig, embedder: Arc<dyn EmbeddingProvider>) -> Result<Self> {
         let store = Arc::new(MemoryStore::new(config)?);
+        
+        // Run cleanup on startup
+        if let Err(e) = store.cleanup(&config.container_tag, config.retention_days, config.max_memories) {
+            tracing::warn!("memory cleanup failed during initialization: {}", e);
+        }
+        
         let searcher = Arc::new(HybridSearcher::new(store.clone(), embedder.clone(), config));
         let profile = Arc::new(UserProfile::new(store.clone()));
 

@@ -443,6 +443,46 @@ impl MemoryStore {
         let count: usize = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
         Ok(count)
     }
+
+    pub fn cleanup(&self, container_tag: &str, retention_days: Option<u32>, max_memories: Option<usize>) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let mut total_deleted = 0;
+
+        // If both are None, return early (no-op)
+        if retention_days.is_none() && max_memories.is_none() {
+            return Ok(0);
+        }
+
+        // Delete old entries by retention_days
+        if let Some(days) = retention_days {
+            let deleted = tx.execute(
+                "DELETE FROM memories WHERE created_at < datetime('now', ?1) AND container_tag = ?2",
+                params![format!("-{} days", days), container_tag],
+            )?;
+            total_deleted += deleted;
+        }
+
+        // Keep only newest N memories per container tag
+        if let Some(max_count) = max_memories {
+            let deleted = tx.execute(
+                "DELETE FROM memories WHERE container_tag = ?1 AND id NOT IN (SELECT id FROM memories WHERE container_tag = ?2 ORDER BY created_at DESC LIMIT ?3)",
+                params![container_tag, container_tag, max_count as i64],
+            )?;
+            total_deleted += deleted;
+        }
+
+        // Clean up orphaned FTS entries
+        tx.execute(
+            "DELETE FROM memories_fts WHERE rowid NOT IN (SELECT rowid FROM memories)",
+            [],
+        )?;
+
+        tx.commit()?;
+
+        tracing::info!(deleted = total_deleted, "memory cleanup completed");
+        Ok(total_deleted)
+    }
 }
 
 fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
@@ -693,4 +733,54 @@ mod tests {
         let facts = store.get_profile_facts(None).unwrap();
         assert!(facts.is_empty());
     }
+    #[test]
+    fn cleanup_with_retention_days_keeps_recent_entries() {
+        let store = MemoryStore::new_in_memory(128).unwrap();
+        let container = "test-container";
+
+        // Insert an entry
+        let entry = MemoryEntry::new("recent memory", MemorySource::Manual, container);
+        store.insert(&entry, &make_embedding(128, 1.0)).unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+
+        // Cleanup with retention_days=1000 keeps recent entries
+        let deleted = store.cleanup(container, Some(1000), None).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn cleanup_with_max_memories_keeps_only_newest() {
+        let store = MemoryStore::new_in_memory(128).unwrap();
+        let container = "test-container";
+
+        // Insert 5 entries
+        for i in 0..5 {
+            let entry = MemoryEntry::new(format!("memory {i}"), MemorySource::Manual, container);
+            store.insert(&entry, &make_embedding(128, i as f32)).unwrap();
+        }
+        assert_eq!(store.count().unwrap(), 5);
+
+        // Cleanup with max_memories=2 should keep only 2 newest
+        let deleted = store.cleanup(container, None, Some(2)).unwrap();
+        assert_eq!(deleted, 3);
+        assert_eq!(store.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn cleanup_with_both_none_is_noop() {
+        let store = MemoryStore::new_in_memory(128).unwrap();
+        let container = "test-container";
+
+        // Insert an entry
+        let entry = MemoryEntry::new("memory", MemorySource::Manual, container);
+        store.insert(&entry, &make_embedding(128, 1.0)).unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+
+        // Cleanup with both None should be a no-op
+        let deleted = store.cleanup(container, None, None).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(store.count().unwrap(), 1);
+    }
+
 }
