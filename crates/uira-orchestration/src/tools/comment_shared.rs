@@ -2,6 +2,8 @@ use std::collections::HashSet;
 
 use uira_comment_checker::{CommentDetector, CommentInfo};
 
+use crate::tools::builtins::hashline;
+
 pub fn build_comment_text_set(comments: &[CommentInfo]) -> HashSet<String> {
     comments.iter().map(|c| c.normalized_text()).collect()
 }
@@ -21,41 +23,8 @@ pub fn filter_new_comments(
         .collect()
 }
 
-pub fn looks_like_hashline_prefix(value: &str) -> bool {
-    let raw = value.trim().trim_start_matches('L');
-    let Some((line_part, hash_part)) = raw.split_once('#') else {
-        return false;
-    };
-    if line_part
-        .trim()
-        .parse::<usize>()
-        .ok()
-        .filter(|n| *n > 0)
-        .is_none()
-    {
-        return false;
-    }
-    let mut chars = hash_part.trim().chars();
-    let first = chars.next();
-    let second = chars.next();
-    match (first, second, chars.next()) {
-        (Some(a), Some(b), None) => a.is_ascii_alphabetic() && b.is_ascii_alphabetic(),
-        _ => false,
-    }
-}
-
 pub fn parse_edit_line_content(line_text: &str) -> String {
-    if let Some((left, rhs)) = line_text.split_once(" | ") {
-        if looks_like_hashline_prefix(left) {
-            return rhs.to_string();
-        }
-    }
-    if let Some((left, rhs)) = line_text.split_once('|') {
-        if looks_like_hashline_prefix(left) {
-            return rhs.to_string();
-        }
-    }
-    line_text.to_string()
+    hashline::parse_line_content(line_text)
 }
 
 pub fn detect_comments_from_edit_lines(

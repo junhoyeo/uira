@@ -7,7 +7,7 @@ mod bash;
 mod edit;
 mod glob;
 mod grep;
-mod hashline;
+pub(crate) mod hashline;
 pub mod memory;
 mod read;
 pub mod todo;
