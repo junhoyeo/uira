@@ -27,6 +27,7 @@ pub struct MemorySystem {
     pub profile: Arc<UserProfile>,
     pub recall_hook: MemoryRecallHook,
     pub capture_hook: MemoryCaptureHook,
+    pub config: MemoryConfig,
 }
 
 impl MemorySystem {
@@ -50,6 +51,7 @@ impl MemorySystem {
             profile,
             recall_hook,
             capture_hook,
+            config: config.clone(),
         })
     }
 
@@ -76,6 +78,7 @@ impl MemorySystem {
             profile,
             recall_hook,
             capture_hook,
+            config: config.clone(),
         })
     }
 
@@ -85,7 +88,7 @@ impl MemorySystem {
             self.searcher.clone(),
             self.embedder.clone(),
             self.profile.clone(),
-            MemoryConfig::default(),
+            self.config.clone(),
         )
     }
 }

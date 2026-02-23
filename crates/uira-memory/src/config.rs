@@ -134,6 +134,17 @@ fn default_capture_mode() -> String {
 }
 
 fn default_container_tag() -> String {
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(dir_name) = cwd.file_name().and_then(|n| n.to_str()) {
+            let sanitized: String = dir_name
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                .collect();
+            return format!("project-{sanitized}");
+        }
+    }
+    // Fallback to hostname
     let hostname = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
@@ -204,6 +215,6 @@ storage_path: "/tmp/test.db"
     #[test]
     fn container_tag_includes_hostname() {
         let config = MemoryConfig::default();
-        assert!(config.container_tag.starts_with("uira_"));
+        assert!(config.container_tag.starts_with("project-"));
     }
 }
