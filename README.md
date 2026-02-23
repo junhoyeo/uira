@@ -839,9 +839,7 @@ Connect to any MCP-compatible server. Tools are auto-discovered and exposed to t
 ```
 
 ## Gateway & Channels
-
-The gateway provides a WebSocket control plane for managing multiple concurrent agent sessions, with channel integrations for team messaging:
-
+The gateway provides a WebSocket control plane for managing multiple concurrent agent sessions, with channel integrations for team messaging.
 ```jsonc
 {
   "gateway": {
@@ -849,29 +847,44 @@ The gateway provides a WebSocket control plane for managing multiple concurrent 
     "host": "0.0.0.0",
     "port": 18790,
     "max_sessions": 10,
-    "default_agent": "balanced"           // "balanced" | "autonomous" | "orchestrator"
+    "auth_token": "${GATEWAY_AUTH_TOKEN}",  // Optional Bearer token for WebSocket auth
+    "default_agent": "balanced"             // "balanced" | "autonomous" | "orchestrator"
   },
-
   "channels": {
     "telegram": {
       "bot_token": "${TELEGRAM_BOT_TOKEN}",
       "allowed_users": ["your_username"],
-      "stream_mode": "partial"            // Progressive message editing
+      "stream_mode": "partial"              // Progressive message editing
     },
     "slack": {
       "bot_token": "${SLACK_BOT_TOKEN}",
       "app_token": "${SLACK_APP_TOKEN}",
       "allowed_channels": ["C0123456789"]
+    },
+    "discord": {
+      "bot_token": "${DISCORD_BOT_TOKEN}"
     }
   }
 }
 ```
 
 Start the gateway:
-
 ```bash
+# Start with defaults from config
+uira-agent gateway start
+
+# Or override host/port
 uira-agent gateway start --host 0.0.0.0 --port 18790
+# With authentication
+uira-agent gateway start --auth-token "your-secret-token"
 ```
+
+**Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `ws://<host>:<port>/ws` | WebSocket connection for session management |
+| `http://<host>:<port>/health` | Health check (returns uptime, active sessions, version) |
 
 ## Architecture
 
