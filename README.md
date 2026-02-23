@@ -8,7 +8,7 @@
 
 ![Demo](./.github/assets/demo.png)
 
-> A lightweight, secure AI agent harness for your entire development lifecycle — built in Rust.
+> A lightweight, secure AI agent harness for your entire development lifecycle, fully written in Rust
 
 <div align="center">
 
