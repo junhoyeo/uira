@@ -42,6 +42,7 @@ const REPO = process.env.GITHUB_REPOSITORY || "junhoyeo/uira";
 /** Crate publish order — layers separated by comments for clarity. */
 const CRATE_ORDER = [
   // Layer 0: no internal dependencies
+  "uira-memory",
   "uira-core",
   "uira-oxc",
   "uira-mcp-client",
