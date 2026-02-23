@@ -135,11 +135,10 @@ impl Tool for WriteTool {
 
         let existed = path.exists();
         let old_content = if existed {
-            fs::read_to_string(path)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed {
-                    message: format!("Failed to read existing file: {}", e),
-                })?
+            match fs::read(path).await {
+                Ok(bytes) => String::from_utf8(bytes).unwrap_or_default(),
+                Err(_) => String::new(),
+            }
         } else {
             String::new()
         };
