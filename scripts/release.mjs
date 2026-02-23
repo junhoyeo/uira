@@ -439,6 +439,9 @@ function isAlreadyPublished(e) {
 
 function publishNpmMain() {
   heading("Publishing @uiradev/uira");
+  // Install workspace devDependencies (tsup, typescript) needed for build
+  log("Installing workspace dependencies...");
+  run("npm", ["install", "--ignore-scripts"]);
   const pkgDir = path.join(ROOT, "packages/uira");
   run("npm", ["run", "build"], { cwd: pkgDir });
   try {
