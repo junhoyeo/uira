@@ -115,6 +115,15 @@ pub fn is_ignored_path(path: &Path) -> bool {
     false
 }
 
+/// Checks if a file should be ignored based on its path and working directory.
+///
+/// Currently checks against hardcoded common ignore patterns.
+/// The `cwd` parameter is accepted for API compatibility but not yet used
+/// for `.gitignore` parsing (the `ignore` crate is not a direct dependency).
+pub fn should_ignore_file(path: &Path, _cwd: &Path) -> bool {
+    is_ignored_path(path)
+}
+
 /// Checks file guards without checking ignored paths.
 ///
 /// Verifies:
@@ -337,5 +346,19 @@ mod tests {
             result.is_ok(),
             "Valid text file in normal path should pass full guards"
         );
+    }
+
+    #[test]
+    fn test_should_ignore_file_node_modules() {
+        let path = Path::new("node_modules/foo/index.js");
+        let cwd = Path::new("/home/user/project");
+        assert!(should_ignore_file(path, cwd));
+    }
+
+    #[test]
+    fn test_should_ignore_file_normal_path() {
+        let path = Path::new("src/main.rs");
+        let cwd = Path::new("/home/user/project");
+        assert!(!should_ignore_file(path, cwd));
     }
 }

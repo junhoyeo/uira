@@ -231,36 +231,41 @@ impl EditTool {
         result
     }
 
+    fn format_error_with_suggestions(old_string: &str, content: &str) -> String {
+        let similar = find_similar_strings(content, old_string, &FindOptions::default());
+        let escaped = Self::escape_for_display(old_string);
+
+        let mut msg = format!(
+            "The old_string was not found in the file. Make sure it matches exactly.\n\nSEARCH TARGET (escaped):\n  \"{}\"\n",
+            escaped
+        );
+
+        msg.push_str("\n🔍 SIMILAR STRINGS FOUND:\n");
+        if similar.is_empty() {
+            msg.push_str("  (no similar strings found)\n");
+        } else {
+            for s in &similar {
+                msg.push_str(&format!(
+                    "  Line {} ({:.0}%): \"{}\"\n",
+                    s.line_number,
+                    s.similarity * 100.0,
+                    s.text
+                ));
+            }
+        }
+
+        msg.push_str("\n📋 RECOVERY STRATEGIES:\n");
+        msg.push_str("  1. Use Read tool to view the file around the target area\n");
+        msg.push_str("  2. Copy the exact text from the file content\n");
+        msg.push_str("  3. Check for invisible characters (tabs, trailing spaces, line endings)\n");
+        msg.push_str("  4. If the text spans multiple lines, ensure line breaks match exactly\n");
+
+        msg
+    }
+
     fn apply_legacy_edit(content: &str, input: &LegacyEditInput) -> Result<String, ToolError> {
         if !content.contains(&input.old_string) {
-            let similar = find_similar_strings(content, &input.old_string, &FindOptions::default());
-            let escaped = Self::escape_for_display(&input.old_string);
-
-            let mut msg = format!(
-                "The old_string was not found in the file. Make sure it matches exactly.\n\nSEARCH TARGET (escaped):\n  \"{}\"\n",
-                escaped
-            );
-
-            msg.push_str("\n🔍 SIMILAR STRINGS FOUND:\n");
-            if similar.is_empty() {
-                msg.push_str("  (no similar strings found)\n");
-            } else {
-                for s in &similar {
-                    msg.push_str(&format!(
-                        "  Line {} ({:.0}%): \"{}\"\n",
-                        s.line_number,
-                        s.similarity * 100.0,
-                        s.text
-                    ));
-                }
-            }
-
-            msg.push_str("\n📋 RECOVERY STRATEGIES:\n");
-            msg.push_str("  1. Use Read tool to view the file around the target area\n");
-            msg.push_str("  2. Copy the exact text from the file content\n");
-            msg.push_str("  3. Check for invisible characters (tabs, trailing spaces, line endings)\n");
-            msg.push_str("  4. If the text spans multiple lines, ensure line breaks match exactly\n");
-
+            let msg = Self::format_error_with_suggestions(&input.old_string, content);
             return Err(ToolError::ExecutionFailed { message: msg });
         }
         if !input.replace_all {
@@ -799,7 +804,7 @@ mod tests {
     #[tokio::test]
     async fn test_edit_fuzzy_very_long_old_string() {
         let mut file = NamedTempFile::new().unwrap();
-        let long_line = format!("prefix_{}_suffix", "a".repeat(540));
+        let long_line = format!("prefix_{}_suffix", "a".repeat(1051));
         write!(file, "{}", long_line).unwrap();
 
         let tool = EditTool::new();
@@ -808,7 +813,7 @@ mod tests {
             .execute(
                 json!({
                     "file_path": file.path().to_string_lossy(),
-                    "old_string": format!("prefix_{}_suffix", "a".repeat(539) + "b"),
+                    "old_string": format!("prefix_{}_suffix", "a".repeat(1050) + "b"),
                     "new_string": "replacement"
                 }),
                 &ctx,
@@ -820,6 +825,30 @@ mod tests {
         assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
         assert!(err_msg.contains("Line 1"));
         assert!(err_msg.contains("RECOVERY STRATEGIES"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_rtl_unicode() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "fn مرحبا_بالعالم() {{ println!(\"سلام\"); }}").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "fn مرحبا_بالعالم() { println!(\"سلام_typo\"); }",
+                    "new_string": "fn fixed() {}"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("مرحبا") || err_msg.contains("بالعالم") || err_msg.contains("سلام"));
     }
 
     #[tokio::test]

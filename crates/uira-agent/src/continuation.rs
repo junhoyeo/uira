@@ -27,10 +27,23 @@ pub fn is_completion_signal(text: &str) -> bool {
         "all tasks",
         "work is complete",
     ];
-    completion_phrases.iter().any(|phrase| lower.contains(phrase))
+    completion_phrases
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}
+
+/// Check if todo continuation should be injected.
+///
+/// Returns true when the agent's output indicates completion
+/// but there are still incomplete todo items.
+pub fn check_todo_continuation(is_completion_signal: bool, has_incomplete_todos: bool) -> bool {
+    is_completion_signal && has_incomplete_todos
 }
 
 /// Generate a continuation message for incomplete todos
+///
+/// Note: The `system_injection` field is populated but currently not consumed by agent.rs.
+/// It is available for future use when the agent loop is updated to inject system prompts.
 pub fn generate_continuation(
     incomplete_count: usize,
     incomplete_summaries: &[String],
@@ -43,7 +56,11 @@ pub fn generate_continuation(
         .join("\n");
 
     ContinuationMessage {
-        system_injection: None,
+        system_injection: Some(
+            "You have incomplete todo items. Do not stop until all items are completed. \
+             Review the remaining items and continue working on them."
+                .to_string(),
+        ),
         user_injection: Some(format!(
             "You still have {} incomplete todo item(s). Please continue working on them:\n\n{}\n\nDo not stop until all items are completed.",
             incomplete_count, items_list
@@ -86,7 +103,7 @@ mod tests {
         let text = msg.user_injection.unwrap();
         assert!(text.contains("1 incomplete todo item(s)"));
         assert!(text.contains("1. Fix login bug"));
-        assert!(msg.system_injection.is_none());
+        assert!(msg.system_injection.is_some());
     }
 
     #[test]
@@ -102,5 +119,26 @@ mod tests {
         assert!(text.contains("1. Fix login bug"));
         assert!(text.contains("2. Add unit tests"));
         assert!(text.contains("3. Update docs"));
+    }
+
+    #[test]
+    fn test_check_todo_continuation_logic() {
+        // Should continue: completion signal + incomplete todos
+        assert!(check_todo_continuation(true, true));
+        // Should not: no completion signal
+        assert!(!check_todo_continuation(false, true));
+        // Should not: no incomplete todos
+        assert!(!check_todo_continuation(true, false));
+        // Should not: neither
+        assert!(!check_todo_continuation(false, false));
+    }
+
+    #[test]
+    fn test_generate_continuation_has_system_injection() {
+        let msg = generate_continuation(1, &["Fix bug".to_string()]);
+        assert!(msg.system_injection.is_some());
+        let sys = msg.system_injection.unwrap();
+        assert!(sys.contains("incomplete todo"));
+        assert!(sys.contains("Do not stop"));
     }
 }
