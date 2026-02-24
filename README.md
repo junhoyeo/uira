@@ -104,8 +104,13 @@ Three pillars:
 ```bash
 # Install via npm (prebuilt binaries, recommended)
 npm i -g @uiradev/uira
-# Or via npx (no install)
+# Or via npx (no install, scoped package)
 npx @uiradev/uira
+# Or via unscoped alias package
+npx uira
+# Explicitly run specific bundled binaries from npm package
+npx -p @uiradev/uira uira-agent --version
+npx -p @uiradev/uira uira-commit-hook-cli --help
 # Or build from source
 git clone https://github.com/junhoyeo/uira
 cd uira
@@ -120,6 +125,8 @@ cargo install --path crates/uira-cli
 | [`@uiradev/uira`](https://www.npmjs.com/package/@uiradev/uira) | Agent + git hooks (prebuilt) | `uira`, `uira-agent`, `uira-commit-hook-cli` |
 | [`@uiradev/hook`](https://www.npmjs.com/package/@uiradev/hook) | Git hooks only | `uira-hook` |
 | [`uira`](https://www.npmjs.com/package/uira) | Alias for `@uiradev/uira` | Same as above |
+
+`uira-agent` is a binary exposed by `@uiradev/uira`, not a standalone npm package name. For npx execution of that binary, use `npx -p @uiradev/uira uira-agent`.
 
 Platform-specific binaries are bundled via `optionalDependencies` — supports macOS (arm64, x64), Linux (x64/arm64, glibc/musl), and Windows (x64).
 
