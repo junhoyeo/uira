@@ -815,23 +815,55 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
             let diff_preview = {
                 let tool = pending.tool_name.to_lowercase();
                 if tool.contains("edit") || tool.contains("write") {
+                    // Get file path for potential file content read
+                    let file_path = pending
+                        .input
+                        .get("file_path")
+                        .or_else(|| pending.input.get("filePath"))
+                        .and_then(|v| v.as_str());
+
+                    // For Edit: use old_string/oldText from input
+                    // For Write: read existing file content if available
                     let before = pending
                         .input
                         .get("old_string")
                         .or_else(|| pending.input.get("oldText"))
-                        .and_then(|v| v.as_str());
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            // For Write tool, read existing file content for accurate diff
+                            if tool.contains("write") {
+                                file_path.and_then(|path| {
+                                    // Expand tilde in path
+                                    let expanded = if path == "~" {
+                                        std::env::var("HOME").ok().map(PathBuf::from)
+                                    } else if let Some(relative) = path.strip_prefix("~/") {
+                                        std::env::var("HOME")
+                                            .ok()
+                                            .map(|h| PathBuf::from(h).join(relative))
+                                    } else {
+                                        Some(PathBuf::from(path))
+                                    };
+                                    expanded.and_then(|p| std::fs::read_to_string(p).ok())
+                                })
+                            } else {
+                                None
+                            }
+                        });
                     let after = pending
                         .input
                         .get("new_string")
                         .or_else(|| pending.input.get("newText"))
                         .or_else(|| pending.input.get("content"))
                         .and_then(|v| v.as_str());
-                    match (before, after) {
+
+                    match (before.as_deref(), after) {
                         (Some(b), Some(a)) => {
                             let diff = TextDiff::from_lines(b, a);
                             Some(diff.unified_diff().header("before", "after").to_string())
                         }
                         (None, Some(content)) => {
+                            // New file - show all content as additions
                             let diff = TextDiff::from_lines("", content);
                             Some(diff.unified_diff().header("before", "after").to_string())
                         }

@@ -276,7 +276,11 @@ impl Tool for EditTool {
             )
             .required(&["op"]);
 
-        let mut schema = JsonSchema::object()
+        // Note: oneOf not supported by Anthropic API at top level.
+        // Runtime validation in execute() handles the two modes:
+        // - Hashline mode: requires edits + expected_file_hash
+        // - Legacy mode: requires old_string + new_string
+        JsonSchema::object()
             .property(
                 "file_path",
                 JsonSchema::string().description("The absolute path to the file to edit"),
@@ -305,17 +309,7 @@ impl Tool for EditTool {
                 JsonSchema::boolean()
                     .description("Legacy mode: replace all occurrences (default false)"),
             )
-            .required(&["file_path"]);
-
-        schema.extra.insert(
-            "oneOf".to_string(),
-            serde_json::json!([
-                {"required": ["edits", "expected_file_hash"]},
-                {"required": ["old_string", "new_string"]}
-            ]),
-        );
-
-        schema
+            .required(&["file_path"])
     }
 
     fn approval_requirement(&self, input: &serde_json::Value) -> ApprovalRequirement {
