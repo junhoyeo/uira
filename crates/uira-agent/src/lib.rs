@@ -11,6 +11,7 @@
 mod agent;
 pub mod approval;
 mod config;
+pub mod continuation;
 pub mod context;
 mod control;
 mod error;
@@ -35,6 +36,7 @@ pub use approval::{
 };
 pub use config::AgentConfig;
 pub use context::*;
+pub use continuation::{ContinuationMessage, generate_continuation, is_completion_signal};
 pub use control::AgentControl;
 pub use error::AgentLoopError;
 pub use event_system::{create_event_system, EventSystem};

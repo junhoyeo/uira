@@ -8,6 +8,7 @@ use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use crate::tools::{Tool, ToolContext, ToolError};
 
 use super::hashline;
+use super::fuzzy::{find_similar_strings, FindOptions};
 
 #[derive(Debug, Deserialize)]
 struct LegacyEditInput {
@@ -208,14 +209,59 @@ impl EditTool {
         Ok(())
     }
 
+    fn escape_for_display(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        for line in s.split('\n') {
+            if !result.is_empty() {
+                result.push('\n');
+            }
+            // Replace tabs with visible arrow
+            let line = line.replace('\t', "→");
+            // Replace carriage returns with visible symbol
+            let line = line.replace('\r', "↵");
+            // Replace trailing spaces with visible dots
+            let trimmed_end = line.trim_end_matches(' ');
+            let trailing_count = line.len() - trimmed_end.len();
+            result.push_str(trimmed_end);
+            for _ in 0..trailing_count {
+                result.push('·');
+            }
+        }
+        result
+    }
+
     fn apply_legacy_edit(content: &str, input: &LegacyEditInput) -> Result<String, ToolError> {
         if !content.contains(&input.old_string) {
-            return Err(ToolError::ExecutionFailed {
-                message: "The old_string was not found in the file. Make sure it matches exactly."
-                    .to_string(),
-            });
-        }
+            let similar = find_similar_strings(content, &input.old_string, &FindOptions::default());
+            let escaped = Self::escape_for_display(&input.old_string);
 
+            let mut msg = format!(
+                "The old_string was not found in the file. Make sure it matches exactly.\n\nSEARCH TARGET (escaped):\n  \"{}\"\n",
+                escaped
+            );
+
+            msg.push_str("\n🔍 SIMILAR STRINGS FOUND:\n");
+            if similar.is_empty() {
+                msg.push_str("  (no similar strings found)\n");
+            } else {
+                for s in &similar {
+                    msg.push_str(&format!(
+                        "  Line {} ({:.0}%): \"{}\"\n",
+                        s.line_number,
+                        s.similarity * 100.0,
+                        s.text
+                    ));
+                }
+            }
+
+            msg.push_str("\n📋 RECOVERY STRATEGIES:\n");
+            msg.push_str("  1. Use Read tool to view the file around the target area\n");
+            msg.push_str("  2. Copy the exact text from the file content\n");
+            msg.push_str("  3. Check for invisible characters (tabs, trailing spaces, line endings)\n");
+            msg.push_str("  4. If the text spans multiple lines, ensure line breaks match exactly\n");
+
+            return Err(ToolError::ExecutionFailed { message: msg });
+        }
         if !input.replace_all {
             let count = content.matches(&input.old_string).count();
             if count > 1 {
@@ -227,7 +273,6 @@ impl EditTool {
                 });
             }
         }
-
         Ok(if input.replace_all {
             content.replace(&input.old_string, &input.new_string)
         } else {
@@ -645,5 +690,87 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("multiple LINE#ID-anchored edits"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_legacy_not_found_shows_similar_strings() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "fn hello_world() {{}}\nfn hello_rust() {{}}").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "fn hello_wrld()",
+                    "new_string": "fn hello_fixed()"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"), "error should contain SIMILAR STRINGS FOUND section, got: {err_msg}");
+        assert!(err_msg.contains("Line "), "error should contain line numbers, got: {err_msg}");
+        assert!(err_msg.contains("%"), "error should contain similarity percentages, got: {err_msg}");
+        assert!(err_msg.contains("RECOVERY STRATEGIES"), "error should contain RECOVERY STRATEGIES section, got: {err_msg}");
+    }
+
+    #[tokio::test]
+    async fn test_edit_legacy_not_found_no_similar_strings() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "apple\nbanana\ncherry").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "zzzzzzzzzzzzzzz_completely_different_zzzzzzzzzzzzzzz",
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("no similar strings found"), "error should say no similar strings found, got: {err_msg}");
+        assert!(err_msg.contains("RECOVERY STRATEGIES"), "error should contain RECOVERY STRATEGIES, got: {err_msg}");
+    }
+
+    #[tokio::test]
+    async fn test_edit_legacy_successful_edit_unchanged() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "Hello, World!").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "World",
+                    "new_string": "Rust"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(read_text(file.path()), "Hello, Rust!");
+        let output = result.as_text().unwrap();
+        assert!(output.contains("@@"));
+    }
+
+    #[test]
+    fn test_escape_for_display() {
+        assert_eq!(EditTool::escape_for_display("hello\tworld"), "hello→world");
+        assert_eq!(EditTool::escape_for_display("hello   "), "hello···");
+        assert_eq!(EditTool::escape_for_display("line1\nline2"), "line1\nline2");
+        assert_eq!(EditTool::escape_for_display("no specials"), "no specials");
     }
 }

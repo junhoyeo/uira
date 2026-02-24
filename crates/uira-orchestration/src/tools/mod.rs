@@ -15,6 +15,7 @@ pub mod registry;
 pub mod router;
 pub mod session_manager;
 pub mod traits;
+pub mod output;
 pub mod types;
 
 pub use approval_cache::{

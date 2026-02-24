@@ -1,0 +1,106 @@
+//! Todo continuation injection
+//!
+//! Detects when the agent is about to stop but has incomplete todos,
+//! and generates continuation messages to keep it working.
+
+/// A continuation message to inject into the conversation
+#[derive(Debug, Clone)]
+pub struct ContinuationMessage {
+    /// Optional system prompt injection
+    pub system_injection: Option<String>,
+    /// User message to inject
+    pub user_injection: Option<String>,
+}
+
+/// Check if the agent's response text indicates it's trying to stop
+pub fn is_completion_signal(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let completion_phrases = [
+        "i'm done",
+        "i am done",
+        "task complete",
+        "all done",
+        "finished",
+        "completed all",
+        "that's everything",
+        "nothing more",
+        "all tasks",
+        "work is complete",
+    ];
+    completion_phrases.iter().any(|phrase| lower.contains(phrase))
+}
+
+/// Generate a continuation message for incomplete todos
+pub fn generate_continuation(
+    incomplete_count: usize,
+    incomplete_summaries: &[String],
+) -> ContinuationMessage {
+    let items_list = incomplete_summaries
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("{}. {}", i + 1, s))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    ContinuationMessage {
+        system_injection: None,
+        user_injection: Some(format!(
+            "You still have {} incomplete todo item(s). Please continue working on them:\n\n{}\n\nDo not stop until all items are completed.",
+            incomplete_count, items_list
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_completion_signal_positive() {
+        assert!(is_completion_signal("I'm done with all the changes."));
+        assert!(is_completion_signal("The task complete successfully."));
+        assert!(is_completion_signal("All done here."));
+        assert!(is_completion_signal("I have finished the implementation."));
+        assert!(is_completion_signal("Work is complete."));
+    }
+
+    #[test]
+    fn test_is_completion_signal_negative() {
+        assert!(!is_completion_signal("Here's the code for the feature."));
+        assert!(!is_completion_signal("Let me implement this next."));
+        assert!(!is_completion_signal("I'll fix the error now."));
+        assert!(!is_completion_signal("Running the tests."));
+    }
+
+    #[test]
+    fn test_is_completion_signal_case_insensitive() {
+        assert!(is_completion_signal("I'M DONE with everything."));
+        assert!(is_completion_signal("TASK COMPLETE."));
+        assert!(is_completion_signal("ALL DONE."));
+        assert!(is_completion_signal("Work Is Complete."));
+    }
+
+    #[test]
+    fn test_generate_continuation_single() {
+        let msg = generate_continuation(1, &["Fix login bug".to_string()]);
+        let text = msg.user_injection.unwrap();
+        assert!(text.contains("1 incomplete todo item(s)"));
+        assert!(text.contains("1. Fix login bug"));
+        assert!(msg.system_injection.is_none());
+    }
+
+    #[test]
+    fn test_generate_continuation_multiple() {
+        let items = vec![
+            "Fix login bug".to_string(),
+            "Add unit tests".to_string(),
+            "Update docs".to_string(),
+        ];
+        let msg = generate_continuation(3, &items);
+        let text = msg.user_injection.unwrap();
+        assert!(text.contains("3 incomplete todo item(s)"));
+        assert!(text.contains("1. Fix login bug"));
+        assert!(text.contains("2. Add unit tests"));
+        assert!(text.contains("3. Update docs"));
+    }
+}
