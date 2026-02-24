@@ -53,6 +53,9 @@ pub fn parse_line_ref(value: &str) -> Option<LineRef> {
     let candidate = candidate.trim_start_matches('L');
     let (line_part, hash_part) = candidate.split_once('#')?;
     let line_number = line_part.trim().parse::<usize>().ok()?;
+    if line_number == 0 {
+        return None;
+    }
     let mut chars = hash_part.trim().chars();
     let h1 = chars.next()?;
     let h2 = chars.next()?;
@@ -127,6 +130,13 @@ mod tests {
         let indented_no_delim_space = parse_line_content("2#AB|    return x");
         assert_eq!(indented_no_delim_space, "    return x");
 
+        let zero_ref = parse_line_content("0#AB | should not strip");
+        assert_eq!(zero_ref, "0#AB | should not strip");
+
+        let zero_ref_no_delim_space = parse_line_content("0#AB|should not strip");
+        assert_eq!(zero_ref_no_delim_space, "0#AB|should not strip");
+
         assert!(parse_line_ref("3#A1").is_none());
+        assert!(parse_line_ref("0#AB").is_none());
     }
 }
