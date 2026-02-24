@@ -318,6 +318,13 @@ impl CommandPalette {
                 slash: Some("/clear".into()),
             },
             PaletteCommand {
+                id: "new".into(),
+                title: "New Session".into(),
+                category: "Navigation".into(),
+                keybind: None,
+                slash: Some("/new".into()),
+            },
+            PaletteCommand {
                 id: "exit".into(),
                 title: "Exit".into(),
                 category: "Navigation".into(),
@@ -338,6 +345,34 @@ impl CommandPalette {
                 category: "Model".into(),
                 keybind: None,
                 slash: Some("/model".into()),
+            },
+            PaletteCommand {
+                id: "render".into(),
+                title: "Render Prompt".into(),
+                category: "Model".into(),
+                keybind: None,
+                slash: Some("/render".into()),
+            },
+            PaletteCommand {
+                id: "think".into(),
+                title: "Toggle Reasoning".into(),
+                category: "Model".into(),
+                keybind: None,
+                slash: Some("/think".into()),
+            },
+            PaletteCommand {
+                id: "reasoning-mode".into(),
+                title: "Set Reasoning Mode".into(),
+                category: "Model".into(),
+                keybind: None,
+                slash: Some("/reasoning-mode".into()),
+            },
+            PaletteCommand {
+                id: "tool-fallback".into(),
+                title: "Tool Fallback Mode".into(),
+                category: "Model".into(),
+                keybind: None,
+                slash: Some("/tool-fallback".into()),
             },
             // Theme
             PaletteCommand {
