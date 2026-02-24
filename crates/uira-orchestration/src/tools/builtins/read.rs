@@ -21,6 +21,12 @@ struct ReadInput {
     offset: Option<usize>,
     #[serde(default)]
     limit: Option<usize>,
+    #[serde(default)]
+    around_line: Option<usize>,
+    #[serde(default)]
+    before: Option<usize>,
+    #[serde(default, rename = "after")]
+    after_lines: Option<usize>,
 }
 
 /// Read tool for reading file contents
@@ -84,6 +90,18 @@ impl Tool for ReadTool {
             .property(
                 "limit",
                 JsonSchema::number().description("Maximum number of lines to read"),
+            )
+            .property(
+                "around_line",
+                JsonSchema::number().description("Center line number (1-based) for reading. When set, reads lines centered around this line. Overrides offset/limit."),
+            )
+            .property(
+                "before",
+                JsonSchema::number().description("Number of lines to include before around_line (default: 5)"),
+            )
+            .property(
+                "after",
+                JsonSchema::number().description("Number of lines to include after around_line (default: 10)"),
             )
             .required(&["file_path"])
     }
@@ -159,9 +177,16 @@ impl Tool for ReadTool {
         })?;
 
         let lines: Vec<&str> = content.lines().collect();
-        let offset = input.offset.unwrap_or(0);
-        let limit = input.limit.unwrap_or(2000);
-
+        let (offset, limit) = if let Some(center) = input.around_line {
+            let before_count = input.before.unwrap_or(5);
+            let after_count = input.after_lines.unwrap_or(10);
+            let center_0based = center.saturating_sub(1); // Convert 1-based to 0-based
+            let start = center_0based.saturating_sub(before_count);
+            let count = before_count + 1 + after_count;
+            (start, count)
+        } else {
+            (input.offset.unwrap_or(0), input.limit.unwrap_or(2000))
+        };
         let selected_lines: Vec<&str> = lines.iter().skip(offset).take(limit).copied().collect();
         let formatted = Self::format_output(&selected_lines, offset);
         let file_hash = hashline::compute_file_hash(&content);
@@ -255,5 +280,164 @@ mod tests {
         assert!(!text.contains(&long_line));
         let expected_prefix = "a".repeat(2000);
         assert!(text.contains(&expected_prefix));
+    }
+
+    #[tokio::test]
+    async fn test_read_around_line() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=10 {
+            writeln!(file, "line {}", i).unwrap();
+        }
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "around_line": 5,
+                    "before": 2,
+                    "after": 3
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        // Center at line 5, before=2, after=3 -> lines 3-8
+        assert!(text.contains("range: L3-L8"));
+        assert!(text.contains("line 3"));
+        assert!(text.contains("line 5"));
+        assert!(text.contains("line 8"));
+        assert!(!text.contains("line 1"));
+        assert!(!text.contains("line 9"));
+    }
+
+    #[tokio::test]
+    async fn test_read_around_line_defaults() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=100 {
+            writeln!(file, "line {}", i).unwrap();
+        }
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "around_line": 50
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        // Center at line 50, before=5 (default), after=10 (default) -> lines 45-60
+        assert!(text.contains("range: L45-L60"));
+        assert!(text.contains("line 45"));
+        assert!(text.contains("line 50"));
+        assert!(text.contains("line 60"));
+        assert!(!text.contains("line 44"));
+        assert!(!text.contains("line 61"));
+    }
+
+    #[tokio::test]
+    async fn test_read_around_line_near_start() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=10 {
+            writeln!(file, "line {}", i).unwrap();
+        }
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "around_line": 2,
+                    "before": 5,
+                    "after": 3
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        // Center at line 2, before=5 would go to -3, saturates to 0
+        // count = 5+1+3 = 9, so we get lines 1 through min(9, 10) = lines 1-9
+        assert!(text.contains("range: L1-L9"));
+        assert!(text.contains("line 1"));
+        assert!(text.contains("line 2"));
+        assert!(text.contains("line 9"));
+        assert!(!text.contains("line 10"));
+    }
+
+    #[tokio::test]
+    async fn test_read_around_line_near_end() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=100 {
+            writeln!(file, "line {}", i).unwrap();
+        }
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "around_line": 98,
+                    "before": 5,
+                    "after": 10
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        // Center at line 98, before=5, after=10 -> lines 93-108, but file ends at 100
+        // So we get lines 93-100
+        assert!(text.contains("line 93"));
+        assert!(text.contains("line 98"));
+        assert!(text.contains("line 100"));
+        assert!(!text.contains("line 92"));
+    }
+
+    #[tokio::test]
+    async fn test_read_around_line_overrides_offset() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 1..=10 {
+            writeln!(file, "line {}", i).unwrap();
+        }
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "around_line": 5,
+                    "before": 1,
+                    "after": 1,
+                    "offset": 0,
+                    "limit": 10
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let text = result.as_text().unwrap();
+        // around_line should override offset/limit -> lines 4-6
+        assert!(text.contains("range: L4-L6"));
+        assert!(text.contains("line 4"));
+        assert!(text.contains("line 5"));
+        assert!(text.contains("line 6"));
+        assert!(!text.contains("line 1"));
+        assert!(!text.contains("line 7"));
     }
 }

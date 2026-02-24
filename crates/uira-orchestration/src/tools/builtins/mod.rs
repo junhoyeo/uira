@@ -5,8 +5,10 @@
 
 mod bash;
 mod edit;
+pub(crate) mod fuzzy;
 mod glob;
 mod grep;
+pub(crate) mod guards;
 pub(crate) mod hashline;
 pub mod memory;
 mod read;
