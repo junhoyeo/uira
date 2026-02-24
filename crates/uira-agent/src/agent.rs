@@ -974,8 +974,22 @@ impl Agent {
                         .await;
                     let summaries: Vec<String> =
                         incomplete_items.iter().map(|t| t.content.clone()).collect();
-                    let continuation =
-                        crate::continuation::generate_continuation(incomplete_items.len(), &summaries);
+                    let continuation = crate::continuation::generate_continuation(
+                        incomplete_items.len(),
+                        &summaries,
+                    );
+
+                    if let Some(system_injection) = continuation.system_injection.clone() {
+                        let system_message = Message::with_blocks(
+                            Role::System,
+                            vec![ContentBlock::text(system_injection)],
+                        );
+                        self.record_message(system_message.clone());
+                        self.session
+                            .context
+                            .add_message(system_message)
+                            .map_err(AgentLoopError::Context)?;
+                    }
 
                     if let Some(injection) = continuation.user_injection {
                         tracing::info!(

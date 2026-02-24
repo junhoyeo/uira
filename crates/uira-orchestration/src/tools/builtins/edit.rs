@@ -7,8 +7,8 @@ use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 
-use super::hashline;
 use super::fuzzy::{find_similar_strings, FindOptions};
+use super::hashline;
 use crate::tools::output::{StandardOutput, ToolOutputFormat, SECTION_DIFF};
 
 #[derive(Debug, Deserialize)]
@@ -86,17 +86,6 @@ impl EditTool {
         lines: &mut Vec<String>,
         edits: &[HashlineEditOp],
     ) -> Result<(), ToolError> {
-        let anchored_edits = edits
-            .iter()
-            .filter(|edit| edit.pos.is_some() || edit.end.is_some())
-            .count();
-        if anchored_edits > 1 {
-            return Err(ToolError::ExecutionFailed {
-                message: "multiple LINE#ID-anchored edits in one request are not supported yet; split into separate Edit calls and re-Read between calls"
-                    .to_string(),
-            });
-        }
-
         for edit in edits {
             let op = edit.op.to_lowercase();
             let replacement = edit
@@ -264,6 +253,12 @@ impl EditTool {
     }
 
     fn apply_legacy_edit(content: &str, input: &LegacyEditInput) -> Result<String, ToolError> {
+        if input.old_string == input.new_string {
+            return Err(ToolError::ExecutionFailed {
+                message: "old_string and new_string are identical".to_string(),
+            });
+        }
+
         if !content.contains(&input.old_string) {
             let msg = Self::format_error_with_suggestions(&input.old_string, content);
             return Err(ToolError::ExecutionFailed { message: msg });
@@ -300,7 +295,7 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Edit a file using hashline-native edits (`edits`) or legacy exact string replacement (`old_string`/`new_string`). Hashline mode currently supports at most one LINE#ID-anchored edit per call."
+        "Edit a file using hashline-native edits (`edits`) or legacy exact string replacement (`old_string`/`new_string`)."
     }
 
     fn schema(&self) -> JsonSchema {
@@ -345,7 +340,7 @@ impl Tool for EditTool {
             .property(
                 "edits",
                 JsonSchema::array(edit_op_schema)
-                    .description("Hashline-native edit operations applied in order (currently supports at most one LINE#ID-anchored edit per call)"),
+                    .description("Hashline-native edit operations applied in order"),
             )
             .property(
                 "old_string",
@@ -398,7 +393,34 @@ impl Tool for EditTool {
         };
 
         let path = Path::new(file_path);
+
         if !path.exists() {
+            if let EditInput::Legacy(legacy) = &input {
+                if legacy.old_string.is_empty() {
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent).await.map_err(|e| {
+                            ToolError::ExecutionFailed {
+                                message: format!("Failed to create parent directories: {}", e),
+                            }
+                        })?;
+                    }
+
+                    fs::write(path, &legacy.new_string).await.map_err(|e| {
+                        ToolError::ExecutionFailed {
+                            message: format!("Failed to write file: {}", e),
+                        }
+                    })?;
+
+                    let diff = TextDiff::from_lines("", &legacy.new_string);
+                    let unified = diff
+                        .unified_diff()
+                        .header(&format!("a/{}", file_path), &format!("b/{}", file_path))
+                        .to_string();
+                    let diff_section = StandardOutput::format_section(SECTION_DIFF, &unified);
+                    return Ok(ToolOutput::text(format!("{}\n{}", file_path, diff_section)));
+                }
+            }
+
             return Err(ToolError::ExecutionFailed {
                 message: format!("File not found: {}", file_path),
             });
@@ -657,7 +679,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_edit_hashline_rejects_multiple_anchored_edits() {
+    async fn test_edit_hashline_allows_multiple_anchored_edits() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(file, "line 1").unwrap();
         writeln!(file, "line 2").unwrap();
@@ -693,11 +715,96 @@ mod tests {
             )
             .await;
 
+        assert!(result.is_ok());
+        let updated = read_text(file.path());
+        assert!(updated.contains("line one"));
+        assert!(updated.contains("line two"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_hashline_accepts_grep_style_anchor() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "alpha").unwrap();
+        writeln!(file, "beta").unwrap();
+
+        let original = read_text(file.path());
+        let file_hash = hashline::compute_file_hash(&original);
+        let line2 = hashline::line_tag(2, "beta");
+        let grep_style = format!("{}:{}", file.path().display(), line2);
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        tool.execute(
+            json!({
+                "file_path": file.path().to_string_lossy(),
+                "expected_file_hash": file_hash,
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": grep_style,
+                        "end": grep_style,
+                        "lines": ["gamma"]
+                    }
+                ]
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+        let updated = read_text(file.path());
+        assert!(updated.contains("gamma"));
+        assert!(!updated.contains("beta"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_legacy_create_missing_file_when_old_string_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("nested/path/new.txt");
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": target.to_string_lossy(),
+                    "old_string": "",
+                    "new_string": "brand new content"
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(read_text(&target), "brand new content");
+        let output = result.as_text().unwrap();
+        assert!(output.starts_with(target.to_string_lossy().as_ref()));
+        assert!(output.contains("======== DIFF ========"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_legacy_rejects_identical_old_and_new() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "same content").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "same",
+                    "new_string": "same"
+                }),
+                &ctx,
+            )
+            .await;
+
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("multiple LINE#ID-anchored edits"));
+            .contains("old_string and new_string are identical"));
     }
 
     #[tokio::test]
@@ -720,10 +827,22 @@ mod tests {
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("SIMILAR STRINGS FOUND"), "error should contain SIMILAR STRINGS FOUND section, got: {err_msg}");
-        assert!(err_msg.contains("Line "), "error should contain line numbers, got: {err_msg}");
-        assert!(err_msg.contains("%"), "error should contain similarity percentages, got: {err_msg}");
-        assert!(err_msg.contains("RECOVERY STRATEGIES"), "error should contain RECOVERY STRATEGIES section, got: {err_msg}");
+        assert!(
+            err_msg.contains("SIMILAR STRINGS FOUND"),
+            "error should contain SIMILAR STRINGS FOUND section, got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("Line "),
+            "error should contain line numbers, got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("%"),
+            "error should contain similarity percentages, got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("RECOVERY STRATEGIES"),
+            "error should contain RECOVERY STRATEGIES section, got: {err_msg}"
+        );
     }
 
     #[tokio::test]
@@ -746,8 +865,14 @@ mod tests {
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("no similar strings found"), "error should say no similar strings found, got: {err_msg}");
-        assert!(err_msg.contains("RECOVERY STRATEGIES"), "error should contain RECOVERY STRATEGIES, got: {err_msg}");
+        assert!(
+            err_msg.contains("no similar strings found"),
+            "error should say no similar strings found, got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("RECOVERY STRATEGIES"),
+            "error should contain RECOVERY STRATEGIES, got: {err_msg}"
+        );
     }
 
     #[tokio::test]
@@ -778,8 +903,11 @@ mod tests {
     #[tokio::test]
     async fn test_edit_fuzzy_unicode_content() {
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, "fn hello_世界() {{ println!(\"hi 😀\"); }}\nfn hello_세상() {{}}")
-            .unwrap();
+        write!(
+            file,
+            "fn hello_世界() {{ println!(\"hi 😀\"); }}\nfn hello_세상() {{}}"
+        )
+        .unwrap();
 
         let tool = EditTool::new();
         let ctx = ToolContext::default();
@@ -848,7 +976,9 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
-        assert!(err_msg.contains("مرحبا") || err_msg.contains("بالعالم") || err_msg.contains("سلام"));
+        assert!(
+            err_msg.contains("مرحبا") || err_msg.contains("بالعالم") || err_msg.contains("سلام")
+        );
     }
 
     #[tokio::test]

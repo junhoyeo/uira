@@ -16,6 +16,7 @@ pub struct ContinuationMessage {
 pub fn is_completion_signal(text: &str) -> bool {
     let lower = text.to_lowercase();
     let completion_phrases = [
+        "<done/>",
         "i'm done",
         "i am done",
         "task complete",
@@ -41,9 +42,6 @@ pub fn check_todo_continuation(is_completion_signal: bool, has_incomplete_todos:
 }
 
 /// Generate a continuation message for incomplete todos
-///
-/// Note: The `system_injection` field is populated but currently not consumed by agent.rs.
-/// It is available for future use when the agent loop is updated to inject system prompts.
 pub fn generate_continuation(
     incomplete_count: usize,
     incomplete_summaries: &[String],
@@ -91,6 +89,7 @@ mod tests {
 
     #[test]
     fn test_is_completion_signal_case_insensitive() {
+        assert!(is_completion_signal("<DONE/>"));
         assert!(is_completion_signal("I'M DONE with everything."));
         assert!(is_completion_signal("TASK COMPLETE."));
         assert!(is_completion_signal("ALL DONE."));

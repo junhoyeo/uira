@@ -52,7 +52,14 @@ pub fn parse_line_ref(value: &str) -> Option<LineRef> {
 
     let candidate = candidate.trim_start_matches('L');
     let (line_part, hash_part) = candidate.split_once('#')?;
-    let line_number = line_part.trim().parse::<usize>().ok()?;
+
+    // Accept plain "12#AB" and grep-style "path/to/file:12#AB" anchors.
+    let line_token = line_part
+        .trim()
+        .rsplit(':')
+        .next()
+        .unwrap_or(line_part.trim());
+    let line_number = line_token.parse::<usize>().ok()?;
     if line_number == 0 {
         return None;
     }
@@ -138,5 +145,9 @@ mod tests {
 
         assert!(parse_line_ref("3#A1").is_none());
         assert!(parse_line_ref("0#AB").is_none());
+
+        let with_path = parse_line_ref("src/main.rs:12#PR|let x = 1;").unwrap();
+        assert_eq!(with_path.line_number, 12);
+        assert_eq!(with_path.hash, ['P', 'R']);
     }
 }

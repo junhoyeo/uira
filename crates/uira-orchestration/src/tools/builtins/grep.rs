@@ -8,6 +8,7 @@ use tokio::fs;
 use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use walkdir::WalkDir;
 
+use super::hashline;
 use crate::tools::{Tool, ToolContext, ToolError};
 
 /// Input for grep tool
@@ -240,9 +241,10 @@ impl Tool for GrepTool {
                     file_has_match = true;
 
                     if output_mode == "content" {
+                        let line_number = line_idx + 1;
                         matches.push(GrepMatch {
                             file: path.display().to_string(),
-                            line_number: line_idx + 1,
+                            line_number,
                             content: line.to_string(),
                         });
 
@@ -272,7 +274,10 @@ impl Tool for GrepTool {
                 } else {
                     matches
                         .iter()
-                        .map(|m| format!("{}:{}:{}", m.file, m.line_number, m.content))
+                        .map(|m| {
+                            let line_ref = hashline::line_tag(m.line_number, &m.content);
+                            format!("{}:{}|{}", m.file, line_ref, m.content)
+                        })
                         .collect::<Vec<_>>()
                         .join("\n")
                 }
@@ -334,7 +339,8 @@ mod tests {
 
         let text = result.as_text().unwrap();
         assert!(text.contains("println"));
-        assert!(text.contains(":2:"));
+        assert!(text.contains(":2#"));
+        assert!(text.contains("|    println!(\"hello\");"));
     }
 
     #[tokio::test]

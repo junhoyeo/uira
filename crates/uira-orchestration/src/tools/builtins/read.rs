@@ -8,6 +8,7 @@ use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 
 use crate::tools::{Tool, ToolContext, ToolError};
 
+use super::guards;
 use super::hashline;
 use crate::tools::output::{StandardOutput, ToolOutputFormat, SECTION_CONTENT, SECTION_METADATA};
 
@@ -125,7 +126,7 @@ impl Tool for ReadTool {
     async fn execute(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let input: ReadInput =
             serde_json::from_value(input).map_err(|e| ToolError::InvalidInput {
@@ -146,21 +147,17 @@ impl Tool for ReadTool {
             });
         }
 
-        let metadata = fs::metadata(path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                message: format!("Failed to read file metadata: {}", e),
-            })?;
-        if metadata.len() > MAX_READ_FILE_BYTES {
+        if guards::should_ignore_file(path, &ctx.cwd) {
             return Err(ToolError::ExecutionFailed {
-                message: format!(
-                    "File too large to read safely ({} bytes > {} bytes): {}",
-                    metadata.len(),
-                    MAX_READ_FILE_BYTES,
-                    input.file_path
-                ),
+                message: format!("File is in an ignored path: {}", input.file_path),
             });
         }
+
+        guards::check_file_guards(path, MAX_READ_FILE_BYTES).map_err(|e| {
+            ToolError::ExecutionFailed {
+                message: e.to_string(),
+            }
+        })?;
 
         let content = fs::read_to_string(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::InvalidData {
@@ -206,7 +203,10 @@ impl Tool for ReadTool {
         ]);
         let metadata_section = StandardOutput::format_section(SECTION_METADATA, &metadata);
         let content_section = StandardOutput::format_section(SECTION_CONTENT, &formatted);
-        let output = format!("{}\n{}\n{}", input.file_path, metadata_section, content_section);
+        let output = format!(
+            "{}\n{}\n{}",
+            input.file_path, metadata_section, content_section
+        );
         Ok(ToolOutput::text(output))
     }
 }
@@ -446,5 +446,23 @@ mod tests {
         assert!(text.contains("line 6"));
         assert!(!text.contains("line 1"));
         assert!(!text.contains("line 7"));
+    }
+
+    #[tokio::test]
+    async fn test_read_rejects_ignored_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let ignored_dir = dir.path().join("node_modules/pkg");
+        std::fs::create_dir_all(&ignored_dir).unwrap();
+        let file_path = ignored_dir.join("index.js");
+        std::fs::write(&file_path, "console.log('x')").unwrap();
+
+        let tool = ReadTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(json!({"file_path": file_path.to_string_lossy()}), &ctx)
+            .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ignored path"));
     }
 }

@@ -7,6 +7,7 @@ pub mod comment_shared;
 pub mod delegate_task;
 pub mod lsp;
 pub mod orchestrator;
+pub mod output;
 pub mod parallel;
 pub mod planning;
 pub mod provider;
@@ -15,7 +16,6 @@ pub mod registry;
 pub mod router;
 pub mod session_manager;
 pub mod traits;
-pub mod output;
 pub mod types;
 
 pub use approval_cache::{
