@@ -302,6 +302,10 @@ uira-agent completion fish >> ~/.config/fish/completions/uira-agent.fish
 | `/help`, `/h`, `/?` | Show available commands |
 | `/models` | Open model selector (keyboard-driven) |
 | `/model <name>` | Switch to a specific model |
+| `/render` | Render conversation as raw prompt text |
+| `/think <on\|off>` | Toggle reasoning mode |
+| `/reasoning-mode <off\|on\|interleaved\|preserved>` | Set reasoning mode |
+| `/tool-fallback <disable\|morphxml\|hermes\|qwen3coder>` | Set tool fallback mode |
 | `/fork [name]` | Branch from the current session point |
 | `/switch <branch>` | Switch to another session branch |
 | `/branches` | List available session branches |
@@ -313,6 +317,7 @@ uira-agent completion fish >> ~/.config/fish/completions/uira-agent.fish
 | `/theme <name>` | Switch theme (default, dark, light, dracula, nord) |
 | `/share [--public] [--description <text>]` | Share session as a GitHub Gist |
 | `/clear` | Clear chat history |
+| `/new` | Alias for `/clear` |
 | `/status`, `/auth` | Show connection status |
 | `/exit`, `/quit`, `/q` | Exit |
 
@@ -321,6 +326,7 @@ uira-agent completion fish >> ~/.config/fish/completions/uira-agent.fish
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
+| `Shift+Enter` | Insert newline |
 | `↑` / `↓` | Navigate input history |
 | `Mouse wheel` | Scroll chat view |
 | `PageUp` / `PageDown` | Scroll chat view |
