@@ -9,6 +9,7 @@ use crate::tools::{Tool, ToolContext, ToolError};
 
 use super::hashline;
 use super::fuzzy::{find_similar_strings, FindOptions};
+use crate::tools::output::{StandardOutput, ToolOutputFormat, SECTION_DIFF};
 
 #[derive(Debug, Deserialize)]
 struct LegacyEditInput {
@@ -450,7 +451,8 @@ impl Tool for EditTool {
             .header(&format!("a/{}", file_path), &format!("b/{}", file_path))
             .to_string();
 
-        Ok(ToolOutput::text(format!("{}\n{}", file_path, unified)))
+        let diff_section = StandardOutput::format_section(SECTION_DIFF, &unified);
+        Ok(ToolOutput::text(format!("{}\n{}", file_path, diff_section)))
     }
 }
 
@@ -487,6 +489,7 @@ mod tests {
         assert_eq!(read_text(file.path()), "Hello, Rust!");
         let output = result.as_text().unwrap();
         assert!(output.starts_with(file.path().to_string_lossy().as_ref()));
+        assert!(output.contains("======== DIFF ========"));
         assert!(output.contains("@@"));
     }
 
@@ -763,7 +766,196 @@ mod tests {
 
         assert_eq!(read_text(file.path()), "Hello, Rust!");
         let output = result.as_text().unwrap();
+        assert!(output.contains("======== DIFF ========"));
         assert!(output.contains("@@"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_unicode_content() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "fn hello_世界() {{ println!(\"hi 😀\"); }}\nfn hello_세상() {{}}")
+            .unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "fn hello_世間() { println!(\"hi 😀\"); }",
+                    "new_string": "fn hello_fixed() {}"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("世界") || err_msg.contains("세상"));
+        assert!(err_msg.contains("😀"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_very_long_old_string() {
+        let mut file = NamedTempFile::new().unwrap();
+        let long_line = format!("prefix_{}_suffix", "a".repeat(540));
+        write!(file, "{}", long_line).unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": format!("prefix_{}_suffix", "a".repeat(539) + "b"),
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("Line 1"));
+        assert!(err_msg.contains("RECOVERY STRATEGIES"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_multiple_similar_matches() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "fn foo_bar() {{}} ").unwrap();
+        writeln!(file, "fn foo_baz() {{}} ").unwrap();
+        writeln!(file, "fn foo_qux() {{}} ").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "fn foo_bat() {}",
+                    "new_string": "fn foo_fixed() {}"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("foo_bar") || err_msg.contains("foo_baz"));
+        assert!(err_msg.matches("Line ").count() >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_multiline_old_string() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "fn alpha() {{").unwrap();
+        writeln!(file, "    println!(\"alpha\");").unwrap();
+        writeln!(file, "}} ").unwrap();
+        writeln!(file, "fn beta() {{").unwrap();
+        writeln!(file, "    println!(\"beta\");").unwrap();
+        writeln!(file, "}} ").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "fn alpha() {\n    println!(\"alphx\");\n}",
+                    "new_string": "fn alpha() {}"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SEARCH TARGET (escaped):"));
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("If the text spans multiple lines"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_whitespace_differences() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "let value = 42;    \n").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "let\tvalue = 42;   ",
+                    "new_string": "let value = 43;"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SEARCH TARGET (escaped):"));
+        assert!(err_msg.contains("→"));
+        assert!(err_msg.contains("···"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_large_file_performance() {
+        let mut file = NamedTempFile::new().unwrap();
+        for i in 0..10_000 {
+            writeln!(file, "line_{i:05}").unwrap();
+        }
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let start = std::time::Instant::now();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "completely_missing_search_target",
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err());
+        assert!(
+            elapsed.as_secs_f64() < 5.0,
+            "fuzzy lookup took too long for 10K lines: {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn test_edit_fuzzy_empty_file() {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "").unwrap();
+
+        let tool = EditTool::new();
+        let ctx = ToolContext::default();
+        let result = tool
+            .execute(
+                json!({
+                    "file_path": file.path().to_string_lossy(),
+                    "old_string": "anything",
+                    "new_string": "replacement"
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SIMILAR STRINGS FOUND"));
+        assert!(err_msg.contains("no similar strings found"));
     }
 
     #[test]

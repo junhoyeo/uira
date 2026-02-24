@@ -9,6 +9,7 @@ use uira_core::{ApprovalRequirement, JsonSchema, SandboxPreference, ToolOutput};
 use crate::tools::{Tool, ToolContext, ToolError};
 
 use super::hashline;
+use crate::tools::output::{StandardOutput, ToolOutputFormat, SECTION_CONTENT, SECTION_METADATA};
 
 const MAX_READ_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_LINE_DISPLAY_CHARS: usize = 2000;
@@ -198,10 +199,14 @@ impl Tool for ReadTool {
         let end_line = offset + selected_lines.len();
 
         // Prepend file path so TUI render_read can extract it
-        let output = format!(
-            "{}\nfile_hash: {}\nrange: L{}-L{}\n{}",
-            input.file_path, file_hash, start_line, end_line, formatted
-        );
+        let range_str = format!("L{}-L{}", start_line, end_line);
+        let metadata = StandardOutput::format_metadata(&[
+            ("file_hash", file_hash.as_str()),
+            ("range", range_str.as_str()),
+        ]);
+        let metadata_section = StandardOutput::format_section(SECTION_METADATA, &metadata);
+        let content_section = StandardOutput::format_section(SECTION_CONTENT, &formatted);
+        let output = format!("{}\n{}\n{}", input.file_path, metadata_section, content_section);
         Ok(ToolOutput::text(output))
     }
 }
@@ -228,6 +233,8 @@ mod tests {
             .unwrap();
 
         let text = result.as_text().unwrap();
+        assert!(text.contains("======== METADATA ========"));
+        assert!(text.contains("======== CONTENT ========"));
         assert!(text.contains("file_hash:"));
         assert!(text.contains("range: L1-L3"));
         assert!(text.contains("1#"));
