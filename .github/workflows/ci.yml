@@ -90,20 +90,31 @@ jobs:
             errors=$((errors + 1))
           fi
 
-          # Check optionalDependencies versions match
+          # Check optionalDependencies alias versions match expected platform-tagged format
           opt_deps=$(node -e "
             const pkg = require('./packages/uira/package.json');
             const deps = pkg.optionalDependencies || {};
-            const mismatched = Object.entries(deps)
-              .filter(([_, v]) => v !== '${cargo_version}')
-              .map(([k, v]) => k + '@' + v);
+            const platformEntries = Object.entries(deps)
+              .filter(([k]) => k.startsWith('@uiradev/uira-'));
+            if (platformEntries.length === 0) {
+              console.log('missing required @uiradev/uira-* optionalDependencies entries');
+              process.exit(1);
+            }
+            const mismatched = platformEntries
+              .map(([k, v]) => {
+                const target = k.slice('@uiradev/uira-'.length);
+                const expected = 'npm:@uiradev/uira@${cargo_version}-' + target;
+                return v === expected ? null : k + '@' + v + ' (expected ' + expected + ')';
+              })
+              .filter(Boolean);
             if (mismatched.length > 0) {
               console.log(mismatched.join(', '));
+              process.exit(1);
             }
           ")
 
           if [[ -n "${opt_deps}" ]]; then
-            echo "::error::optionalDependencies version mismatch: ${opt_deps} (expected ${cargo_version})"
+            echo "::error::optionalDependencies alias mismatch: ${opt_deps}"
             errors=$((errors + 1))
           fi
 

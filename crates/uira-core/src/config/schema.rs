@@ -93,7 +93,6 @@ pub struct UiraConfig {
     #[serde(default)]
     pub sidebar: SidebarConfig,
 
-
     /// Whether to show the startup logo in the chat view (default: true)
     #[serde(default = "default_true")]
     pub show_logo: bool,
@@ -1287,8 +1286,6 @@ pub struct DiscordChannelConfig {
 // Memory Configuration
 // ============================================================================
 
-
-
 // ============================================================================
 // Keybindings Configuration
 // ============================================================================
@@ -1647,7 +1644,9 @@ sidebar:
         assert!(settings.auto_recall);
         assert!(settings.auto_capture);
         assert_eq!(settings.max_recall_results, 5);
-        assert!(settings.container_tag.starts_with("project-") || settings.container_tag == "default");
+        assert!(
+            settings.container_tag.starts_with("project-") || settings.container_tag == "default"
+        );
     }
 
     #[test]

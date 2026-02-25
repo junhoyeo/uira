@@ -10,9 +10,9 @@ use uira_memory::{
 };
 use uira_orchestration::{
     register_builtins_with_todos, AgentExecutor, ApprovalCache, AstToolProvider,
-    DelegationToolProvider, LspToolProvider, McpToolProvider, MemoryForgetTool,
-    MemoryProfileTool, MemorySearchTool, MemoryStoreTool, TodoStore, ToolCallRuntime,
-    ToolContext, ToolOrchestrator, ToolRouter,
+    DelegationToolProvider, LspToolProvider, McpToolProvider, MemoryForgetTool, MemoryProfileTool,
+    MemorySearchTool, MemoryStoreTool, TodoStore, ToolCallRuntime, ToolContext, ToolOrchestrator,
+    ToolRouter,
 };
 use uira_providers::ModelClient;
 use uira_security::build_evaluator_from_rules;

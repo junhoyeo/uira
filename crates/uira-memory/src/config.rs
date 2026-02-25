@@ -32,7 +32,6 @@ pub struct MemoryConfig {
     #[serde(default = "default_max_recall_results")]
     pub max_recall_results: usize,
 
-
     #[serde(default = "default_recall_min_query_length")]
     pub recall_min_query_length: usize,
 

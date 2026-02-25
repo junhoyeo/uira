@@ -152,10 +152,16 @@ impl Tool for WriteTool {
         let diff = TextDiff::from_lines(&old_content, &input.content);
         let unified = diff
             .unified_diff()
-            .header(&format!("a/{}", input.file_path), &format!("b/{}", input.file_path))
+            .header(
+                &format!("a/{}", input.file_path),
+                &format!("b/{}", input.file_path),
+            )
             .to_string();
 
-        Ok(ToolOutput::text(format!("{}\n{}", input.file_path, unified)))
+        Ok(ToolOutput::text(format!(
+            "{}\n{}",
+            input.file_path, unified
+        )))
     }
 }
 

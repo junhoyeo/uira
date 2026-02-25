@@ -3,11 +3,12 @@
 //! This module provides comment detection for tools that write source code,
 //! warning agents when they add comments or docstrings.
 
-use std::collections::HashSet;
 use std::path::Path;
 use uira_comment_checker::{
     format_hook_message, CommentDetector, CommentInfo, FilterChain, LanguageRegistry,
 };
+
+use crate::tools::comment_shared;
 
 /// Tools that write/modify source files
 const CHECKABLE_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit"];
@@ -74,23 +75,33 @@ impl CommentChecker {
             .or_else(|| tool_input.get("filePath"))
             .and_then(|v| v.as_str())?;
 
+        if !self.is_supported_file(file_path) {
+            return None;
+        }
+
         match tool_name {
             "Write" | "NotebookEdit" => {
                 let content = tool_input.get("content").and_then(|v| v.as_str())?;
                 self.check_write(file_path, content)
             }
             "Edit" => {
-                let old_string = tool_input
-                    .get("old_string")
-                    .or_else(|| tool_input.get("oldString"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
                 let new_string = tool_input
                     .get("new_string")
                     .or_else(|| tool_input.get("newString"))
-                    .and_then(|v| v.as_str())?;
+                    .and_then(|v| v.as_str());
 
-                self.check_edit(file_path, old_string, new_string)
+                if let Some(new_string) = new_string {
+                    let old_string = tool_input
+                        .get("old_string")
+                        .or_else(|| tool_input.get("oldString"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    return self.check_edit(file_path, old_string, new_string);
+                }
+
+                let edits = tool_input.get("edits").and_then(|v| v.as_array())?;
+                self.format_if_any(self.detect_comments_from_edit_lines(file_path, edits))
             }
             "MultiEdit" => {
                 let edits = tool_input.get("edits").and_then(|v| v.as_array())?;
@@ -110,8 +121,15 @@ impl CommentChecker {
                     if let Some(new_str) = new_string {
                         let old_comments = self.detector.detect(old_string, file_path, true);
                         let new_comments = self.detector.detect(new_str, file_path, true);
-                        let only_new = Self::filter_new_comments(&old_comments, new_comments);
+                        let only_new =
+                            comment_shared::filter_new_comments(&old_comments, new_comments);
                         all_comments.extend(only_new);
+                    } else {
+                        all_comments.extend(comment_shared::detect_comments_from_edit_lines(
+                            &self.detector,
+                            file_path,
+                            std::slice::from_ref(edit),
+                        ));
                     }
                 }
 
@@ -132,23 +150,11 @@ impl CommentChecker {
         self.registry.is_supported(&ext)
     }
 
-    fn build_comment_text_set(comments: &[CommentInfo]) -> HashSet<String> {
-        comments.iter().map(|c| c.normalized_text()).collect()
-    }
-
     fn filter_new_comments(
         old_comments: &[CommentInfo],
         new_comments: Vec<CommentInfo>,
     ) -> Vec<CommentInfo> {
-        if old_comments.is_empty() {
-            return new_comments;
-        }
-
-        let old_set = Self::build_comment_text_set(old_comments);
-        new_comments
-            .into_iter()
-            .filter(|c| !old_set.contains(&c.normalized_text()))
-            .collect()
+        comment_shared::filter_new_comments(old_comments, new_comments)
     }
 
     fn format_if_any(&self, comments: Vec<CommentInfo>) -> Option<String> {
@@ -168,6 +174,14 @@ impl CommentChecker {
         }
 
         Some(format_hook_message(&filtered, None))
+    }
+
+    fn detect_comments_from_edit_lines(
+        &self,
+        file_path: &str,
+        edits: &[serde_json::Value],
+    ) -> Vec<CommentInfo> {
+        comment_shared::detect_comments_from_edit_lines(&self.detector, file_path, edits)
     }
 }
 
@@ -230,5 +244,65 @@ mod tests {
             }),
         );
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_check_tool_result_hashline_edit_lines() {
+        let checker = CommentChecker::new();
+        let result = checker.check_tool_result(
+            "Edit",
+            &json!({
+                "file_path": "test.py",
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": "1#ZZ",
+                        "end": "1#ZZ",
+                        "lines": ["1#ZZ | # hashline comment"]
+                    }
+                ]
+            }),
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_non_hashline_pipe_text_not_stripped_for_detection() {
+        let checker = CommentChecker::new();
+        let result = checker.check_tool_result(
+            "Edit",
+            &json!({
+                "file_path": "test.py",
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": "1#ZZ",
+                        "end": "1#ZZ",
+                        "lines": ["value = a | b  # trailing comment"]
+                    }
+                ]
+            }),
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_hashline_edit_ignored_for_unsupported_file() {
+        let checker = CommentChecker::new();
+        let result = checker.check_tool_result(
+            "Edit",
+            &json!({
+                "file_path": "README.md",
+                "edits": [
+                    {
+                        "op": "replace",
+                        "pos": "1#ZZ",
+                        "end": "1#ZZ",
+                        "lines": ["1#ZZ | # markdown heading"]
+                    }
+                ]
+            }),
+        );
+        assert!(result.is_none());
     }
 }

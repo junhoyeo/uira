@@ -815,23 +815,55 @@ fn spawn_approval_handler(mut approval_rx: ApprovalReceiver, event_tx: mpsc::Sen
             let diff_preview = {
                 let tool = pending.tool_name.to_lowercase();
                 if tool.contains("edit") || tool.contains("write") {
+                    // Get file path for potential file content read
+                    let file_path = pending
+                        .input
+                        .get("file_path")
+                        .or_else(|| pending.input.get("filePath"))
+                        .and_then(|v| v.as_str());
+
+                    // For Edit: use old_string/oldText from input
+                    // For Write: read existing file content if available
                     let before = pending
                         .input
                         .get("old_string")
                         .or_else(|| pending.input.get("oldText"))
-                        .and_then(|v| v.as_str());
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| {
+                            // For Write tool, read existing file content for accurate diff
+                            if tool.contains("write") {
+                                file_path.and_then(|path| {
+                                    // Expand tilde in path
+                                    let expanded = if path == "~" {
+                                        std::env::var("HOME").ok().map(PathBuf::from)
+                                    } else if let Some(relative) = path.strip_prefix("~/") {
+                                        std::env::var("HOME")
+                                            .ok()
+                                            .map(|h| PathBuf::from(h).join(relative))
+                                    } else {
+                                        Some(PathBuf::from(path))
+                                    };
+                                    expanded.and_then(|p| std::fs::read_to_string(p).ok())
+                                })
+                            } else {
+                                None
+                            }
+                        });
                     let after = pending
                         .input
                         .get("new_string")
                         .or_else(|| pending.input.get("newText"))
                         .or_else(|| pending.input.get("content"))
                         .and_then(|v| v.as_str());
-                    match (before, after) {
+
+                    match (before.as_deref(), after) {
                         (Some(b), Some(a)) => {
                             let diff = TextDiff::from_lines(b, a);
                             Some(diff.unified_diff().header("before", "after").to_string())
                         }
                         (None, Some(content)) => {
+                            // New file - show all content as additions
                             let diff = TextDiff::from_lines("", content);
                             Some(diff.unified_diff().header("before", "after").to_string())
                         }
@@ -1102,6 +1134,22 @@ impl App {
                 description: "Switch model",
             },
             SlashCommand {
+                command: "render",
+                description: "Render conversation as raw prompt text",
+            },
+            SlashCommand {
+                command: "think",
+                description: "Toggle reasoning mode",
+            },
+            SlashCommand {
+                command: "reasoning-mode",
+                description: "Set reasoning mode",
+            },
+            SlashCommand {
+                command: "tool-fallback",
+                description: "Set tool fallback mode",
+            },
+            SlashCommand {
                 command: "theme",
                 description: "Theme management",
             },
@@ -1180,6 +1228,10 @@ impl App {
             SlashCommand {
                 command: "clear",
                 description: "Clear chat",
+            },
+            SlashCommand {
+                command: "new",
+                description: "Alias for clear chat",
             },
             SlashCommand {
                 command: "undo",
@@ -1648,9 +1700,12 @@ impl App {
             if self.show_logo {
                 let chat_area = chunks[0];
                 let max_logo_h = chat_area.height / 2;
-                let lines =
-                    self.logo_image
-                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent, self.theme.bg);
+                let lines = self.logo_image.render_as_lines(
+                    chat_area.width,
+                    max_logo_h,
+                    self.theme.accent,
+                    self.theme.bg,
+                );
                 self.chat_view.set_logo_lines(lines);
             } else if !self.chat_view.logo_lines.is_empty() {
                 self.chat_view.set_logo_lines(Vec::new());
@@ -1678,9 +1733,12 @@ impl App {
             if self.show_logo {
                 let chat_area = chunks[0];
                 let max_logo_h = chat_area.height / 2;
-                let lines =
-                    self.logo_image
-                        .render_as_lines(chat_area.width, max_logo_h, self.theme.accent, self.theme.bg);
+                let lines = self.logo_image.render_as_lines(
+                    chat_area.width,
+                    max_logo_h,
+                    self.theme.accent,
+                    self.theme.bg,
+                );
                 self.chat_view.set_logo_lines(lines);
             } else if !self.chat_view.logo_lines.is_empty() {
                 self.chat_view.set_logo_lines(Vec::new());
@@ -2968,6 +3026,15 @@ impl App {
                     self.refresh_autocomplete();
                 }
                 KeyCode::Enter => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        let byte_index =
+                            Self::char_index_to_byte_index(&self.input, self.cursor_pos);
+                        self.input.insert(byte_index, '\n');
+                        self.cursor_pos += 1;
+                        self.refresh_autocomplete();
+                        return KeyAction::None;
+                    }
+
                     if self.autocomplete_state.is_active()
                         && self.autocomplete_state.mode == AutocompleteMode::Slash
                         && self.input.starts_with('/')
@@ -3918,6 +3985,19 @@ impl App {
                     ("/auth, /status".into(), "Show current status".into()),
                     ("/models".into(), "List available models".into()),
                     ("/model <name>".into(), "Switch to a different model".into()),
+                    (
+                        "/render".into(),
+                        "Render conversation as raw prompt text".into(),
+                    ),
+                    ("/think [on|off]".into(), "Toggle reasoning mode".into()),
+                    (
+                        "/reasoning-mode [off|on|interleaved|preserved]".into(),
+                        "Set reasoning mode".into(),
+                    ),
+                    (
+                        "/tool-fallback [mode]".into(),
+                        "Set tool fallback mode (disable|morphxml|hermes|qwen3coder)".into(),
+                    ),
                     ("/agents".into(), "Open agent dialog".into()),
                     ("/sessions".into(), "Open sessions dialog".into()),
                     ("/mcps".into(), "Open MCP dialog".into()),
@@ -3946,6 +4026,7 @@ impl App {
                     ("/wrap".into(), "Toggle diff wrap mode".into()),
                     ("/share".into(), "Share session to GitHub Gist".into()),
                     ("/clear".into(), "Clear chat history".into()),
+                    ("/new".into(), "Alias for /clear".into()),
                 ])
                 .with_title("Commands");
                 self.dialog_stack.show(Box::new(help));
@@ -3962,12 +4043,170 @@ impl App {
                     None,
                 );
             }
-            "/clear" => {
+            "/clear" | "/new" => {
                 self.chat_view.messages.clear();
                 self.pending_images.clear();
                 self.message_queue.clear();
                 self.redo_stack.clear();
                 self.status = "Chat cleared".to_string();
+            }
+            "/render" => {
+                let rendered = self
+                    .chat_view
+                    .messages
+                    .iter()
+                    .map(|m| format!("{}: {}", role_title(&m.role), m.content))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                let output = if rendered.trim().is_empty() {
+                    "(empty conversation)".to_string()
+                } else {
+                    rendered
+                };
+                self.chat_view
+                    .messages
+                    .push(ChatMessage::new("system", output));
+            }
+            "/think" => {
+                let arg = parts.get(1).copied();
+                let current = self.kv_store.get("reasoning_mode", false);
+                let Some(raw) = arg else {
+                    let current_mode = self.kv_store.get(
+                        "reasoning_mode_value",
+                        if current { "on" } else { "off" }.to_string(),
+                    );
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "system",
+                        format!(
+                            "Reasoning is currently {}.\nUsage: /think <on|off>",
+                            current_mode
+                        ),
+                    ));
+                    return;
+                };
+
+                let next = match raw {
+                    "on" | "enable" | "true" => true,
+                    "off" | "disable" | "false" => false,
+                    _ => {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Invalid argument: {}. Use 'on' or 'off'.", raw),
+                        ));
+                        return;
+                    }
+                };
+
+                if next == current {
+                    self.chat_view.messages.push(ChatMessage::new(
+                        "system",
+                        format!(
+                            "Reasoning is already {}",
+                            if current { "enabled" } else { "disabled" }
+                        ),
+                    ));
+                    return;
+                }
+                self.kv_store.set("reasoning_mode", next);
+                self.kv_store.set(
+                    "reasoning_mode_value",
+                    if next { "on" } else { "off" }.to_string(),
+                );
+                self.chat_view.messages.push(ChatMessage::new(
+                    "system",
+                    format!(
+                        "Reasoning mode {}",
+                        if next { "enabled" } else { "disabled" }
+                    ),
+                ));
+            }
+            "/reasoning-mode" => {
+                const MODES: [&str; 4] = ["off", "on", "interleaved", "preserved"];
+                let arg = parts.get(1).copied();
+                let current = self.kv_store.get("reasoning_mode_value", "off".to_string());
+
+                match arg {
+                    None => {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!(
+                                "Reasoning mode: {}\nUsage: /reasoning-mode <{}>",
+                                current,
+                                MODES.join("|")
+                            ),
+                        ));
+                    }
+                    Some(raw) => {
+                        if !MODES.contains(&raw) {
+                            self.chat_view.messages.push(ChatMessage::new(
+                                "system",
+                                format!("Invalid mode: {}. Use one of: {}", raw, MODES.join("|")),
+                            ));
+                            return;
+                        }
+                        if raw == current {
+                            self.chat_view.messages.push(ChatMessage::new(
+                                "system",
+                                format!("Already using reasoning mode: {}", raw),
+                            ));
+                            return;
+                        }
+
+                        self.kv_store.set("reasoning_mode_value", raw.to_string());
+                        self.kv_store.set("reasoning_mode", raw != "off");
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Reasoning mode set to: {}", raw),
+                        ));
+                    }
+                }
+            }
+            "/tool-fallback" => {
+                const MODES: [&str; 4] = ["disable", "morphxml", "hermes", "qwen3coder"];
+                let arg = parts.get(1).copied();
+                let current = self
+                    .kv_store
+                    .get("tool_fallback_mode", "disable".to_string());
+
+                match arg {
+                    None => {
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!(
+                                "Tool fallback mode: {}\nUsage: /tool-fallback <{}>",
+                                current,
+                                MODES.join("|")
+                            ),
+                        ));
+                    }
+                    Some(raw) => {
+                        let normalized = match raw {
+                            "on" => "morphxml",
+                            "off" => "disable",
+                            _ => raw,
+                        };
+                        if !MODES.contains(&normalized) {
+                            self.chat_view.messages.push(ChatMessage::new(
+                                "system",
+                                format!("Invalid mode: {}. Use one of: {}", raw, MODES.join("|")),
+                            ));
+                            return;
+                        }
+                        if normalized == current {
+                            self.chat_view.messages.push(ChatMessage::new(
+                                "system",
+                                format!("Already using tool fallback mode: {}", normalized),
+                            ));
+                            return;
+                        }
+                        self.kv_store
+                            .set("tool_fallback_mode", normalized.to_string());
+                        self.chat_view.messages.push(ChatMessage::new(
+                            "system",
+                            format!("Tool fallback mode set to: {}", normalized),
+                        ));
+                    }
+                }
             }
             "/undo" => {
                 self.undo_last_message_pair();
@@ -4352,7 +4591,12 @@ impl App {
             "exit" => self.handle_slash_command("/exit"),
             "models" => self.handle_slash_command("/models"),
             "model" => self.handle_slash_command("/model"),
+            "render" => self.handle_slash_command("/render"),
+            "think" => self.handle_slash_command("/think"),
+            "reasoning-mode" => self.handle_slash_command("/reasoning-mode"),
+            "tool-fallback" => self.handle_slash_command("/tool-fallback"),
             "theme_list" => self.handle_slash_command("/theme"),
+            "new" => self.handle_slash_command("/new"),
             "fork" => self.handle_slash_command("/fork"),
             "switch" => self.handle_slash_command("/switch"),
             "branches" => self.handle_slash_command("/branches"),
@@ -5534,6 +5778,59 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
 
         assert!(app.command_palette.is_active());
+    }
+
+    #[test]
+    fn shift_enter_inserts_newline_in_input() {
+        let mut app = App::new();
+        app.input = "hello".to_string();
+        app.cursor_pos = app.input.chars().count();
+
+        let action = app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+
+        assert_eq!(action, KeyAction::None);
+        assert_eq!(app.input, "hello\n");
+        assert_eq!(app.cursor_pos, 6);
+    }
+
+    #[test]
+    fn think_without_args_reports_status_and_usage() {
+        let mut app = App::new();
+
+        app.handle_slash_command("/think");
+
+        let last = app
+            .chat_view
+            .messages
+            .last()
+            .expect("expected system message");
+        assert_eq!(last.role, "system");
+        assert!(last.content.contains("Reasoning is currently"));
+        assert!(last.content.contains("Usage: /think <on|off>"));
+    }
+
+    #[test]
+    fn reasoning_mode_command_sets_and_reports_modes() {
+        let mut app = App::new();
+
+        app.handle_slash_command("/reasoning-mode interleaved");
+        let last = app
+            .chat_view
+            .messages
+            .last()
+            .expect("expected system message");
+        assert_eq!(last.role, "system");
+        assert!(last.content.contains("Reasoning mode set to: interleaved"));
+        let mode = app.kv_store.get("reasoning_mode_value", "off".to_string());
+        assert_eq!(mode, "interleaved");
+
+        app.handle_slash_command("/reasoning-mode");
+        let last = app
+            .chat_view
+            .messages
+            .last()
+            .expect("expected system message");
+        assert!(last.content.contains("Reasoning mode: interleaved"));
     }
 
     #[test]

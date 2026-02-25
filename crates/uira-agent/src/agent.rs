@@ -70,6 +70,12 @@ pub struct Agent {
     command_rx: Option<CommandReceiver>,
     keyword_detector: KeywordDetectorHook,
     last_tool_output: Option<String>,
+    /// Whether todo continuation injection is enabled
+    continuation_enabled: bool,
+    /// Maximum number of continuation injections per run
+    max_continuations: usize,
+    /// Number of continuation injections in the current run
+    continuation_count: usize,
 }
 
 impl Agent {
@@ -99,6 +105,9 @@ impl Agent {
             command_rx: None,
             keyword_detector: KeywordDetectorHook::new(),
             last_tool_output: None,
+            continuation_enabled: true,
+            max_continuations: 3,
+            continuation_count: 0,
         }
     }
 
@@ -938,22 +947,77 @@ impl Agent {
 
                 self.state = AgentState::Thinking;
             } else {
-                // No tool calls, we're done
+                // No tool calls — check for todo continuation before stopping
+                let response_text = response.text();
+                let output = if response_text.is_empty() {
+                    self.last_tool_output.take().unwrap_or_default()
+                } else {
+                    response_text
+                };
+
+                // Check if we should inject a continuation message
+                if self.continuation_enabled
+                    && self.continuation_count < self.max_continuations
+                    && crate::continuation::is_completion_signal(&output)
+                    && self
+                        .session
+                        .todo_store
+                        .has_incomplete(&self.session.id.to_string())
+                        .await
+                {
+                    self.continuation_count += 1;
+
+                    let incomplete_items = self
+                        .session
+                        .todo_store
+                        .incomplete_items(&self.session.id.to_string())
+                        .await;
+                    let summaries: Vec<String> =
+                        incomplete_items.iter().map(|t| t.content.clone()).collect();
+                    let continuation = crate::continuation::generate_continuation(
+                        incomplete_items.len(),
+                        &summaries,
+                    );
+
+                    if let Some(system_injection) = continuation.system_injection.clone() {
+                        let system_message = Message::with_blocks(
+                            Role::System,
+                            vec![ContentBlock::text(system_injection)],
+                        );
+                        self.record_message(system_message.clone());
+                        self.session
+                            .context
+                            .add_message(system_message)
+                            .map_err(AgentLoopError::Context)?;
+                    }
+
+                    if let Some(injection) = continuation.user_injection {
+                        tracing::info!(
+                            "Todo continuation {}/{}: injecting prompt for {} incomplete items",
+                            self.continuation_count,
+                            self.max_continuations,
+                            incomplete_items.len()
+                        );
+
+                        let continuation_message =
+                            Message::with_blocks(Role::User, vec![ContentBlock::text(injection)]);
+                        self.record_message(continuation_message.clone());
+                        self.session
+                            .context
+                            .add_message(continuation_message)
+                            .map_err(AgentLoopError::Context)?;
+
+                        self.state = AgentState::Thinking;
+                        continue;
+                    }
+                }
+
+                // No continuation needed — complete normally
                 self.state = AgentState::Complete;
                 self.emit_event(ThreadEvent::ThreadCompleted {
                     usage: self.session.usage.clone(),
                 })
                 .await;
-
-                let output = {
-                    let text = response.text();
-                    if text.is_empty() {
-                        self.last_tool_output.take().unwrap_or_default()
-                    } else {
-                        text
-                    }
-                };
-
                 return Ok(ExecutionResult::success(
                     output,
                     self.session.turn,

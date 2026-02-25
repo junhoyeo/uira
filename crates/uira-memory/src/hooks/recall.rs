@@ -261,7 +261,10 @@ mod tests {
         assert!(result.is_none());
 
         // Query at or above threshold should proceed (may return None if no results)
-        let result = hook.recall("this is a long enough query text").await.unwrap();
+        let result = hook
+            .recall("this is a long enough query text")
+            .await
+            .unwrap();
         // No assertion on Some/None since we have no data, just verifying it doesn't early-return
     }
 
