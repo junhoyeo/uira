@@ -212,6 +212,17 @@ impl Agent {
             AgentCommand::BranchTree { response_tx } => {
                 let _ = response_tx.send(Ok(self.render_branch_tree()));
             }
+            AgentCommand::RenderPrompt { response_tx } => {
+                let messages = self.session.context.messages();
+                let tool_specs = self.session.tool_specs();
+                let result = self
+                    .session
+                    .client
+                    .render_request(messages, &tool_specs)
+                    .await
+                    .map_err(|e| e.to_string());
+                let _ = response_tx.send(result);
+            }
         }
     }
 
@@ -748,6 +759,7 @@ impl Agent {
         &mut self,
         message: Message,
     ) -> Result<ExecutionResult, AgentLoopError> {
+        self.reset_continuation_state();
         self.state = AgentState::Thinking;
 
         let session_span =
@@ -829,6 +841,7 @@ impl Agent {
     }
 
     pub async fn run(&mut self, prompt: &str) -> Result<ExecutionResult, AgentLoopError> {
+        self.reset_continuation_state();
         self.state = AgentState::Thinking;
 
         let session_span =
@@ -866,6 +879,10 @@ impl Agent {
         prompt: String,
     ) -> Result<ExecutionResult, AgentLoopError> {
         self.run(&prompt).await
+    }
+
+    fn reset_continuation_state(&mut self) {
+        self.continuation_count = 0;
     }
 
     async fn run_turn_loop(&mut self) -> Result<ExecutionResult, AgentLoopError> {
