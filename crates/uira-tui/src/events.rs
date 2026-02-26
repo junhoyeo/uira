@@ -9,6 +9,7 @@ pub enum AppEvent {
     UserInput(String),
     ApprovalRequest(crate::views::ApprovalRequest),
     TodoUpdated(Vec<TodoItem>),
+    Status(String),
     Info(String),
     AgentChanged(String),
     ThemeChangeRequested(String),

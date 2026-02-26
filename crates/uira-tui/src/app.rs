@@ -35,8 +35,8 @@ use uira_core::{
     TodoItem, TodoPriority, TodoStatus,
 };
 use uira_providers::{
-    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
-    ProviderConfig, SecretString,
+    AnthropicClient, FriendliClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient,
+    OpenCodeClient, ProviderConfig, SecretString,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -801,6 +801,20 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
             };
 
             OpenCodeClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "friendliai" => {
+            let api_key = std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from);
+
+            let config = ProviderConfig {
+                provider: Provider::FriendliAI,
+                api_key,
+                model: model.to_string(),
+                ..Default::default()
+            };
+
+            FriendliClient::new(config)
                 .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
                 .map_err(|e| e.to_string())
         }
@@ -4051,21 +4065,52 @@ impl App {
                 self.status = "Chat cleared".to_string();
             }
             "/render" => {
-                let rendered = self
-                    .chat_view
-                    .messages
-                    .iter()
-                    .map(|m| format!("{}: {}", role_title(&m.role), m.content))
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                let output = if rendered.trim().is_empty() {
-                    "(empty conversation)".to_string()
+                let is_friendli_model = self
+                    .current_model
+                    .as_deref()
+                    .map(|model| model.to_ascii_lowercase().starts_with("friendliai/"))
+                    .unwrap_or(false);
+
+                if !is_friendli_model {
+                    self.status = "/render is only available with FriendliAI models. Switch to a FriendliAI model to use prompt rendering.".to_string();
+                    return;
+                }
+
+                if let Some(ref tx) = self.agent_command_tx {
+                    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                    let tx = tx.clone();
+                    let event_tx = self.event_tx.clone();
+                    tokio::spawn(async move {
+                        if tx
+                            .send(AgentCommand::RenderPrompt {
+                                response_tx: resp_tx,
+                            })
+                            .await
+                            .is_ok()
+                        {
+                            match resp_rx.await {
+                                Ok(Ok(rendered_text)) => {
+                                    let _ = event_tx.send(AppEvent::Info(rendered_text)).await;
+                                }
+                                Ok(Err(err)) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Status(format!("Render failed: {}", err)))
+                                        .await;
+                                }
+                                Err(_) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Status(
+                                            "Render request cancelled".to_string(),
+                                        ))
+                                        .await;
+                                }
+                            }
+                        }
+                    });
+                    self.status = "Rendering prompt...".to_string();
                 } else {
-                    rendered
-                };
-                self.chat_view
-                    .messages
-                    .push(ChatMessage::new("system", output));
+                    self.status = "/render is only available with FriendliAI models. Switch to a FriendliAI model to use prompt rendering.".to_string();
+                }
             }
             "/think" => {
                 let arg = parts.get(1).copied();
@@ -4675,6 +4720,9 @@ impl App {
             }
             AppEvent::TodoUpdated(todos) => {
                 self.todos = todos;
+            }
+            AppEvent::Status(message) => {
+                self.status = message;
             }
             AppEvent::Info(message) => {
                 self.status = message.clone();

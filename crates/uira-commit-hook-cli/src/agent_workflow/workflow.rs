@@ -107,6 +107,7 @@ impl AgentWorkflow {
             max_retries: Some(3),
             enable_thinking: false,
             thinking_budget: None,
+            friendliai: None,
         };
 
         let client = ModelClientBuilder::new()

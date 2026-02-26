@@ -13,6 +13,7 @@ pub enum Provider {
     Google,
     Ollama,
     OpenCode,
+    FriendliAI,
     OpenRouter,
     Custom,
 }
@@ -25,6 +26,7 @@ impl std::fmt::Display for Provider {
             Self::Google => write!(f, "google"),
             Self::Ollama => write!(f, "ollama"),
             Self::OpenCode => write!(f, "opencode"),
+            Self::FriendliAI => write!(f, "friendliai"),
             Self::OpenRouter => write!(f, "openrouter"),
             Self::Custom => write!(f, "custom"),
         }
