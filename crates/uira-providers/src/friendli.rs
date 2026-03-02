@@ -26,6 +26,92 @@ pub enum ModelType {
     Dedicated,
 }
 
+/// Per-model reasoning configuration matching the reference implementation's friendli-models.ts
+struct FriendliReasoningConfig {
+    /// Toggle key for enabling reasoning (e.g. "enable_thinking"), None = always-reasoning model
+    reasoning_toggle: Option<&'static str>,
+    /// Toggle key for preserved reasoning (e.g. "clear_thinking")
+    preserved_toggle: Option<&'static str>,
+    /// Field name for interleaved reasoning content (e.g. "reasoning_content")
+    #[allow(dead_code)]
+    interleaved_field: &'static str,
+    /// Value to set reasoning_toggle when enabling reasoning
+    reasoning_on: bool,
+    /// Value to set preserved_toggle when enabling preserved mode
+    preserved_on: bool,
+}
+
+/// Default reasoning config matching reference's DEFAULT_REASONING_CONFIG
+const DEFAULT_REASONING_CONFIG: FriendliReasoningConfig = FriendliReasoningConfig {
+    reasoning_toggle: Some("enable_thinking"),
+    preserved_toggle: Some("clear_thinking"),
+    interleaved_field: "reasoning_content",
+    reasoning_on: true,
+    preserved_on: false,
+};
+
+/// Always-reasoning config for models like MiniMax that don't have a toggle
+const ALWAYS_REASONING_CONFIG: FriendliReasoningConfig = FriendliReasoningConfig {
+    reasoning_toggle: None,
+    preserved_toggle: Some("clear_thinking"),
+    interleaved_field: "reasoning_content",
+    reasoning_on: true,
+    preserved_on: false,
+};
+
+/// Get reasoning config for a model, matching reference's FRIENDLI_MODELS registry
+fn get_reasoning_config(model_id: &str) -> &'static FriendliReasoningConfig {
+    match model_id {
+        // Always-reasoning models (reasoning_toggle = null in reference)
+        "MiniMaxAI/MiniMax-M2.5" | "MiniMaxAI/MiniMax-M2.1" => &ALWAYS_REASONING_CONFIG,
+        // Default reasoning config for all other models
+        _ => &DEFAULT_REASONING_CONFIG,
+    }
+}
+
+/// Build chat_template_kwargs from model ID and reasoning mode.
+/// Matches reference implementation's buildFriendliChatTemplateKwargs()
+fn build_chat_template_kwargs(
+    model_id: &str,
+    reasoning_mode: &str,
+) -> Option<HashMap<String, bool>> {
+    if reasoning_mode == "off" {
+        return None;
+    }
+
+    let config = get_reasoning_config(model_id);
+    let mut kwargs = HashMap::new();
+
+    match reasoning_mode {
+        "on" => {
+            if let Some(toggle) = config.reasoning_toggle {
+                kwargs.insert(toggle.to_string(), config.reasoning_on);
+            }
+        }
+        "interleaved" => {
+            if let Some(toggle) = config.reasoning_toggle {
+                kwargs.insert(toggle.to_string(), config.reasoning_on);
+            }
+            // Interleaved mode: reasoning content appears inline
+            // No additional kwargs needed beyond enabling reasoning
+        }
+        "preserved" => {
+            if let Some(toggle) = config.reasoning_toggle {
+                kwargs.insert(toggle.to_string(), config.reasoning_on);
+            }
+            if let Some(preserved) = config.preserved_toggle {
+                kwargs.insert(preserved.to_string(), config.preserved_on);
+            }
+        }
+        _ => return None,
+    }
+
+    if kwargs.is_empty() {
+        None
+    } else {
+        Some(kwargs)
+    }
+}
 pub struct FriendliClient {
     client: Client,
     config: ProviderConfig,
@@ -140,7 +226,11 @@ impl FriendliClient {
             },
             stream: Some(stream),
             temperature: self.config.temperature,
-            chat_template_kwargs: None,
+            chat_template_kwargs: self
+                .config
+                .reasoning_mode
+                .as_deref()
+                .and_then(|mode| build_chat_template_kwargs(model_id, mode)),
         }
     }
 

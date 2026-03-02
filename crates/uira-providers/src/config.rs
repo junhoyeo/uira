@@ -314,6 +314,9 @@ pub struct ProviderConfig {
     pub enable_thinking: bool,
     /// Token budget for thinking when enabled
     pub thinking_budget: Option<u32>,
+    /// Reasoning mode for providers that support it (e.g. FriendliAI chat_template_kwargs)
+    /// Values: "off", "on", "interleaved", "preserved"
+    pub reasoning_mode: Option<String>,
     /// FriendliAI-specific configuration
     pub friendliai: Option<FriendliAIConfig>,
 }
@@ -332,6 +335,7 @@ impl Default for ProviderConfig {
             enable_thinking: false,
             thinking_budget: None,
             friendliai: None,
+            reasoning_mode: None,
         }
     }
 }
@@ -405,6 +409,11 @@ impl ProviderConfig {
     pub fn with_thinking(mut self, budget: u32) -> Self {
         self.enable_thinking = true;
         self.thinking_budget = Some(budget);
+        self
+    }
+
+    pub fn with_reasoning_mode(mut self, mode: impl Into<String>) -> Self {
+        self.reasoning_mode = Some(mode.into());
         self
     }
 }
