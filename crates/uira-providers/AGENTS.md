@@ -1,6 +1,6 @@
 # uira-providers
 
-Model provider clients (Anthropic, OpenAI, Gemini, Ollama).
+Model provider clients (Anthropic, OpenAI, Gemini, Ollama, FriendliAI).
 
 ## Anthropic Provider (`src/anthropic/`)
 
@@ -89,3 +89,57 @@ OpenAI-specific helpers live under `src/openai/`:
 
 ### Re-exports (`lib.rs`)
 - `classify_openai_error`, `OpenAIClient` are `pub`
+
+## FriendliAI Provider (`src/friendli.rs`)
+
+Single-file provider client supporting both serverless and dedicated endpoints.
+
+### Credential Resolution
+ Priority: `ProviderConfig.api_key` → `FriendliAIConfig.get_token()` (token/token_file) → `FRIENDLI_TOKEN` env
+ `FriendliAIConfig` supports inline `token`, `token_file` (reads from disk), and env fallback
+
+### Endpoint Resolution
+ Priority: `ProviderConfig.base_url` → `FriendliAIConfig.custom_endpoint` → derived from `ModelType`
+ `ModelType::Serverless` → `https://api.friendli.ai/serverless/v1`
+ `ModelType::Dedicated` → `https://api.friendli.ai/dedicated/v1`
+ Model type resolved via: explicit `base_url` containing `/dedicated/` → `FriendliAIConfig.endpoint_type` → default `Serverless`
+
+### Render API (`/render`)
+ FriendliAI-exclusive feature — only provider that overrides `render_request()` from `ModelClient` trait
+ Endpoint: `{base_url}/chat/render` (POST)
+ Reuses `build_request()` payload but strips `stream` and `tool_choice` fields before sending
+ Returns raw rendered prompt text (not included in AI conversation messages)
+ TUI displays render output with "render" role using dim + text_muted styling
+
+### Reasoning Mode (`chat_template_kwargs`)
+ `ProviderConfig.reasoning_mode` controls reasoning behavior: `"off"` (default), `"on"`, `"interleaved"`, `"preserved"`
+ `build_chat_template_kwargs()` computes `HashMap<String, bool>` from model ID + reasoning mode
+ Per-model reasoning config via `get_reasoning_config()` — model registry pattern matching reference implementation
+ Always-reasoning models (MiniMax): `reasoning_toggle = None` (no toggle key emitted)
+ Default config: `enable_thinking: true`, `clear_thinking: false`
+ `"off"` mode returns `None` (no kwargs sent), other modes emit appropriate toggle keys
+ kwargs are serialized into `FriendliRequest.chat_template_kwargs` field (skipped when `None`)
+
+### SSE Streaming
+ Buffer uses `drain()` for O(n) event extraction (consistent with Anthropic/OpenAI)
+ `[DONE]` sentinel yields `MessageStop` and returns
+ `MessageDelta` with `stop_reason` also triggers `MessageStop` + return
+ Transport errors mid-stream are terminal (no retry)
+ Max SSE buffer: 10MB (`MAX_SSE_BUFFER`)
+ Supports `reasoning_content` field in stream deltas → mapped to `ThinkingDelta`
+
+### Error Handling
+ Status 429 → `ProviderError::RateLimited` with `Retry-After` header parsing (default 60s)
+ 5xx → `ProviderError::Unavailable`
+ Other errors → `ProviderError::InvalidResponse` with status + body
+ No retry wrapper (unlike Anthropic/OpenAI) — single-attempt requests
+
+### Message Conversion
+ User messages with `Blocks` content → multipart `FriendliContentPart` array (text + image_url)
+ Non-user `Blocks` → concatenated text string
+ Images converted via `image_source_to_data_url()` — failures logged with `tracing::warn!` and skipped
+ `ToolCalls` content on user messages → `None` content (no text conversion, unlike Anthropic)
+ Tool results embedded as text parts
+
+### Re-exports (`lib.rs`)
+ `FriendliClient` is `pub`
