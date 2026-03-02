@@ -35,8 +35,8 @@ use uira_core::{
     TodoItem, TodoPriority, TodoStatus,
 };
 use uira_providers::{
-    AnthropicClient, FriendliClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient,
-    OpenCodeClient, ProviderConfig, SecretString,
+    AnthropicClient, FriendliAIConfig, FriendliClient, FriendliEndpointType, GeminiClient,
+    ModelClient, OllamaClient, OpenAIClient, OpenCodeClient, ProviderConfig, SecretString,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -719,7 +719,7 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
 }
 
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
-fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
+fn create_client_for_model(model_str: &str, reasoning_mode: Option<&str>) -> Result<Arc<dyn ModelClient>, String> {
     let (provider, model) = model_str
         .split_once('/')
         .unwrap_or(("anthropic", model_str));
@@ -806,15 +806,46 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
                 .map_err(|e| e.to_string())
         }
         "friendliai" => {
-            let api_key = std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from);
+            // Load config file for FriendliAI settings (token, endpoint, etc.)
+            let uira_config = uira_core::config::load_config(None).ok();
+            let friendli_settings = uira_config
+                .as_ref()
+                .map(|c| &c.providers.friendliai);
 
+            // Build FriendliAIConfig from config file settings
+            let mut friendli_config = FriendliAIConfig::default();
+            if let Some(settings) = friendli_settings {
+                if let Some(ref token) = settings.token {
+                    friendli_config.token = Some(SecretString::from(token.clone()));
+                }
+                if let Some(ref token_file) = settings.token_file {
+                    friendli_config.token_file = Some(std::path::PathBuf::from(token_file));
+                }
+                if let Some(ref endpoint_type) = settings.endpoint_type {
+                    friendli_config.endpoint_type = match endpoint_type.as_str() {
+                        "dedicated" => FriendliEndpointType::Dedicated,
+                        _ => FriendliEndpointType::Serverless,
+                    };
+                }
+                if let Some(ref custom_endpoint) = settings.custom_endpoint {
+                    friendli_config.custom_endpoint = Some(custom_endpoint.clone());
+                }
+            }
+
+            // Env var fallback for API key
+            let api_key = std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from);
+            // Map reasoning_mode: "off" or None → None, otherwise Some
+            let rm = reasoning_mode.and_then(|m| {
+                if m == "off" { None } else { Some(m.to_string()) }
+            });
             let config = ProviderConfig {
                 provider: Provider::FriendliAI,
                 api_key,
                 model: model.to_string(),
+                reasoning_mode: rm,
+                friendliai: Some(friendli_config),
                 ..Default::default()
             };
-
             FriendliClient::new(config)
                 .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
                 .map_err(|e| e.to_string())
@@ -5229,7 +5260,11 @@ impl App {
         self.max_context_tokens = Self::infer_max_context_tokens(model_str);
         self.status = format!("Switching to {}...", model_str);
 
-        match create_client_for_model(model_str) {
+        // Read reasoning mode from kv_store for FriendliAI chat_template_kwargs
+        let rm_value = self.kv_store.get("reasoning_mode_value", "off".to_string());
+        let rm_opt = if rm_value == "off" { None } else { Some(rm_value.as_str()) };
+
+        match create_client_for_model(model_str, rm_opt) {
             Ok(new_client) => {
                 self.toast_manager.show(
                     format!("Switched to {}", model_str),
