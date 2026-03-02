@@ -61,26 +61,42 @@ impl FriendliClient {
     }
 
     fn get_api_key(config: &ProviderConfig) -> Result<SecretString, ProviderError> {
+        // Priority 1: Top-level api_key (set by ProviderConfig constructors)
         if let Some(api_key) = &config.api_key {
             return Ok(api_key.clone());
         }
 
+        // Priority 2: FriendliAI-specific config (token, token_file, env var)
+        if let Some(ref friendliai) = config.friendliai {
+            if let Ok(token) = friendliai.get_token() {
+                return Ok(token);
+            }
+        }
+
+        // Priority 3: Direct env var fallback
         if let Ok(key) = std::env::var("FRIENDLI_TOKEN") {
             return Ok(SecretString::from(key));
         }
-
         Err(ProviderError::Configuration(
-            "FRIENDLI_TOKEN environment variable not set".into(),
+            "No FriendliAI API token found. Set FRIENDLI_TOKEN, provide api_key in config, or configure friendliai.token/token_file".into(),
         ))
     }
 
     fn resolve_model_type(config: &ProviderConfig) -> ModelType {
+        // Priority 1: Explicit base_url containing /dedicated/
         if let Some(base_url) = config.base_url.as_deref() {
             if base_url.contains("/dedicated/") {
                 return ModelType::Dedicated;
             }
         }
 
+        // Priority 2: FriendliAI-specific endpoint_type config
+        if let Some(ref friendliai) = config.friendliai {
+            return match friendliai.endpoint_type {
+                crate::config::FriendliEndpointType::Serverless => ModelType::Serverless,
+                crate::config::FriendliEndpointType::Dedicated => ModelType::Dedicated,
+            };
+        }
         ModelType::Serverless
     }
 
@@ -227,13 +243,23 @@ impl FriendliClient {
     }
 
     fn base_url(&self) -> &str {
-        self.config
-            .base_url
-            .as_deref()
-            .unwrap_or(match self.model_type {
-                ModelType::Serverless => FRIENDLI_SERVERLESS_BASE_URL,
-                ModelType::Dedicated => FRIENDLI_DEDICATED_BASE_URL,
-            })
+        // Priority 1: Top-level base_url override
+        if let Some(ref url) = self.config.base_url {
+            return url.as_str();
+        }
+
+        // Priority 2: FriendliAI-specific custom_endpoint
+        if let Some(ref friendliai) = self.config.friendliai {
+            if let Some(ref custom) = friendliai.custom_endpoint {
+                return custom.as_str();
+            }
+        }
+
+        // Priority 3: Derived from model_type (which already honors friendliai.endpoint_type)
+        match self.model_type {
+            ModelType::Serverless => FRIENDLI_SERVERLESS_BASE_URL,
+            ModelType::Dedicated => FRIENDLI_DEDICATED_BASE_URL,
+        }
     }
 
     fn convert_response(&self, response: FriendliResponse) -> ModelResponse {
@@ -492,8 +518,8 @@ impl ModelClient for FriendliClient {
                         }
 
                         while let Some(pos) = buffer.find("\n\n") {
-                            let event = buffer[..pos].to_string();
-                            buffer = buffer[pos + 2..].to_string();
+                            let event: String = buffer.drain(..pos).collect();
+                            buffer.drain(..2.min(buffer.len()));
 
                             if let Some(chunk) = Self::parse_sse_line(&event) {
                                 let is_stop = matches!(&chunk, StreamChunk::MessageStop);
