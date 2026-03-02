@@ -11,6 +11,7 @@ pub enum AppEvent {
     TodoUpdated(Vec<TodoItem>),
     Status(String),
     Info(String),
+    RenderResult(String),
     AgentChanged(String),
     ThemeChangeRequested(String),
     ExportRequested(String),

@@ -536,6 +536,7 @@ fn role_title(role: &str) -> &str {
         "tool" => "Tool",
         "error" => "Error",
         "thinking" => "Thinking",
+        "render" => "Render",
         _ => "Message",
     }
 }
@@ -4090,7 +4091,8 @@ impl App {
                         {
                             match resp_rx.await {
                                 Ok(Ok(rendered_text)) => {
-                                    let _ = event_tx.send(AppEvent::Info(rendered_text)).await;
+                                    let _ =
+                                        event_tx.send(AppEvent::RenderResult(rendered_text)).await;
                                 }
                                 Ok(Err(err)) => {
                                     let _ = event_tx
@@ -4727,6 +4729,10 @@ impl App {
             AppEvent::Info(message) => {
                 self.status = message.clone();
                 self.chat_view.push_message("system", message, None);
+            }
+            AppEvent::RenderResult(text) => {
+                self.status = "Render complete".to_string();
+                self.chat_view.push_message("render", text, None);
             }
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
