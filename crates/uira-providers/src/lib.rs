@@ -29,6 +29,7 @@ pub use anthropic::{with_retry, PayloadLogEvent, PayloadLogger, RetryConfig};
 pub use auth::*;
 pub use client::ModelClientBuilder;
 pub use config::ProviderConfig;
+pub use config::{FriendliAIConfig, FriendliEndpointType};
 pub use error::ProviderError;
 pub use friendli::FriendliClient;
 pub use gemini::GeminiClient;
