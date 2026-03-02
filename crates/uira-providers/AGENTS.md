@@ -104,6 +104,23 @@ Single-file provider client supporting both serverless and dedicated endpoints.
  `ModelType::Dedicated` → `https://api.friendli.ai/dedicated/v1`
  Model type resolved via: explicit `base_url` containing `/dedicated/` → `FriendliAIConfig.endpoint_type` → default `Serverless`
 
+### Config File Support
+ Settings live in `uira.yaml`/`uira.jsonc` under `providers.friendliai`
+ `FriendliAIProviderSettings` (uira-core schema) maps to `FriendliAIConfig` (uira-providers) at client creation
+ Fields: `token`, `token_file`, `endpoint_type` ("serverless"/"dedicated"), `custom_endpoint`
+ Environment variables in config values are expanded via `expand_providers_settings()`
+ TUI's `create_client_for_model()` loads config file and builds `FriendliAIConfig` from settings
+
+ Example config:
+ ```yaml
+ providers:
+   friendliai:
+     token: "${FRIENDLI_TOKEN}"
+     token_file: "~/.friendli/token"
+     endpoint_type: "serverless"
+     custom_endpoint: "https://custom.endpoint.example.com/v1"
+ ```
+
 ### Render API (`/render`)
  FriendliAI-exclusive feature — only provider that overrides `render_request()` from `ModelClient` trait
  Endpoint: `{base_url}/chat/render` (POST)
@@ -142,4 +159,4 @@ Single-file provider client supporting both serverless and dedicated endpoints.
  Tool results embedded as text parts
 
 ### Re-exports (`lib.rs`)
- `FriendliClient` is `pub`
+ `FriendliClient`, `FriendliAIConfig`, `FriendliEndpointType` are `pub`
