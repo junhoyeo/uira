@@ -719,7 +719,10 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
 }
 
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
-fn create_client_for_model(model_str: &str, reasoning_mode: Option<&str>) -> Result<Arc<dyn ModelClient>, String> {
+fn create_client_for_model(
+    model_str: &str,
+    reasoning_mode: Option<&str>,
+) -> Result<Arc<dyn ModelClient>, String> {
     let (provider, model) = model_str
         .split_once('/')
         .unwrap_or(("anthropic", model_str));
@@ -808,9 +811,7 @@ fn create_client_for_model(model_str: &str, reasoning_mode: Option<&str>) -> Res
         "friendliai" => {
             // Load config file for FriendliAI settings (token, endpoint, etc.)
             let uira_config = uira_core::config::load_config(None).ok();
-            let friendli_settings = uira_config
-                .as_ref()
-                .map(|c| &c.providers.friendliai);
+            let friendli_settings = uira_config.as_ref().map(|c| &c.providers.friendliai);
 
             // Build FriendliAIConfig from config file settings
             let mut friendli_config = FriendliAIConfig::default();
@@ -836,7 +837,11 @@ fn create_client_for_model(model_str: &str, reasoning_mode: Option<&str>) -> Res
             let api_key = std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from);
             // Map reasoning_mode: "off" or None → None, otherwise Some
             let rm = reasoning_mode.and_then(|m| {
-                if m == "off" { None } else { Some(m.to_string()) }
+                if m == "off" {
+                    None
+                } else {
+                    Some(m.to_string())
+                }
             });
             let config = ProviderConfig {
                 provider: Provider::FriendliAI,
@@ -5262,7 +5267,11 @@ impl App {
 
         // Read reasoning mode from kv_store for FriendliAI chat_template_kwargs
         let rm_value = self.kv_store.get("reasoning_mode_value", "off".to_string());
-        let rm_opt = if rm_value == "off" { None } else { Some(rm_value.as_str()) };
+        let rm_opt = if rm_value == "off" {
+            None
+        } else {
+            Some(rm_value.as_str())
+        };
 
         match create_client_for_model(model_str, rm_opt) {
             Ok(new_client) => {
