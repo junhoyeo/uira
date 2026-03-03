@@ -90,6 +90,9 @@ pub enum AgentCommand {
     BranchTree {
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    RenderPrompt {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Sender for agent commands

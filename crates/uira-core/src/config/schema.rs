@@ -773,6 +773,8 @@ fn default_compaction_strategy() -> String {
 pub struct ProvidersSettings {
     #[serde(default)]
     pub anthropic: AnthropicProviderSettings,
+    #[serde(default)]
+    pub friendliai: FriendliAIProviderSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -788,6 +790,25 @@ pub struct PayloadLogSettings {
 
     #[serde(default)]
     pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FriendliAIProviderSettings {
+    /// API token (prefer FRIENDLI_TOKEN env var or token_file for security)
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// Path to file containing the API token
+    #[serde(default)]
+    pub token_file: Option<String>,
+
+    /// Endpoint type: "serverless" (default) or "dedicated"
+    #[serde(default)]
+    pub endpoint_type: Option<String>,
+
+    /// Custom endpoint URL (overrides endpoint_type)
+    #[serde(default)]
+    pub custom_endpoint: Option<String>,
 }
 
 // ============================================================================

@@ -9,6 +9,7 @@ pub const ENV_ANTHROPIC_API_KEY: &str = "ANTHROPIC_API_KEY";
 pub const ENV_OPENAI_API_KEY: &str = "OPENAI_API_KEY";
 pub const ENV_GEMINI_API_KEY: &str = "GEMINI_API_KEY";
 pub const ENV_GOOGLE_API_KEY: &str = "GOOGLE_API_KEY";
+pub const ENV_FRIENDLI_TOKEN: &str = "FRIENDLI_TOKEN";
 
 pub use config::*;
 pub use events::*;

@@ -35,8 +35,8 @@ use uira_core::{
     TodoItem, TodoPriority, TodoStatus,
 };
 use uira_providers::{
-    AnthropicClient, GeminiClient, ModelClient, OllamaClient, OpenAIClient, OpenCodeClient,
-    ProviderConfig, SecretString,
+    AnthropicClient, FriendliAIConfig, FriendliClient, FriendliEndpointType, GeminiClient,
+    ModelClient, OllamaClient, OpenAIClient, OpenCodeClient, ProviderConfig, SecretString,
 };
 use unicode_width::UnicodeWidthChar;
 
@@ -536,6 +536,7 @@ fn role_title(role: &str) -> &str {
         "tool" => "Tool",
         "error" => "Error",
         "thinking" => "Thinking",
+        "render" => "Render",
         _ => "Message",
     }
 }
@@ -718,7 +719,10 @@ fn format_branch_list(branches: &[BranchInfo]) -> String {
 }
 
 /// Create a model client from a "provider/model" string (e.g., "anthropic/claude-sonnet-4")
-fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, String> {
+fn create_client_for_model(
+    model_str: &str,
+    reasoning_mode: Option<&str>,
+) -> Result<Arc<dyn ModelClient>, String> {
     let (provider, model) = model_str
         .split_once('/')
         .unwrap_or(("anthropic", model_str));
@@ -801,6 +805,59 @@ fn create_client_for_model(model_str: &str) -> Result<Arc<dyn ModelClient>, Stri
             };
 
             OpenCodeClient::new(config)
+                .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
+                .map_err(|e| e.to_string())
+        }
+        "friendliai" => {
+            // Load config file for FriendliAI settings (token, endpoint, etc.)
+            let uira_config = uira_core::config::load_config(None).ok();
+            let friendli_settings = uira_config.as_ref().map(|c| &c.providers.friendliai);
+
+            // Build FriendliAIConfig from config file settings
+            let mut friendli_config = FriendliAIConfig::default();
+            if let Some(settings) = friendli_settings {
+                if let Some(ref token) = settings.token {
+                    friendli_config.token = Some(SecretString::from(token.clone()));
+                }
+                if let Some(ref token_file) = settings.token_file {
+                    friendli_config.token_file = Some(std::path::PathBuf::from(token_file));
+                }
+                if let Some(ref endpoint_type) = settings.endpoint_type {
+                    friendli_config.endpoint_type = match endpoint_type.as_str() {
+                        "dedicated" => FriendliEndpointType::Dedicated,
+                        _ => FriendliEndpointType::Serverless,
+                    };
+                }
+                if let Some(ref custom_endpoint) = settings.custom_endpoint {
+                    friendli_config.custom_endpoint = Some(custom_endpoint.clone());
+                }
+            }
+
+            // Env var fallback for API key — only when no config token is supplied,
+            // so FriendliClient's credential resolution (config > env) is honored.
+            let api_key = if friendli_config.token.is_some() || friendli_config.token_file.is_some()
+            {
+                None
+            } else {
+                std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from)
+            };
+            // Map reasoning_mode: "off" or None → None, otherwise Some
+            let rm = reasoning_mode.and_then(|m| {
+                if m == "off" {
+                    None
+                } else {
+                    Some(m.to_string())
+                }
+            });
+            let config = ProviderConfig {
+                provider: Provider::FriendliAI,
+                api_key,
+                model: model.to_string(),
+                reasoning_mode: rm,
+                friendliai: Some(friendli_config),
+                ..Default::default()
+            };
+            FriendliClient::new(config)
                 .map(|c| Arc::new(c) as Arc<dyn ModelClient>)
                 .map_err(|e| e.to_string())
         }
@@ -4051,21 +4108,53 @@ impl App {
                 self.status = "Chat cleared".to_string();
             }
             "/render" => {
-                let rendered = self
-                    .chat_view
-                    .messages
-                    .iter()
-                    .map(|m| format!("{}: {}", role_title(&m.role), m.content))
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                let output = if rendered.trim().is_empty() {
-                    "(empty conversation)".to_string()
+                let is_friendli_model = self
+                    .current_model
+                    .as_deref()
+                    .map(|model| model.to_ascii_lowercase().starts_with("friendliai/"))
+                    .unwrap_or(false);
+
+                if !is_friendli_model {
+                    self.status = "/render is only available with FriendliAI models. Switch to a FriendliAI model to use prompt rendering.".to_string();
+                    return;
+                }
+
+                if let Some(ref tx) = self.agent_command_tx {
+                    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+                    let tx = tx.clone();
+                    let event_tx = self.event_tx.clone();
+                    tokio::spawn(async move {
+                        if tx
+                            .send(AgentCommand::RenderPrompt {
+                                response_tx: resp_tx,
+                            })
+                            .await
+                            .is_ok()
+                        {
+                            match resp_rx.await {
+                                Ok(Ok(rendered_text)) => {
+                                    let _ =
+                                        event_tx.send(AppEvent::RenderResult(rendered_text)).await;
+                                }
+                                Ok(Err(err)) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Status(format!("Render failed: {}", err)))
+                                        .await;
+                                }
+                                Err(_) => {
+                                    let _ = event_tx
+                                        .send(AppEvent::Status(
+                                            "Render request cancelled".to_string(),
+                                        ))
+                                        .await;
+                                }
+                            }
+                        }
+                    });
+                    self.status = "Rendering prompt...".to_string();
                 } else {
-                    rendered
-                };
-                self.chat_view
-                    .messages
-                    .push(ChatMessage::new("system", output));
+                    self.status = "/render is only available with FriendliAI models. Switch to a FriendliAI model to use prompt rendering.".to_string();
+                }
             }
             "/think" => {
                 let arg = parts.get(1).copied();
@@ -4676,9 +4765,16 @@ impl App {
             AppEvent::TodoUpdated(todos) => {
                 self.todos = todos;
             }
+            AppEvent::Status(message) => {
+                self.status = message;
+            }
             AppEvent::Info(message) => {
                 self.status = message.clone();
                 self.chat_view.push_message("system", message, None);
+            }
+            AppEvent::RenderResult(text) => {
+                self.status = "Render complete".to_string();
+                self.chat_view.push_message("render", text, None);
             }
             AppEvent::BranchChanged(branch_name) => {
                 self.current_branch = branch_name;
@@ -5175,7 +5271,15 @@ impl App {
         self.max_context_tokens = Self::infer_max_context_tokens(model_str);
         self.status = format!("Switching to {}...", model_str);
 
-        match create_client_for_model(model_str) {
+        // Read reasoning mode from kv_store for FriendliAI chat_template_kwargs
+        let rm_value = self.kv_store.get("reasoning_mode_value", "off".to_string());
+        let rm_opt = if rm_value == "off" {
+            None
+        } else {
+            Some(rm_value.as_str())
+        };
+
+        match create_client_for_model(model_str, rm_opt) {
             Ok(new_client) => {
                 self.toast_manager.show(
                     format!("Switched to {}", model_str),

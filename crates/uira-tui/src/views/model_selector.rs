@@ -45,8 +45,20 @@ pub const MODEL_GROUPS: &[ModelGroup] = &[
         provider: "ollama",
         models: &["llama3.1", "qwen2.5-coder", "deepseek-coder"],
     },
+    ModelGroup {
+        provider: "friendliai",
+        models: &[
+            "MiniMaxAI/MiniMax-M2.5",
+            "MiniMaxAI/MiniMax-M2.1",
+            "zai-org/GLM-5",
+            "zai-org/GLM-4.7",
+            "Qwen/Qwen3-235B-A22B-Instruct-2507",
+            "Qwen/Qwen3-235B-A22B-Thinking-2507",
+            "LGAI-EXAONE/K-EXAONE-236B-A23B",
+            "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+        ],
+    },
 ];
-
 pub struct ModelSelector {
     active: bool,
     group_index: usize,

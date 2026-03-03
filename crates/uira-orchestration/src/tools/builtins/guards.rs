@@ -70,7 +70,7 @@ pub fn is_binary_file(path: &Path) -> io::Result<bool> {
 ///
 /// Returns `true` if the path should be ignored, `false` otherwise.
 pub fn is_ignored_path(path: &Path) -> bool {
-    let path_str = path.to_string_lossy();
+    let path_str = path.to_string_lossy().replace('\\', "/");
 
     // Check for node_modules
     if path_str.contains("/node_modules/") || path_str.starts_with("node_modules/") {
@@ -237,6 +237,12 @@ mod tests {
             is_ignored_path(path),
             "node_modules at root should be ignored"
         );
+
+        let path = Path::new(r"src\node_modules\foo.js");
+        assert!(
+            is_ignored_path(path),
+            "node_modules path with Windows separators should be ignored"
+        );
     }
 
     #[test]
@@ -248,6 +254,12 @@ mod tests {
         assert!(
             is_ignored_path(path),
             ".git in subdirectory should be ignored"
+        );
+
+        let path = Path::new(r"src\.git\objects");
+        assert!(
+            is_ignored_path(path),
+            ".git with Windows separators should be ignored"
         );
     }
 

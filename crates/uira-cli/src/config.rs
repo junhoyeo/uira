@@ -15,7 +15,7 @@ pub struct CliConfig {
     #[serde(default)]
     pub default_model: Option<String>,
 
-    /// API keys by provider
+    /// API keys by provider (e.g., "anthropic", "openai", "friendliai")
     #[serde(default)]
     pub api_keys: std::collections::HashMap<String, String>,
 
@@ -127,6 +127,13 @@ mod tests {
         assert_eq!(
             config.get_api_key("anthropic"),
             Some(&"sk-test-key".to_string())
+        );
+
+        // Test FriendliAI API key management
+        config.set_api_key("friendliai", "fl-test-token");
+        assert_eq!(
+            config.get_api_key("friendliai"),
+            Some(&"fl-test-token".to_string())
         );
     }
 }

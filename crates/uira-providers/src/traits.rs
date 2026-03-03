@@ -26,6 +26,17 @@ pub trait ModelClient: Send + Sync {
         tools: &[ToolSpec],
     ) -> ModelResult<ResponseStream>;
 
+    /// Render the full request as raw prompt text (provider-specific, e.g. FriendliAI /chat/render)
+    async fn render_request(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolSpec],
+    ) -> ModelResult<String> {
+        Err(ProviderError::Configuration(
+            "Prompt rendering is only available with FriendliAI provider".into(),
+        ))
+    }
+
     /// Check if this client supports tool use
     fn supports_tools(&self) -> bool;
 

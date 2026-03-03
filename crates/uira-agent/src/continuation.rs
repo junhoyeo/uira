@@ -15,6 +15,27 @@ pub struct ContinuationMessage {
 /// Check if the agent's response text indicates it's trying to stop
 pub fn is_completion_signal(text: &str) -> bool {
     let lower = text.to_lowercase();
+    let negated_completion_phrases = [
+        "not finished",
+        "not done",
+        "not complete",
+        "not completed",
+        "not all tasks",
+        "isn't finished",
+        "isn't done",
+        "isn't complete",
+        "is not finished",
+        "is not done",
+        "is not complete",
+        "still incomplete",
+    ];
+    if negated_completion_phrases
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+    {
+        return false;
+    }
+
     let completion_phrases = [
         "<done/>",
         "i'm done",
@@ -85,6 +106,9 @@ mod tests {
         assert!(!is_completion_signal("Let me implement this next."));
         assert!(!is_completion_signal("I'll fix the error now."));
         assert!(!is_completion_signal("Running the tests."));
+        assert!(!is_completion_signal("I am not finished yet."));
+        assert!(!is_completion_signal("Work is not complete."));
+        assert!(!is_completion_signal("Not all tasks are done yet."));
     }
 
     #[test]

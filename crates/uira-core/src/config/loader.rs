@@ -286,6 +286,15 @@ fn expand_providers_settings(
     if let Some(ref path) = settings.anthropic.payload_log.path {
         settings.anthropic.payload_log.path = Some(expand_env_string(path));
     }
+    if let Some(ref token) = settings.friendliai.token {
+        settings.friendliai.token = Some(expand_env_string(token));
+    }
+    if let Some(ref path) = settings.friendliai.token_file {
+        settings.friendliai.token_file = Some(expand_env_string(path));
+    }
+    if let Some(ref endpoint) = settings.friendliai.custom_endpoint {
+        settings.friendliai.custom_endpoint = Some(expand_env_string(endpoint));
+    }
     settings
 }
 

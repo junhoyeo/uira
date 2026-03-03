@@ -95,6 +95,9 @@ impl ChatView {
             "tool" => Style::default().fg(self.theme.accent),
             "error" => Style::default().fg(self.theme.error),
             "system" => Style::default().fg(self.theme.warning),
+            "render" => Style::default()
+                .fg(self.theme.text_muted)
+                .add_modifier(Modifier::DIM),
             _ => Style::default().fg(self.theme.fg),
         }
     }
@@ -513,6 +516,7 @@ impl ChatView {
             "system" => self.theme.warning,
             "error" => self.theme.error,
             "thinking" => self.theme.borders,
+            "render" => self.theme.text_muted,
             _ => self.theme.fg,
         }
     }
