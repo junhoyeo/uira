@@ -833,8 +833,14 @@ fn create_client_for_model(
                 }
             }
 
-            // Env var fallback for API key
-            let api_key = std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from);
+            // Env var fallback for API key — only when no config token is supplied,
+            // so FriendliClient's credential resolution (config > env) is honored.
+            let api_key = if friendli_config.token.is_some() || friendli_config.token_file.is_some()
+            {
+                None
+            } else {
+                std::env::var("FRIENDLI_TOKEN").ok().map(SecretString::from)
+            };
             // Map reasoning_mode: "off" or None → None, otherwise Some
             let rm = reasoning_mode.and_then(|m| {
                 if m == "off" {
